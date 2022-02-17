@@ -20,16 +20,19 @@
 
 #include "gtest/gtest.h"
 #include "pw_assert/check.h"
+#include "pw_bytes/endian.h"
 #include "pw_containers/vector.h"
 #include "pw_log/log.h"
 #include "pw_log/proto/log.pwpb.h"
 #include "pw_log/proto_utils.h"
+#include "pw_log_rpc/log_filter.h"
+#include "pw_log_tokenized/metadata.h"
+#include "pw_protobuf/bytes_utils.h"
 #include "pw_protobuf/decoder.h"
 #include "pw_result/result.h"
 #include "pw_rpc/channel.h"
 #include "pw_rpc/raw/fake_channel_output.h"
 #include "pw_rpc/raw/test_method_context.h"
-#include "pw_string/string_builder.h"
 #include "pw_sync/mutex.h"
 
 namespace pw::log_rpc {
@@ -38,12 +41,12 @@ namespace {
 using log::pw_rpc::raw::Logs;
 
 #define LOG_SERVICE_METHOD_CONTEXT \
-  PW_RAW_TEST_METHOD_CONTEXT(LogService, Listen, 6, 128)
+  PW_RAW_TEST_METHOD_CONTEXT(LogService, Listen, 10, 256)
 
 constexpr size_t kMaxMessageSize = 50;
-static_assert(RpcLogDrain::kMaxDropMessageSize < kMaxMessageSize);
 constexpr size_t kMaxLogEntrySize =
     RpcLogDrain::kMinEntrySizeWithoutPayload + kMaxMessageSize;
+static_assert(RpcLogDrain::kMinEntryBufferSize < kMaxLogEntrySize);
 constexpr size_t kMultiSinkBufferSize = kMaxLogEntrySize * 10;
 constexpr size_t kMaxDrains = 3;
 constexpr char kMessage[] = "message";
@@ -52,8 +55,13 @@ constexpr char kMessage[] = "message";
 constexpr char kLongMessage[] =
     "This is a long log message that will be dropped.";
 static_assert(sizeof(kLongMessage) < kMaxMessageSize);
-static_assert(sizeof(kLongMessage) > RpcLogDrain::kMaxDropMessageSize);
+static_assert(sizeof(kLongMessage) > RpcLogDrain::kMinEntryBufferSize);
 std::array<std::byte, 1> rpc_request_buffer;
+constexpr auto kSampleMetadata =
+    log_tokenized::Metadata::Set<PW_LOG_LEVEL_INFO, 123, 0x03, __LINE__>();
+constexpr auto kDropMessageMetadata =
+    log_tokenized::Metadata::Set<0, 0, 0, 0>();
+constexpr int64_t kSampleTimestamp = 1000;
 
 // `LogServiceTest` sets up a logging environment for testing with a `MultiSink`
 // for log entries, and multiple `RpcLogDrain`s for consuming such log entries.
@@ -68,22 +76,26 @@ class LogServiceTest : public ::testing::Test {
     }
   }
 
-  void AddLogEntries(size_t log_count, std::string_view message) {
+  void AddLogEntries(size_t log_count,
+                     std::string_view message,
+                     log_tokenized::Metadata metadata,
+                     int64_t timestamp) {
     for (size_t i = 0; i < log_count; ++i) {
-      AddLogEntry(message);
+      ASSERT_TRUE(AddLogEntry(message, metadata, timestamp).ok());
     }
   }
 
-  void AddLogEntry(std::string_view message) {
-    auto metadata =
-        log_tokenized::Metadata::Set<PW_LOG_LEVEL_WARN, __LINE__, 0, 0>();
+  StatusWithSize AddLogEntry(std::string_view message,
+                             log_tokenized::Metadata metadata,
+                             int64_t timestamp) {
     Result<ConstByteSpan> encoded_log_result =
         log::EncodeTokenizedLog(metadata,
                                 std::as_bytes(std::span(message)),
-                                /*ticks_since_epoch=*/0,
+                                timestamp,
                                 entry_encode_buffer_);
-    EXPECT_EQ(encoded_log_result.status(), OkStatus());
+    PW_TRY_WITH_SIZE(encoded_log_result.status());
     multisink_.HandleEntry(encoded_log_result.value());
+    return StatusWithSize(encoded_log_result.value().size());
   }
 
  protected:
@@ -91,6 +103,21 @@ class LogServiceTest : public ::testing::Test {
   multisink::MultiSink multisink_;
   RpcLogDrainMap drain_map_;
   std::array<std::byte, kMaxLogEntrySize> entry_encode_buffer_;
+  static constexpr size_t kMaxFilterRules = 3;
+  std::array<Filter::Rule, kMaxFilterRules> rules1_;
+  std::array<Filter::Rule, kMaxFilterRules> rules2_;
+  std::array<Filter::Rule, kMaxFilterRules> rules3_;
+  static constexpr std::array<std::byte, cfg::kMaxFilterIdBytes> filter_id1_{
+      std::byte(65), std::byte(66), std::byte(67), std::byte(0)};
+  static constexpr std::array<std::byte, cfg::kMaxFilterIdBytes> filter_id2_{
+      std::byte(68), std::byte(69), std::byte(70), std::byte(0)};
+  static constexpr std::array<std::byte, cfg::kMaxFilterIdBytes> filter_id3_{
+      std::byte(71), std::byte(72), std::byte(73), std::byte(0)};
+  std::array<Filter, kMaxDrains> filters_ = {
+      Filter(filter_id1_, rules1_),
+      Filter(filter_id2_, rules2_),
+      Filter(filter_id3_, rules3_),
+  };
 
   // Drain Buffers
   std::array<std::byte, kMaxLogEntrySize> drain_buffer1_;
@@ -104,86 +131,102 @@ class LogServiceTest : public ::testing::Test {
       RpcLogDrain(kIgnoreWriterErrorsDrainId,
                   drain_buffer1_,
                   shared_mutex_,
-                  RpcLogDrain::LogDrainErrorHandling::kIgnoreWriterErrors),
-      RpcLogDrain(
-          kCloseWriterOnErrorDrainId,
-          drain_buffer2_,
-          shared_mutex_,
-          RpcLogDrain::LogDrainErrorHandling::kCloseStreamOnWriterError),
+                  RpcLogDrain::LogDrainErrorHandling::kIgnoreWriterErrors,
+                  &filters_[0]),
+      RpcLogDrain(kCloseWriterOnErrorDrainId,
+                  drain_buffer2_,
+                  shared_mutex_,
+                  RpcLogDrain::LogDrainErrorHandling::kCloseStreamOnWriterError,
+                  &filters_[1]),
       RpcLogDrain(kSmallBufferDrainId,
                   small_buffer_,
                   shared_mutex_,
-                  RpcLogDrain::LogDrainErrorHandling::kIgnoreWriterErrors),
+                  RpcLogDrain::LogDrainErrorHandling::kIgnoreWriterErrors,
+                  &filters_[2]),
   };
+};
+struct TestLogEntry {
+  log_tokenized::Metadata metadata = kSampleMetadata;
+  int64_t timestamp = 0;
+  uint32_t dropped = 0;
+  ConstByteSpan tokenized_data = {};
 };
 
 // Unpacks a `LogEntry` proto buffer and compares it with the expected data.
 void VerifyLogEntry(protobuf::Decoder& entry_decoder,
-                    log_tokenized::Metadata expected_metadata,
-                    ConstByteSpan expected_tokenized_data,
-                    const int64_t expected_timestamp) {
+                    const TestLogEntry& expected_entry) {
   ConstByteSpan tokenized_data;
-  EXPECT_TRUE(entry_decoder.Next().ok());  // message [tokenized]
-  EXPECT_EQ(1U, entry_decoder.FieldNumber());
-  EXPECT_TRUE(entry_decoder.ReadBytes(&tokenized_data).ok());
-  if (tokenized_data.size() != expected_tokenized_data.size()) {
-    PW_LOG_ERROR(
-        "actual: '%s', expected: '%s'",
-        reinterpret_cast<const char*>(tokenized_data.begin()),
-        reinterpret_cast<const char*>(expected_tokenized_data.begin()));
+  if (!expected_entry.tokenized_data.empty()) {
+    ASSERT_EQ(entry_decoder.Next(), OkStatus());
+    ASSERT_EQ(entry_decoder.FieldNumber(), 1u);  // message [tokenized]
+    ASSERT_TRUE(entry_decoder.ReadBytes(&tokenized_data).ok());
+    if (tokenized_data.size() != expected_entry.tokenized_data.size()) {
+      PW_LOG_ERROR(
+          "actual: '%s', expected: '%s'",
+          reinterpret_cast<const char*>(tokenized_data.begin()),
+          reinterpret_cast<const char*>(expected_entry.tokenized_data.begin()));
+    }
+    EXPECT_EQ(tokenized_data.size(), expected_entry.tokenized_data.size());
+    EXPECT_EQ(std::memcmp(tokenized_data.begin(),
+                          expected_entry.tokenized_data.begin(),
+                          expected_entry.tokenized_data.size()),
+              0);
   }
-  EXPECT_EQ(tokenized_data.size(), expected_tokenized_data.size());
-  EXPECT_EQ(std::memcmp(tokenized_data.begin(),
-                        expected_tokenized_data.begin(),
-                        expected_tokenized_data.size()),
-            0);
-
-  uint32_t line_level;
-  EXPECT_TRUE(entry_decoder.Next().ok());  // line_level
-  EXPECT_EQ(2U, entry_decoder.FieldNumber());
-  EXPECT_TRUE(entry_decoder.ReadUint32(&line_level).ok());
-  EXPECT_EQ(expected_metadata.level(), line_level & PW_LOG_LEVEL_BITMASK);
-  EXPECT_EQ(expected_metadata.line_number(),
-            (line_level & ~PW_LOG_LEVEL_BITMASK) >> PW_LOG_LEVEL_BITS);
-
-  if (expected_metadata.flags() != 0) {
+  if (expected_entry.metadata.level()) {
+    ASSERT_EQ(entry_decoder.Next(), OkStatus());
+    ASSERT_EQ(entry_decoder.FieldNumber(), 2u);  // line_level
+    uint32_t line_level;
+    ASSERT_TRUE(entry_decoder.ReadUint32(&line_level).ok());
+    EXPECT_EQ(expected_entry.metadata.level(),
+              line_level & PW_LOG_LEVEL_BITMASK);
+    EXPECT_EQ(expected_entry.metadata.line_number(),
+              (line_level & ~PW_LOG_LEVEL_BITMASK) >> PW_LOG_LEVEL_BITS);
+  }
+  if (expected_entry.metadata.flags()) {
+    ASSERT_EQ(entry_decoder.Next(), OkStatus());
+    ASSERT_EQ(entry_decoder.FieldNumber(), 3u);  // flags
     uint32_t flags;
-    EXPECT_TRUE(entry_decoder.Next().ok());  // flags
-    EXPECT_EQ(3U, entry_decoder.FieldNumber());
-    EXPECT_TRUE(entry_decoder.ReadUint32(&flags).ok());
-    EXPECT_EQ(expected_metadata.flags(), flags);
+    ASSERT_TRUE(entry_decoder.ReadUint32(&flags).ok());
+    EXPECT_EQ(expected_entry.metadata.flags(), flags);
   }
-
-  const bool has_timestamp = entry_decoder.Next().ok();  // timestamp
-  if (expected_timestamp == 0 && !has_timestamp) {
-    return;
+  if (expected_entry.timestamp) {
+    ASSERT_EQ(entry_decoder.Next(), OkStatus());
+    ASSERT_TRUE(entry_decoder.FieldNumber() == 4u       // timestamp
+                || entry_decoder.FieldNumber() == 5u);  // time_since_last_entry
+    int64_t timestamp;
+    ASSERT_TRUE(entry_decoder.ReadInt64(&timestamp).ok());
+    EXPECT_EQ(expected_entry.timestamp, timestamp);
   }
-  int64_t timestamp;
-  EXPECT_TRUE(has_timestamp);
-  EXPECT_EQ(4U, entry_decoder.FieldNumber());
-  EXPECT_TRUE(entry_decoder.ReadInt64(&timestamp).ok());
-  EXPECT_EQ(expected_timestamp, timestamp);
+  if (expected_entry.dropped) {
+    ASSERT_EQ(entry_decoder.Next(), OkStatus());
+    ASSERT_EQ(entry_decoder.FieldNumber(), 6u);  // dropped
+    uint32_t dropped;
+    ASSERT_TRUE(entry_decoder.ReadUint32(&dropped).ok());
+    EXPECT_EQ(expected_entry.dropped, dropped);
+  }
+  if (expected_entry.metadata.module()) {
+    ASSERT_EQ(entry_decoder.Next(), OkStatus());
+    ASSERT_EQ(entry_decoder.FieldNumber(), 7u);  // module_name
+    const Result<uint32_t> module =
+        protobuf::DecodeBytesToUint32(entry_decoder);
+    ASSERT_EQ(module.status(), OkStatus());
+    EXPECT_EQ(expected_entry.metadata.module(), module.value());
+  }
 }
 
 // Verifies a stream of log entries, returning the total count found.
 size_t VerifyLogEntries(protobuf::Decoder& entries_decoder,
-                        Vector<ConstByteSpan>& message_stack) {
+                        Vector<TestLogEntry>& expected_entries_stack) {
   size_t entries_found = 0;
   while (entries_decoder.Next().ok()) {
     ConstByteSpan entry;
     EXPECT_TRUE(entries_decoder.ReadBytes(&entry).ok());
     protobuf::Decoder entry_decoder(entry);
-    auto expected_metadata =
-        log_tokenized::Metadata::Set<PW_LOG_LEVEL_WARN, __LINE__, 0, 0>();
-    if (message_stack.empty()) {
+    if (expected_entries_stack.empty()) {
       break;
     }
-    ConstByteSpan expected_message = message_stack.back();
-    VerifyLogEntry(entry_decoder,
-                   expected_metadata,
-                   expected_message,
-                   /*expected_timestamp=*/0);
-    message_stack.pop_back();
+    VerifyLogEntry(entry_decoder, expected_entries_stack.back());
+    expected_entries_stack.pop_back();
     ++entries_found;
   }
   return entries_found;
@@ -236,7 +279,7 @@ TEST_F(LogServiceTest, AssignWriter) {
   third_call_context.call(rpc_request_buffer);
   EXPECT_EQ(active_drain.Flush(), OkStatus());
   ASSERT_FALSE(third_call_context.done());
-  EXPECT_EQ(third_call_context.responses().size(), 1u);
+  EXPECT_EQ(third_call_context.responses().size(), 0u);
   EXPECT_EQ(active_drain.Close(), OkStatus());
 }
 
@@ -248,7 +291,8 @@ TEST_F(LogServiceTest, StartAndEndStream) {
 
   // Add log entries.
   const size_t total_entries = 10;
-  AddLogEntries(total_entries, kMessage);
+  AddLogEntries(total_entries, kMessage, kSampleMetadata, kSampleTimestamp);
+
   // Request logs.
   context.call(rpc_request_buffer);
   EXPECT_EQ(active_drain.Flush(), OkStatus());
@@ -263,10 +307,11 @@ TEST_F(LogServiceTest, StartAndEndStream) {
   EXPECT_GE(context.responses().size(), 1u);
 
   // Verify data in responses.
-  Vector<ConstByteSpan, total_entries> message_stack;
+  Vector<TestLogEntry, total_entries> message_stack;
   for (size_t i = 0; i < total_entries; ++i) {
-    message_stack.push_back(
-        std::as_bytes(std::span(std::string_view(kMessage))));
+    message_stack.push_back({.timestamp = kSampleTimestamp,
+                             .tokenized_data = std::as_bytes(
+                                 std::span(std::string_view(kMessage)))});
   }
   size_t entries_found = 0;
   for (auto& response : context.responses()) {
@@ -285,7 +330,7 @@ TEST_F(LogServiceTest, HandleDropped) {
   // Add log entries.
   const size_t total_entries = 5;
   const uint32_t total_drop_count = 2;
-  AddLogEntries(total_entries, kMessage);
+  AddLogEntries(total_entries, kMessage, kSampleMetadata, kSampleTimestamp);
   multisink_.HandleDropped(total_drop_count);
 
   // Request logs.
@@ -297,13 +342,13 @@ TEST_F(LogServiceTest, HandleDropped) {
   ASSERT_GE(context.responses().size(), 1u);
 
   // Add create expected messages in a stack to match the order they arrive in.
-  Vector<ConstByteSpan, total_entries + 1> message_stack;
-  StringBuffer<32> message;
-  message.Format("Dropped %u", static_cast<unsigned int>(total_drop_count));
-  message_stack.push_back(std::as_bytes(std::span(std::string_view(message))));
+  Vector<TestLogEntry, total_entries + 1> message_stack;
+  message_stack.push_back(
+      {.metadata = kDropMessageMetadata, .dropped = total_drop_count});
   for (size_t i = 0; i < total_entries; ++i) {
-    message_stack.push_back(
-        std::as_bytes(std::span(std::string_view(kMessage))));
+    message_stack.push_back({.timestamp = kSampleTimestamp,
+                             .tokenized_data = std::as_bytes(
+                                 std::span(std::string_view(kMessage)))});
   }
 
   // Verify data in responses.
@@ -326,7 +371,7 @@ TEST_F(LogServiceTest, HandleSmallBuffer) {
   // Add log entries.
   const size_t total_entries = 5;
   const uint32_t total_drop_count = total_entries;
-  AddLogEntries(total_entries, kLongMessage);
+  AddLogEntries(total_entries, kLongMessage, kSampleMetadata, kSampleTimestamp);
   // Request logs.
   context.call(rpc_request_buffer);
   EXPECT_EQ(small_buffer_drain.value()->Flush(), OkStatus());
@@ -334,10 +379,9 @@ TEST_F(LogServiceTest, HandleSmallBuffer) {
   ASSERT_EQ(context.status(), OkStatus());
   ASSERT_GE(context.responses().size(), 1u);
 
-  Vector<ConstByteSpan, total_entries + 1> message_stack;
-  StringBuffer<32> message;
-  message.Format("Dropped %u", static_cast<unsigned int>(total_drop_count));
-  message_stack.push_back(std::as_bytes(std::span(std::string_view(message))));
+  Vector<TestLogEntry, total_entries + 1> message_stack;
+  message_stack.push_back(
+      {.metadata = kDropMessageMetadata, .dropped = total_drop_count});
 
   // Verify data in responses.
   size_t entries_found = 0;
@@ -357,7 +401,7 @@ TEST_F(LogServiceTest, FlushDrainWithoutMultisink) {
 
   // Add log entries.
   const size_t total_entries = 5;
-  AddLogEntries(total_entries, kMessage);
+  AddLogEntries(total_entries, kMessage, kSampleMetadata, kSampleTimestamp);
   // Request logs.
   context.call(rpc_request_buffer);
   EXPECT_EQ(detached_drain.Close(), OkStatus());
@@ -366,23 +410,31 @@ TEST_F(LogServiceTest, FlushDrainWithoutMultisink) {
 }
 
 TEST_F(LogServiceTest, LargeLogEntry) {
-  const auto expected_metadata =
-      log_tokenized::Metadata::Set<PW_LOG_LEVEL_WARN,
-                                   (1 << PW_LOG_TOKENIZED_MODULE_BITS) - 1,
-                                   (1 << PW_LOG_TOKENIZED_FLAG_BITS) - 1,
-                                   (1 << PW_LOG_TOKENIZED_LINE_BITS) - 1>();
-  ConstByteSpan expected_message = std::as_bytes(std::span(kMessage));
-  const int64_t expected_timestamp = std::numeric_limits<int64_t>::max();
+  const TestLogEntry expected_entry{
+      .metadata =
+          log_tokenized::Metadata::Set<PW_LOG_LEVEL_WARN,
+                                       (1 << PW_LOG_TOKENIZED_MODULE_BITS) - 1,
+                                       (1 << PW_LOG_TOKENIZED_FLAG_BITS) - 1,
+                                       (1 << PW_LOG_TOKENIZED_LINE_BITS) - 1>(),
+      .timestamp = std::numeric_limits<int64_t>::max(),
+      .tokenized_data = std::as_bytes(std::span(kMessage)),
+  };
 
   // Add entry to multisink.
   log::LogEntry::MemoryEncoder encoder(entry_encode_buffer_);
-  encoder.WriteMessage(expected_message);
-  encoder.WriteLineLevel(
-      (expected_metadata.level() & PW_LOG_LEVEL_BITMASK) |
-      ((expected_metadata.line_number() << PW_LOG_LEVEL_BITS) &
-       ~PW_LOG_LEVEL_BITMASK));
-  encoder.WriteFlags(expected_metadata.flags());
-  encoder.WriteTimestamp(expected_timestamp);
+  ASSERT_EQ(encoder.WriteMessage(expected_entry.tokenized_data), OkStatus());
+  ASSERT_EQ(encoder.WriteLineLevel(
+                (expected_entry.metadata.level() & PW_LOG_LEVEL_BITMASK) |
+                ((expected_entry.metadata.line_number() << PW_LOG_LEVEL_BITS) &
+                 ~PW_LOG_LEVEL_BITMASK)),
+            OkStatus());
+  ASSERT_EQ(encoder.WriteFlags(expected_entry.metadata.flags()), OkStatus());
+  ASSERT_EQ(encoder.WriteTimestamp(expected_entry.timestamp), OkStatus());
+  const uint32_t little_endian_module = bytes::ConvertOrderTo(
+      std::endian::little, expected_entry.metadata.module());
+  ASSERT_EQ(
+      encoder.WriteModule(std::as_bytes(std::span(&little_endian_module, 1))),
+      OkStatus());
   ASSERT_EQ(encoder.status(), OkStatus());
   multisink_.HandleEntry(encoder);
 
@@ -403,8 +455,7 @@ TEST_F(LogServiceTest, LargeLogEntry) {
   ConstByteSpan entry;
   EXPECT_TRUE(entries_decoder.ReadBytes(&entry).ok());
   protobuf::Decoder entry_decoder(entry);
-  VerifyLogEntry(
-      entry_decoder, expected_metadata, expected_message, expected_timestamp);
+  VerifyLogEntry(entry_decoder, expected_entry);
 }
 
 TEST_F(LogServiceTest, InterruptedLogStreamSendsDropCount) {
@@ -413,20 +464,30 @@ TEST_F(LogServiceTest, InterruptedLogStreamSendsDropCount) {
   ASSERT_TRUE(drain.ok());
 
   LogService log_service(drain_map_);
-  const uint32_t output_buffer_size = 100;
+  const size_t output_buffer_size = 128;
+  const size_t max_packets = 10;
   rpc::RawFakeChannelOutput<10, output_buffer_size, 512> output;
   rpc::Channel channel(rpc::Channel::Create<drain_channel_id>(&output));
   rpc::Server server(std::span(&channel, 1));
 
   // Add as many entries needed to have multiple packets send.
-  const uint32_t min_packets_sent = 4;
-  const uint32_t max_messages_per_response =
-      output_buffer_size / sizeof(kMessage);
-  const size_t total_entries = min_packets_sent * max_messages_per_response;
-  AddLogEntries(total_entries, kMessage);
+  StatusWithSize status =
+      AddLogEntry(kMessage, kSampleMetadata, kSampleTimestamp);
+  ASSERT_TRUE(status.ok());
+
+  // In reality less than output_buffer_size is given as a buffer, since some
+  // bytes are used for the RPC framing.
+  const uint32_t max_messages_per_response = output_buffer_size / status.size();
+  // Send less packets than the max to avoid crashes.
+  const uint32_t packets_sent = max_packets / 2;
+  const size_t total_entries = packets_sent * max_messages_per_response;
+  const size_t max_entries = 50;
+  // Check we can test all these entries.
+  ASSERT_GE(max_entries, total_entries);
+  AddLogEntries(total_entries - 1, kMessage, kSampleMetadata, kSampleTimestamp);
 
   // Interrupt log stream with an error.
-  const uint32_t successful_packets_sent = min_packets_sent - 2;
+  const uint32_t successful_packets_sent = packets_sent / 2;
   output.set_send_status(Status::Unavailable(), successful_packets_sent);
 
   // Request logs.
@@ -441,10 +502,11 @@ TEST_F(LogServiceTest, InterruptedLogStreamSendsDropCount) {
   ASSERT_EQ(output.payloads<Logs::Listen>().size(), successful_packets_sent);
 
   // Verify data in responses.
-  Vector<ConstByteSpan, total_entries> message_stack;
+  Vector<TestLogEntry, max_entries> message_stack;
   for (size_t i = 0; i < total_entries; ++i) {
-    message_stack.push_back(
-        std::as_bytes(std::span(std::string_view(kMessage))));
+    message_stack.push_back({.timestamp = kSampleTimestamp,
+                             .tokenized_data = std::as_bytes(
+                                 std::span(std::string_view(kMessage)))});
   }
   size_t entries_found = 0;
   for (auto& response : output.payloads<Logs::Listen>()) {
@@ -469,12 +531,12 @@ TEST_F(LogServiceTest, InterruptedLogStreamSendsDropCount) {
   const uint32_t total_drop_count = entries_found / successful_packets_sent;
   const uint32_t remaining_entries = total_entries - total_drop_count;
   for (size_t i = 0; i < remaining_entries; ++i) {
-    message_stack.push_back(
-        std::as_bytes(std::span(std::string_view(kMessage))));
+    message_stack.push_back({.timestamp = kSampleTimestamp,
+                             .tokenized_data = std::as_bytes(
+                                 std::span(std::string_view(kMessage)))});
   }
-  StringBuffer<32> message;
-  message.Format("Dropped %u", static_cast<unsigned int>(total_drop_count));
-  message_stack.push_back(std::as_bytes(std::span(std::string_view(message))));
+  message_stack.push_back(
+      {.metadata = kDropMessageMetadata, .dropped = total_drop_count});
 
   for (auto& response : output.payloads<Logs::Listen>()) {
     protobuf::Decoder entry_decoder(response);
@@ -490,21 +552,31 @@ TEST_F(LogServiceTest, InterruptedLogStreamIgnoresErrors) {
   ASSERT_TRUE(drain.ok());
 
   LogService log_service(drain_map_);
-  const uint32_t output_buffer_size = 100;
-  rpc::RawFakeChannelOutput<10, output_buffer_size, 768> output;
+  const size_t output_buffer_size = 128;
+  const size_t max_packets = 20;
+  rpc::RawFakeChannelOutput<max_packets, output_buffer_size, 512> output;
   rpc::Channel channel(rpc::Channel::Create<drain_channel_id>(&output));
   rpc::Server server(std::span(&channel, 1));
 
   // Add as many entries needed to have multiple packets send.
-  const uint32_t min_packets_sent = 4;
-  const uint32_t max_messages_per_response =
-      output_buffer_size / sizeof(kMessage);
-  const size_t total_entries = min_packets_sent * max_messages_per_response;
-  AddLogEntries(total_entries, kMessage);
+  StatusWithSize status =
+      AddLogEntry(kMessage, kSampleMetadata, kSampleTimestamp);
+  ASSERT_TRUE(status.ok());
+
+  // In reality less than output_buffer_size is given as a buffer, since some
+  // bytes are used for the RPC framing.
+  const uint32_t max_messages_per_response = output_buffer_size / status.size();
+  // Send less packets than the max to avoid crashes.
+  const uint32_t packets_sent = 4;
+  const size_t total_entries = packets_sent * max_messages_per_response;
+  const size_t max_entries = 50;
+  // Check we can test all these entries.q
+  ASSERT_GE(max_entries, total_entries);
+  AddLogEntries(total_entries - 1, kMessage, kSampleMetadata, kSampleTimestamp);
 
   // Interrupt log stream with an error.
-  const uint32_t error_on_packet_count = min_packets_sent;
-  output.set_send_status(Status::Unavailable(), min_packets_sent);
+  const uint32_t error_on_packet_count = packets_sent / 2;
+  output.set_send_status(Status::Unavailable(), error_on_packet_count);
 
   // Request logs.
   rpc::RawServerWriter writer = rpc::RawServerWriter::Open<Logs::Listen>(
@@ -514,8 +586,8 @@ TEST_F(LogServiceTest, InterruptedLogStreamIgnoresErrors) {
   EXPECT_EQ(drain.value()->Flush(), OkStatus());
   EXPECT_FALSE(output.done());
 
-  // Make some packets were sent.
-  ASSERT_GE(output.payloads<Logs::Listen>().size(), min_packets_sent);
+  // Make sure some packets were sent.
+  ASSERT_GE(output.payloads<Logs::Listen>().size(), 0u);
 
   // Verify that not all the entries were sent.
   size_t entries_found = 0;
@@ -525,27 +597,13 @@ TEST_F(LogServiceTest, InterruptedLogStreamIgnoresErrors) {
   }
   EXPECT_LE(entries_found, total_entries);
 
-  // Verify that a drop message count is found.
-  // Don't account the drop count message in the total drop count.
+  // Verify that all messages were sent and the drop count messageis ignored.
   const uint32_t total_drop_count = total_entries - entries_found + 1;
-  // Since all messages are the same, the is a constant `total_drop_count`
-  // number of entries per packet.
-  const uint32_t entry_count_before_error =
-      error_on_packet_count * total_drop_count;
-  const uint32_t entry_count_after_error =
-      entries_found - 1 - entry_count_before_error;
-  Vector<ConstByteSpan, total_entries> message_stack;
-  // Add messages to the stack in the reverse order they are sent.
-  for (size_t i = 0; i < entry_count_after_error; ++i) {
-    message_stack.push_back(
-        std::as_bytes(std::span(std::string_view(kMessage))));
-  }
-  StringBuffer<32> message;
-  message.Format("Dropped %u", static_cast<unsigned int>(total_drop_count));
-  message_stack.push_back(std::as_bytes(std::span(std::string_view(message))));
-  for (size_t i = 0; i < entry_count_before_error; ++i) {
-    message_stack.push_back(
-        std::as_bytes(std::span(std::string_view(kMessage))));
+  Vector<TestLogEntry, max_entries> message_stack;
+  for (size_t i = 0; i < total_drop_count; ++i) {
+    message_stack.push_back({.timestamp = kSampleTimestamp,
+                             .tokenized_data = std::as_bytes(
+                                 std::span(std::string_view(kMessage)))});
   }
 
   for (auto& response : output.payloads<Logs::Listen>()) {
@@ -565,6 +623,104 @@ TEST_F(LogServiceTest, InterruptedLogStreamIgnoresErrors) {
   output.clear();
   EXPECT_EQ(drain.value()->Close(), OkStatus());
   EXPECT_TRUE(output.done());
+}
+
+TEST_F(LogServiceTest, FilterLogs) {
+  // Add a variety of logs.
+  const uint32_t module = 0xcafe;
+  const uint32_t flags = 0x02;
+  const uint32_t line_number = 100;
+  const auto debug_metadata = log_tokenized::Metadata::
+      Set<PW_LOG_LEVEL_DEBUG, module, flags, line_number>();
+  ASSERT_TRUE(AddLogEntry(kMessage, debug_metadata, kSampleTimestamp).ok());
+  const auto info_metadata = log_tokenized::Metadata::
+      Set<PW_LOG_LEVEL_INFO, module, flags, line_number>();
+  ASSERT_TRUE(AddLogEntry(kMessage, info_metadata, kSampleTimestamp).ok());
+  const auto warn_metadata = log_tokenized::Metadata::
+      Set<PW_LOG_LEVEL_WARN, module, flags, line_number>();
+  ASSERT_TRUE(AddLogEntry(kMessage, warn_metadata, kSampleTimestamp).ok());
+  const auto error_metadata = log_tokenized::Metadata::
+      Set<PW_LOG_LEVEL_ERROR, module, flags, line_number>();
+  ASSERT_TRUE(AddLogEntry(kMessage, error_metadata, kSampleTimestamp).ok());
+  const auto different_flags_metadata = log_tokenized::Metadata::
+      Set<PW_LOG_LEVEL_ERROR, module, 0x01, line_number>();
+  ASSERT_TRUE(
+      AddLogEntry(kMessage, different_flags_metadata, kSampleTimestamp).ok());
+  const auto different_module_metadata = log_tokenized::Metadata::
+      Set<PW_LOG_LEVEL_ERROR, 0xabcd, flags, line_number>();
+  ASSERT_TRUE(
+      AddLogEntry(kMessage, different_module_metadata, kSampleTimestamp).ok());
+
+  // Add messages to the stack in the reverse order they are sent.
+  Vector<TestLogEntry, 3> message_stack;
+  message_stack.push_back(
+      {.metadata = error_metadata,
+       .timestamp = kSampleTimestamp,
+       .tokenized_data = std::as_bytes(std::span(std::string_view(kMessage)))});
+  message_stack.push_back(
+      {.metadata = warn_metadata,
+       .timestamp = kSampleTimestamp,
+       .tokenized_data = std::as_bytes(std::span(std::string_view(kMessage)))});
+  message_stack.push_back(
+      {.metadata = info_metadata,
+       .timestamp = kSampleTimestamp,
+       .tokenized_data = std::as_bytes(std::span(std::string_view(kMessage)))});
+
+  // Set up filter rules for drain at drains_[1].
+  RpcLogDrain& drain = drains_[1];
+  for (auto& rule : rules2_) {
+    rule = {};
+  }
+  const auto module_little_endian =
+      bytes::CopyInOrder<uint32_t>(std::endian::little, module);
+  rules2_[0] = {
+      .action = Filter::Rule::Action::kKeep,
+      .level_greater_than_or_equal = log::FilterRule::Level::INFO_LEVEL,
+      .any_flags_set = flags,
+      .module_equals{module_little_endian.begin(), module_little_endian.end()}};
+  rules2_[1] = {
+      .action = Filter::Rule::Action::kDrop,
+      .level_greater_than_or_equal = log::FilterRule::Level::ANY_LEVEL,
+      .any_flags_set = 0,
+      .module_equals{},
+  };
+
+  // Request logs.
+  LOG_SERVICE_METHOD_CONTEXT context(drain_map_);
+  context.set_channel_id(drain.channel_id());
+  context.call({});
+  ASSERT_EQ(drain.Flush(), OkStatus());
+
+  size_t entries_found = 0;
+  for (auto& response : context.responses()) {
+    protobuf::Decoder entry_decoder(response);
+    entries_found += VerifyLogEntries(entry_decoder, message_stack);
+  }
+  EXPECT_EQ(entries_found, 3u);
+}
+
+TEST_F(LogServiceTest, ReopenClosedLogStreamWithAcquiredBuffer) {
+  const uint32_t drain_channel_id = kCloseWriterOnErrorDrainId;
+  auto drain = drain_map_.GetDrainFromChannelId(drain_channel_id);
+  ASSERT_TRUE(drain.ok());
+
+  LogService log_service(drain_map_);
+  rpc::RawFakeChannelOutput<10, 128, 512> output;
+  rpc::Channel channel(rpc::Channel::Create<drain_channel_id>(&output));
+  rpc::Server server(std::span(&channel, 1));
+
+  // Request logs.
+  rpc::RawServerWriter writer = rpc::RawServerWriter::Open<Logs::Listen>(
+      server, drain_channel_id, log_service);
+  EXPECT_EQ(drain.value()->Open(writer), OkStatus());
+  // This drain closes on errors.
+  EXPECT_EQ(drain.value()->Flush(), OkStatus());
+
+  // Request log stream with a new writer.
+  writer = rpc::RawServerWriter::Open<Logs::Listen>(
+      server, drain_channel_id, log_service);
+  EXPECT_EQ(drain.value()->Open(writer), OkStatus());
+  EXPECT_EQ(drain.value()->Flush(), OkStatus());
 }
 
 }  // namespace

@@ -30,13 +30,17 @@ pw_cc_library(
 pw_cc_library(
     name = "support_armv7m",
     srcs = ["cpu_state.cc"],
-    hdrs = ["public/pw_cpu_exception_cortex_m/cpu_state.h"],
+    hdrs = [
+        "public/pw_cpu_exception_cortex_m/cpu_state.h",
+        "public_overrides/pw_cpu_exception_backend/state.h",
+    ],
     includes = ["public"],
     deps = [
         ":config",
         ":cortex_m_constants",
         "//pw_log",
         "//pw_preprocessor",
+        "//pw_preprocessor:arch",
         "//pw_string",
     ],
 )
@@ -74,6 +78,7 @@ pw_cc_library(
         # TODO(pwbug/101): Need to add support for facades/backends to Bazel.
         "//pw_cpu_exception",
         "//pw_preprocessor",
+        "//pw_preprocessor:arch",
     ],
 )
 
@@ -101,6 +106,7 @@ pw_cc_library(
     name = "cortex_m_constants",
     hdrs = ["pw_cpu_exception_cortex_m_private/cortex_m_constants.h"],
     visibility = ["//visibility:private"],
+    deps = ["//pw_preprocessor:arch"],
 )
 
 pw_cc_test(

@@ -22,7 +22,6 @@
 #include "gtest/gtest.h"
 #include "pw_rpc/internal/test_method.h"
 #include "pw_rpc/internal/test_utils.h"
-#include "pw_rpc/server_context.h"
 #include "pw_rpc/service.h"
 #include "pw_rpc_private/fake_server_reader_writer.h"
 
@@ -69,7 +68,7 @@ TEST(ServerWriter, DefaultConstruct_Closed) {
   EXPECT_FALSE(writer.active());
 }
 
-TEST(ServerWriter, Construct_RegistersWithServer) {
+TEST(ServerWriter, Construct_RegistersWithServer) PW_NO_LOCK_SAFETY_ANALYSIS {
   ServerContextForTest<TestService> context(TestService::method.method());
   FakeServerWriter writer(context.get());
 
@@ -78,14 +77,14 @@ TEST(ServerWriter, Construct_RegistersWithServer) {
   EXPECT_EQ(static_cast<void*>(call), static_cast<void*>(&writer));
 }
 
-TEST(ServerWriter, Destruct_RemovesFromServer) {
+TEST(ServerWriter, Destruct_RemovesFromServer) PW_NO_LOCK_SAFETY_ANALYSIS {
   ServerContextForTest<TestService> context(TestService::method.method());
   { FakeServerWriter writer(context.get()); }
 
   EXPECT_EQ(context.server().FindCall(kPacket), nullptr);
 }
 
-TEST(ServerWriter, Finish_RemovesFromServer) {
+TEST(ServerWriter, Finish_RemovesFromServer) PW_NO_LOCK_SAFETY_ANALYSIS {
   ServerContextForTest<TestService> context(TestService::method.method());
   FakeServerWriter writer(context.get());
 
@@ -168,6 +167,7 @@ TEST(ServerWriter, Closed_IgnoresFinish) {
 
 TEST(ServerWriter, DefaultConstructor_NoClientStream) {
   FakeServerWriter writer;
+  LockGuard lock(rpc_lock());
   EXPECT_FALSE(writer.as_server_call().has_client_stream());
   EXPECT_FALSE(writer.as_server_call().client_stream_open());
 }
@@ -176,6 +176,7 @@ TEST(ServerWriter, Open_NoClientStream) {
   ServerContextForTest<TestService> context(TestService::method.method());
   FakeServerWriter writer(context.get());
 
+  LockGuard lock(rpc_lock());
   EXPECT_FALSE(writer.as_server_call().has_client_stream());
   EXPECT_FALSE(writer.as_server_call().client_stream_open());
 }
@@ -183,6 +184,7 @@ TEST(ServerWriter, Open_NoClientStream) {
 TEST(ServerReader, DefaultConstructor_ClientStreamClosed) {
   test::FakeServerReader reader;
   EXPECT_FALSE(reader.as_server_call().active());
+  LockGuard lock(rpc_lock());
   EXPECT_FALSE(reader.as_server_call().client_stream_open());
 }
 
@@ -190,6 +192,7 @@ TEST(ServerReader, Open_ClientStreamStartsOpen) {
   ServerContextForTest<TestService> context(TestService::method.method());
   test::FakeServerReader reader(context.get());
 
+  LockGuard lock(rpc_lock());
   EXPECT_TRUE(reader.as_server_call().has_client_stream());
   EXPECT_TRUE(reader.as_server_call().client_stream_open());
 }
@@ -199,11 +202,14 @@ TEST(ServerReader, Close_ClosesClientStream) {
   test::FakeServerReader reader(context.get());
 
   EXPECT_TRUE(reader.as_server_call().active());
+  rpc_lock().lock();
   EXPECT_TRUE(reader.as_server_call().client_stream_open());
+  rpc_lock().unlock();
   EXPECT_EQ(OkStatus(),
             reader.as_server_call().CloseAndSendResponse(OkStatus()));
 
   EXPECT_FALSE(reader.as_server_call().active());
+  LockGuard lock(rpc_lock());
   EXPECT_FALSE(reader.as_server_call().client_stream_open());
 }
 
@@ -212,10 +218,12 @@ TEST(ServerReader, EndClientStream_OnlyClosesClientStream) {
   test::FakeServerReader reader(context.get());
 
   EXPECT_TRUE(reader.active());
+  rpc_lock().lock();
   EXPECT_TRUE(reader.as_server_call().client_stream_open());
-  reader.as_server_call().EndClientStream();
+  reader.as_server_call().HandleClientStreamEnd();
 
   EXPECT_TRUE(reader.active());
+  LockGuard lock(rpc_lock());
   EXPECT_FALSE(reader.as_server_call().client_stream_open());
 }
 
@@ -224,9 +232,12 @@ TEST(ServerReaderWriter, Move_MaintainsClientStream) {
   test::FakeServerReaderWriter reader_writer(context.get());
   test::FakeServerReaderWriter destination;
 
+  rpc_lock().lock();
   EXPECT_FALSE(destination.as_server_call().client_stream_open());
+  rpc_lock().unlock();
 
   destination = std::move(reader_writer);
+  LockGuard lock(rpc_lock());
   EXPECT_TRUE(destination.as_server_call().has_client_stream());
   EXPECT_TRUE(destination.as_server_call().client_stream_open());
 }
@@ -244,8 +255,11 @@ TEST(ServerReaderWriter, Move_MovesCallbacks) {
 #endif  // PW_RPC_CLIENT_STREAM_END_CALLBACK
 
   test::FakeServerReaderWriter destination(std::move(reader_writer));
+  rpc_lock().lock();
   destination.as_server_call().HandlePayload({});
-  destination.as_server_call().EndClientStream();
+  rpc_lock().lock();
+  destination.as_server_call().HandleClientStreamEnd();
+  rpc_lock().lock();
   destination.as_server_call().HandleError(Status::Unknown());
 
   EXPECT_EQ(calls, 2 + PW_RPC_CLIENT_STREAM_END_CALLBACK);

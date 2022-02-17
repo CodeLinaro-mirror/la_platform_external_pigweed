@@ -49,6 +49,8 @@ runs bootstrap.
 
 .. _send us a note: pigweed@googlegroups.com
 
+On POSIX systems, the environment can be deactivated by running ``deactivate``.
+
 ==================================
 Using pw_env_setup in your project
 ==================================
@@ -259,6 +261,10 @@ here.
   complain if one of the required submodules is not present. Combining this
   with ``optional_submodules`` is not supported.
 
+``pw_packages``
+  A list of packages to install using :ref:`pw_package <module-pw_package>`
+  after the rest of bootstrap completes.
+
 An example of a config file is below.
 
 .. code-block:: json
@@ -277,6 +283,7 @@ An example of a config file is below.
       ],
       "system_packages": false
     },
+    "pw_packages": [],
     "optional_submodules": [
       "optional/submodule/one",
       "optional/submodule/two"
@@ -301,14 +308,18 @@ install many Python packages that might otherwise have conflicting dependencies.
 However, this means version of packages can often change underneath us and
 builds will not be hermetic.
 
-To ensure versions don't change without approval, run
+To ensure versions don't change without approval, Pigweed by default pins the
+versions of packages it depends on using a `pip constraints file`_. To pin the
+versions of additional packages your project depends on, run
 ``pw python-packages list <path/to/constraints/file>`` and then add
 ``pw_build_PIP_CONSTRAINTS = ["//path/to/constraints/file"]`` to your project's
-``.gn`` file (see `Pigweed's .gn file` for an example).
+``.gn`` file (see `Pigweed's .gn file`_ for an example).
 
+.. _pip constraints file: https://pip.pypa.io/en/stable/user_guide/#constraints-files
+.. _default constraints: https://cs.opensource.google/pigweed/pigweed/+/main:pw_env_setup/py/pw_env_setup/virtualenv_setup/constraint.list
 .. _Pigweed's .gn file: https://cs.opensource.google/pigweed/pigweed/+/main:.gn
 
-To update packages, remove the ``pw_build_PIP_CONSTRAINTS`` line, delete the
+To update packages, set ``pw_build_PIP_CONSTRAINTS = []``, delete the
 environment, and bootstrap again. Then run the ``list`` command from above
 again, and run ``pw presubmit``.
 

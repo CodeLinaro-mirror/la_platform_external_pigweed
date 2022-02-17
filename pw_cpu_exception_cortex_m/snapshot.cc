@@ -16,6 +16,7 @@
 
 #include "pw_cpu_exception_cortex_m/snapshot.h"
 
+#include "pw_cpu_exception/support.h"
 #include "pw_cpu_exception_cortex_m/proto_dump.h"
 #include "pw_cpu_exception_cortex_m_private/config.h"
 #include "pw_cpu_exception_cortex_m_private/cortex_m_constants.h"
@@ -26,7 +27,7 @@
 #include "pw_thread/snapshot.h"
 #include "pw_thread_protos/thread.pwpb.h"
 
-namespace pw::cpu_exception_cortex_m {
+namespace pw::cpu_exception::cortex_m {
 namespace {
 
 constexpr char kMainStackHandlerModeName[] = "Main Stack (Handler Mode)";
@@ -76,12 +77,13 @@ Status CaptureMainStack(
 
 Status SnapshotCpuState(
     const pw_cpu_exception_State& cpu_state,
-    cpu_exception::cortex_m::SnapshotCpuState::StreamEncoder&
-        snapshot_encoder) {
-  cpu_exception::LogCpuState(cpu_state);
-  cpu_exception::cortex_m::ArmV7mCpuState::StreamEncoder cpu_state_encoder =
-      snapshot_encoder.GetArmv7mCpuStateEncoder();
-  pw::cpu_exception::DumpCpuStateProto(cpu_state_encoder, cpu_state);
+    SnapshotCpuStateOverlay::StreamEncoder& snapshot_encoder) {
+  LogCpuState(cpu_state);
+  {
+    ArmV7mCpuState::StreamEncoder cpu_state_encoder =
+        snapshot_encoder.GetArmv7mCpuStateEncoder();
+    DumpCpuStateProto(cpu_state_encoder, cpu_state);
+  }
   return snapshot_encoder.status();
 }
 
@@ -99,7 +101,7 @@ Status SnapshotMainStackThread(
   // In thread mode the value is 0, in handler mode the value is non-zero.
   uint32_t xpsr;
   asm volatile("mrs %0, xpsr\n" : "=r"(xpsr));
-  if ((xpsr & cpu_exception::kXpsrIpsrMask) != 0) {
+  if ((xpsr & kXpsrIpsrMask) != 0) {
     return CaptureMainStack(ProcessorMode::kHandlerMode,
                             stack_low_addr,
                             stack_high_addr,
@@ -117,7 +119,7 @@ Status SnapshotMainStackThread(
   // stack.
   uint32_t control;
   asm volatile("mrs %0, control\n" : "=r"(control));
-  if ((control & cpu_exception::kControlThreadModeStackMask) != 0) {
+  if ((control & kControlThreadModeStackMask) != 0) {
     return OkStatus();  // Main stack is not currently active.
   }
 
@@ -146,16 +148,15 @@ Status SnapshotMainStackThread(
   // 0b1101 - 0xD Thread mode Process
 
   // First check whether the CPU state shows the main stack was active.
-  if ((exc_return & cpu_exception::kExcReturnStackMask) != 0) {
+  if ((exc_return & kExcReturnStackMask) != 0) {
     return OkStatus();  // Main stack is not currently active.
   }
   const uintptr_t stack_pointer = cpu_state.extended.msp;
 
   // Second, check if we're in Handler mode, AKA handling exceptions/interrupts.
-  const ProcessorMode mode =
-      ((exc_return & cpu_exception::kExcReturnModeMask) == 0)
-          ? ProcessorMode::kHandlerMode
-          : ProcessorMode::kThreadMode;
+  const ProcessorMode mode = ((exc_return & kExcReturnModeMask) == 0)
+                                 ? ProcessorMode::kHandlerMode
+                                 : ProcessorMode::kThreadMode;
 
   return CaptureMainStack(mode,
                           stack_low_addr,
@@ -165,4 +166,4 @@ Status SnapshotMainStackThread(
                           thread_stack_callback);
 }
 
-}  // namespace pw::cpu_exception_cortex_m
+}  // namespace pw::cpu_exception::cortex_m

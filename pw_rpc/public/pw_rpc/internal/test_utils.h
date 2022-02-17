@@ -36,7 +36,8 @@ class TestOutput : public ChannelOutput {
   static constexpr size_t buffer_size() { return kOutputBufferSize; }
 
   constexpr TestOutput(const char* name = "TestOutput")
-      : ChannelOutput(name), sent_data_{} {}
+      : ChannelOutput(name), sent_data_ {}
+  {}
 
   std::span<std::byte> AcquireBuffer() override { return buffer_; }
 
@@ -144,6 +145,7 @@ class ServerContextForTest {
   const internal::CallContext& get() { return context_; }
   auto& output() { return output_; }
   TestServer& server() { return static_cast<TestServer&>(server_); }
+  Service& service() { return service_; }
 
  private:
   TestOutput<kOutputBufferSize> output_;

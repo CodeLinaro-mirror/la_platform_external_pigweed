@@ -16,7 +16,9 @@
 #include <span>
 
 #include "pw_assert/assert.h"
+#include "pw_bytes/span.h"
 #include "pw_rpc/channel.h"
+#include "pw_rpc/internal/lock.h"
 #include "pw_status/status.h"
 
 namespace pw::rpc::internal {
@@ -70,29 +72,40 @@ class Channel : public rpc::Channel {
   };
 
   // Acquires a buffer for the packet.
-  OutputBuffer AcquireBuffer() const {
+  OutputBuffer AcquireBuffer() const PW_LOCKS_EXCLUDED(rpc_lock()) {
     return OutputBuffer(output().AcquireBuffer());
   }
 
-  Status Send(const internal::Packet& packet) {
-    OutputBuffer buffer = AcquireBuffer();
-    return Send(buffer, packet);
+  // Sends an RPC packet. Acquires and uses a ChannelOutput buffer.
+  Status Send(const internal::Packet& packet) PW_LOCKS_EXCLUDED(rpc_lock()) {
+    return SendSpan(output().AcquireBuffer(), packet);
   }
 
-  Status Send(OutputBuffer& output, const internal::Packet& packet);
-
-  void Release(OutputBuffer& buffer) {
-    output().DiscardBuffer(buffer.buffer_);
+  // Sends an RPC packet using the provided output buffer.
+  Status SendBuffer(OutputBuffer& buffer, const internal::Packet& packet)
+      PW_UNLOCK_FUNCTION(rpc_lock()) {
+    // TODO(pwbug/597): It would be cleaner if the Call object released the
+    //     OutputBuffer, unlocked the RPC mutex, and then passed a span to this
+    //     function.
+    const std::span released_buffer = buffer.buffer_;
     buffer.buffer_ = {};
+    rpc_lock().unlock();
+    return SendSpan(released_buffer, packet);
+  }
+
+  void Release(OutputBuffer& buffer) PW_UNLOCK_FUNCTION(rpc_lock()) {
+    const ConstByteSpan released_buffer = buffer.buffer_;
+    buffer.buffer_ = {};
+    rpc_lock().unlock();
+    output().DiscardBuffer(released_buffer);
   }
 
   // Allow setting the channel ID for tests.
   using rpc::Channel::set_channel_id;
 
-  // Allow accessing the client from the channel.
-  // TODO(pwbug/504): Remove this when users have migrated off the old API.
-  using rpc::Channel::client;
-  using rpc::Channel::set_client;
+ private:
+  Status SendSpan(ByteSpan buffer, const internal::Packet& packet) const
+      PW_LOCKS_EXCLUDED(rpc_lock());
 };
 
 }  // namespace pw::rpc::internal

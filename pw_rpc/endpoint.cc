@@ -12,11 +12,21 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+// clang-format off
+#include "pw_rpc/internal/log_config.h"  // PW_LOG_* macros must be first.
+
 #include "pw_rpc/internal/endpoint.h"
+// clang-format on
 
 #include "pw_log/log.h"
+#include "pw_rpc/internal/lock.h"
 
 namespace pw::rpc::internal {
+
+RpcLock& rpc_lock() {
+  static RpcLock lock;
+  return lock;
+}
 
 Endpoint::~Endpoint() {
   // Since the calls remove themselves from the Endpoint in
@@ -51,14 +61,18 @@ Result<Packet> Endpoint::ProcessPacket(std::span<const std::byte> data,
 }
 
 void Endpoint::RegisterCall(Call& call) {
-  Call* const existing_call =
-      FindCallById(call.channel_id(), call.service_id(), call.method_id());
+  rpc_lock().lock();
 
-  if (existing_call != nullptr) {
-    existing_call->HandleError(Status::Cancelled());
-  }
+  Call* const existing_call = FindCallById(
+      call.channel_id_locked(), call.service_id(), call.method_id());
 
   RegisterUniqueCall(call);
+
+  if (existing_call != nullptr) {
+    existing_call->ReplaceWithNewInstance(call);
+  } else {
+    rpc_lock().unlock();
+  }
 }
 
 Channel* Endpoint::GetInternalChannel(uint32_t id) const {
@@ -85,8 +99,8 @@ Call* Endpoint::FindCallById(uint32_t channel_id,
                              uint32_t service_id,
                              uint32_t method_id) {
   for (Call& call : calls_) {
-    if (channel_id == call.channel_id() && service_id == call.service_id() &&
-        method_id == call.method_id()) {
+    if (channel_id == call.channel_id_locked() &&
+        service_id == call.service_id() && method_id == call.method_id()) {
       return &call;
     }
   }

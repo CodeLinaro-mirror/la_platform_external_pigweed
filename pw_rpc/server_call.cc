@@ -16,17 +16,23 @@
 
 namespace pw::rpc::internal {
 
-ServerCall& ServerCall::operator=(ServerCall&& other) {
+void ServerCall::MoveServerCallFrom(ServerCall& other) {
   // If this call is active, finish it first.
-  CloseAndSendResponse(OkStatus()).IgnoreError();
+  if (active_locked()) {
+    Close();
+    // TODO(pwbug/597): Ensure the call object is locked before releasing the
+    //     RPC mutex.
+    SendPacket(PacketType::RESPONSE,
+               {},
+               OkStatus());  // Unlocks when it sends a packet
+    rpc_lock().lock();
+  }
 
   MoveFrom(other);
 
 #if PW_RPC_CLIENT_STREAM_END_CALLBACK
   on_client_stream_end_ = std::move(other.on_client_stream_end_);
 #endif  // PW_RPC_CLIENT_STREAM_END_CALLBACK
-
-  return *this;
 }
 
 }  // namespace pw::rpc::internal

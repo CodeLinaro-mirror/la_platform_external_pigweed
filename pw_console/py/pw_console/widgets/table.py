@@ -15,15 +15,12 @@
 
 import collections
 import copy
-import logging
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from pw_console.console_prefs import ConsolePrefs
 from pw_console.log_line import LogLine
 import pw_console.text_formatting
-
-_LOG = logging.getLogger(__package__)
 
 
 class TableView:
@@ -72,23 +69,28 @@ class TableView:
 
     def _ordered_column_widths(self):
         """Return each column and width in the preferred order."""
-        # Reverse sort if no custom ordering.
-        if not self.prefs.column_order:
-            return self.column_widths.items()
+        if self.prefs.column_order:
+            # Get ordered_columns
+            columns = copy.copy(self.column_widths)
+            ordered_columns = {}
 
-        # Get ordered_columns
-        columns = copy.copy(self.column_widths)
-        ordered_columns = {}
+            for column_name in self.prefs.column_order:
+                # If valid column name
+                if column_name in columns:
+                    ordered_columns[column_name] = columns.pop(column_name)
 
-        for column_name in self.prefs.column_order:
-            # If valid column name
-            if column_name in columns:
-                ordered_columns[column_name] = columns.pop(column_name)
-        # NOTE: Any remaining columns not specified by the user are not shown.
-        # Perhaps a user setting could add them at the end. To add them in:
-        if not self.prefs.omit_unspecified_columns:
-            for column_name in columns:
-                ordered_columns[column_name] = columns[column_name]
+            # Add remaining columns unless user preference to hide them.
+            if not self.prefs.omit_unspecified_columns:
+                for column_name in columns:
+                    ordered_columns[column_name] = columns[column_name]
+        else:
+            ordered_columns = copy.copy(self.column_widths)
+
+        if not self.prefs.show_python_file and 'py_file' in ordered_columns:
+            del ordered_columns['py_file']
+        if not self.prefs.show_python_logger and 'py_logger' in ordered_columns:
+            del ordered_columns['py_logger']
+
         return ordered_columns.items()
 
     def update_metadata_column_widths(self, log: LogLine):
@@ -202,7 +204,7 @@ class TableView:
             log.record.message)
         message = log.metadata.fields.get(
             'msg',
-            message_text.strip(),  # Remove any trailing line breaks
+            message_text.rstrip(),  # Remove any trailing line breaks
         )
         # Alternatively ANSI formatting can be preserved with:
         #   message = ANSI(log.record.message).__pt_formatted_text__()
@@ -233,7 +235,7 @@ class TableView:
                     i + index_modifier) if 0 <= i <= 7 else default_style
 
                 style = self.prefs.column_style(column_name,
-                                                column_value.strip(),
+                                                column_value.rstrip(),
                                                 default=fallback_style)
 
                 fragments.append((style, column_value))

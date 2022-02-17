@@ -12,7 +12,11 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+// clang-format off
+#include "pw_rpc/internal/log_config.h"  // PW_LOG_* macros must be first.
+
 #include "pw_rpc/internal/channel.h"
+// clang-format on
 
 #include "pw_log/log.h"
 #include "pw_rpc/internal/packet.h"
@@ -27,21 +31,20 @@ std::span<byte> Channel::OutputBuffer::payload(const Packet& packet) const {
                                          : std::span<byte>();
 }
 
-Status Channel::Send(OutputBuffer& buffer, const internal::Packet& packet) {
-  Result encoded = packet.Encode(buffer.buffer_);
+Status Channel::SendSpan(ByteSpan buffer,
+                         const internal::Packet& packet) const {
+  Result encoded = packet.Encode(buffer);
 
   if (!encoded.ok()) {
+    output().DiscardBuffer(buffer);
     PW_LOG_ERROR(
         "Failed to encode RPC packet type %u to channel %u buffer, status %u",
         static_cast<unsigned>(packet.type()),
         static_cast<unsigned>(id()),
         encoded.status().code());
-    output().DiscardBuffer(buffer.buffer_);
-    buffer.buffer_ = {};
     return Status::Internal();
   }
 
-  buffer.buffer_ = {};
   Status status = output().SendAndReleaseBuffer(encoded.value());
 
   if (!status.ok()) {
