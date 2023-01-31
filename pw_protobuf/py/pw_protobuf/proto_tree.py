@@ -663,7 +663,9 @@ def _add_message_fields(
         else:
             type_node = None
 
-        optional = field.proto3_optional
+        # TODO(b/267367139)
+        # optional = field.proto3_optional
+        optional = False
         repeated = (
             field.label == descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
         )
