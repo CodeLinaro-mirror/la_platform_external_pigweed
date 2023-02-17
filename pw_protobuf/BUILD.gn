@@ -19,6 +19,7 @@ import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_fuzzer/fuzzer.gni")
+import("$dir_pw_perf_test/perf_test.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_unit_test/facade_test.gni")
 import("$dir_pw_unit_test/test.gni")
@@ -53,6 +54,7 @@ pw_source_set("pw_protobuf") {
     dir_pw_bytes,
     dir_pw_function,
     dir_pw_log,
+    dir_pw_preprocessor,
     dir_pw_result,
     dir_pw_span,
     dir_pw_status,
@@ -182,6 +184,16 @@ pw_test("message_test") {
   sources = [ "message_test.cc" ]
 }
 
+group("perf_tests") {
+  deps = [ ":encoder_perf_test" ]
+}
+
+pw_perf_test("encoder_perf_test") {
+  enable_if = pw_perf_test_TIMER_INTERFACE_BACKEND != ""
+  deps = [ ":pw_protobuf" ]
+  sources = [ "encoder_perf_test.cc" ]
+}
+
 config("one_byte_varint") {
   defines = [ "PW_PROTOBUF_CFG_MAX_VARINT_SIZE=1" ]
   visibility = [ ":*" ]
@@ -201,12 +213,13 @@ pw_facade_test("varint_size_test") {
 }
 
 pw_proto_library("codegen_protos") {
-  sources = [ "pw_protobuf_codegen_protos/options.proto" ]
+  sources = [ "pw_protobuf_codegen_protos/codegen_options.proto" ]
 }
 
 pw_proto_library("common_protos") {
   sources = [
     "pw_protobuf_protos/common.proto",
+    "pw_protobuf_protos/field_options.proto",
     "pw_protobuf_protos/status.proto",
   ]
 }

@@ -28,11 +28,13 @@ pw_add_library(pw_third_party.fuchsia.fit INTERFACE
     repo/sdk/lib/fit/include
   PUBLIC_DEPS
     pw_third_party.fuchsia.stdcompat
+    pw_assert.assert
 )
 
 pw_add_library(pw_third_party.fuchsia.stdcompat INTERFACE
   HEADERS
     repo/sdk/lib/stdcompat/include/lib/stdcompat/bit.h
+    repo/sdk/lib/stdcompat/include/lib/stdcompat/functional.h
     repo/sdk/lib/stdcompat/include/lib/stdcompat/memory.h
     repo/sdk/lib/stdcompat/include/lib/stdcompat/optional.h
     repo/sdk/lib/stdcompat/include/lib/stdcompat/type_traits.h

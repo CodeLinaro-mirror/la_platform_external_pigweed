@@ -31,7 +31,7 @@ void LoggingEventHandler::RunAllTestsEnd(
   PW_LOG_INFO(PW_UNIT_TEST_GOOGLETEST_PASSED_SUMMARY,
               run_tests_summary.passed_tests);
   if (run_tests_summary.skipped_tests) {
-    PW_LOG_WARN(PW_UNIT_TEST_GOOGLETEST_SKIPPED_SUMMARY,
+    PW_LOG_WARN(PW_UNIT_TEST_GOOGLETEST_DISABLED_SUMMARY,
                 run_tests_summary.skipped_tests);
   }
   if (run_tests_summary.failed_tests) {
@@ -61,7 +61,7 @@ void LoggingEventHandler::TestCaseEnd(const TestCase& test_case,
                    test_case.test_name);
       break;
     case TestResult::kSkipped:
-      PW_LOG_WARN(PW_UNIT_TEST_GOOGLETEST_CASE_SKIPPED,
+      PW_LOG_WARN(PW_UNIT_TEST_GOOGLETEST_CASE_DISABLED,
                   test_case.suite_name,
                   test_case.test_name);
       break;
@@ -77,13 +77,19 @@ void LoggingEventHandler::TestCaseExpect(const TestCase& test_case,
   const char* result = expectation.success ? "Success" : "Failure";
   uint32_t level = expectation.success ? PW_LOG_LEVEL_INFO : PW_LOG_LEVEL_ERROR;
   PW_LOG(level,
+         PW_LOG_MODULE_NAME,
          PW_LOG_FLAGS,
          "%s:%d: %s",
          test_case.file_name,
          expectation.line_number,
          result);
-  PW_LOG(level, PW_LOG_FLAGS, "      Expected: %s", expectation.expression);
   PW_LOG(level,
+         PW_LOG_MODULE_NAME,
+         PW_LOG_FLAGS,
+         "      Expected: %s",
+         expectation.expression);
+  PW_LOG(level,
+         PW_LOG_MODULE_NAME,
          PW_LOG_FLAGS,
          "        Actual: %s",
          expectation.evaluated_expression);

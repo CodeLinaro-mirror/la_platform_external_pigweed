@@ -21,7 +21,6 @@ code. These tools must be available on the path when this script is invoked!
 
 import argparse
 import collections
-import dataclasses
 import difflib
 import logging
 import os
@@ -39,6 +38,8 @@ from typing import (
     NamedTuple,
     Optional,
     Pattern,
+    Sequence,
+    TextIO,
     Tuple,
     Union,
 )
@@ -54,35 +55,18 @@ except ImportError:
 import pw_cli.color
 import pw_cli.env
 from pw_presubmit.presubmit import FileFilter
-from pw_presubmit import cli, git_repo, owners_checks, PresubmitContext
+from pw_presubmit import (
+    cli,
+    FormatContext,
+    git_repo,
+    owners_checks,
+    PresubmitContext,
+)
 from pw_presubmit.tools import exclude_paths, file_summary, log_run, plural
 
 _LOG: logging.Logger = logging.getLogger(__name__)
 _COLOR = pw_cli.color.colors()
 _DEFAULT_PATH = Path('out', 'format')
-
-
-@dataclasses.dataclass
-class FormatContext:
-    """Context passed into formatting helpers.
-
-    This class is a subset of PresubmitContext (from presubmit.py) containing
-    only what's needed by this function.
-
-    For full documentation on the members see the PresubmitContext section of
-    pw_presubmit/docs.rst.
-
-    Args:
-        root: Source checkout root directory
-        output_dir: Output directory for this specific language
-        paths: Modified files for the presubmit step to check (often used in
-            formatting steps but ignored in compile steps)
-    """
-
-    root: Path
-    output_dir: Path
-    paths: Tuple[Path, ...]
-
 
 _Context = Union[PresubmitContext, FormatContext]
 
@@ -108,7 +92,7 @@ def colorize_diff(lines: Iterable[str]) -> str:
 
 
 def _diff(path, original: bytes, formatted: bytes) -> str:
-    return colorize_diff(
+    return ''.join(
         difflib.unified_diff(
             original.decode(errors='replace').splitlines(True),
             formatted.decode(errors='replace').splitlines(True),
@@ -262,9 +246,9 @@ def check_py_format_yapf(ctx: _Context) -> Dict[Path, str]:
 
         matches = tuple(_DIFF_START.finditer(raw_diff))
         for start, end in zip(matches, (*matches[1:], None)):
-            errors[Path(start.group(1))] = colorize_diff(
-                raw_diff[start.start() : end.start() if end else None]
-            )
+            errors[Path(start.group(1))] = raw_diff[
+                start.start() : end.start() if end else None
+            ]
 
     if process.stderr:
         _LOG.error(
@@ -282,15 +266,45 @@ def fix_py_format_yapf(ctx: _Context) -> Dict[Path, str]:
     return {}
 
 
-_BLACK_OPTS = (
-    '--skip-string-normalization',
-    '--line-length',
-    '80',
-    '--target-version',
-    'py310',
-    '--include',
-    r'\.pyi?$',
-)
+BLACK = 'black'
+
+
+def _enumerate_black_configs() -> Iterable[Path]:
+    if directory := os.environ.get('PW_PROJECT_ROOT'):
+        yield Path(directory, '.black.toml')
+        yield Path(directory, 'pyproject.toml')
+
+    if directory := os.environ.get('PW_ROOT'):
+        yield Path(directory, '.black.toml')
+        yield Path(directory, 'pyproject.toml')
+
+
+def _black_config_args() -> Sequence[Union[str, Path]]:
+    config = None
+    for config_location in _enumerate_black_configs():
+        if config_location.is_file():
+            config = config_location
+            break
+
+    config_args: Sequence[Union[str, Path]] = ()
+    if config:
+        config_args = ('--config', config)
+    return config_args
+
+
+def _black_multiple_files(ctx: _Context) -> Tuple[str, ...]:
+    changed_paths: List[str] = []
+    for line in (
+        log_run(
+            [BLACK, '--check', *_black_config_args(), *ctx.paths],
+            capture_output=True,
+        )
+        .stderr.decode()
+        .splitlines()
+    ):
+        if match := re.search(r'^would reformat (.*)\s*$', line):
+            changed_paths.append(match.group(1))
+    return tuple(changed_paths)
 
 
 def check_py_format_black(ctx: _Context) -> Dict[Path, str]:
@@ -299,18 +313,7 @@ def check_py_format_black(ctx: _Context) -> Dict[Path, str]:
 
     # Run black --check on the full list of paths and then only run black
     # individually on the files that black found issue with.
-    changed_paths: List[str] = []
-    for line in (
-        log_run(
-            ['black', '--check', *_BLACK_OPTS, *ctx.paths],
-            capture_output=True,
-        )
-        .stderr.decode()
-        .splitlines()
-    ):
-        if match := re.search(r'^would reformat (.*)\s*$', line):
-            changed_paths.append(match.group(1))
-    paths: Tuple[str, ...] = tuple(changed_paths)
+    paths: Tuple[str, ...] = _black_multiple_files(ctx)
 
     def _format_temp(path: Union[Path, str], data: bytes) -> bytes:
         # black doesn't have an option to output the changed file, so copy the
@@ -320,7 +323,10 @@ def check_py_format_black(ctx: _Context) -> Dict[Path, str]:
             build = Path(temp) / os.path.basename(path)
             build.write_bytes(data)
 
-            proc = log_run(['black', *_BLACK_OPTS, build], capture_output=True)
+            proc = log_run(
+                [BLACK, *_black_config_args(), build],
+                capture_output=True,
+            )
             if proc.returncode:
                 stderr = proc.stderr.decode(errors='replace')
                 stderr = stderr.replace(str(build), str(path))
@@ -339,8 +345,18 @@ def fix_py_format_black(ctx: _Context) -> Dict[Path, str]:
     """Fixes formatting for the provided files in place."""
     errors: Dict[Path, str] = {}
 
+    # Run black --check on the full list of paths and then only run black
+    # individually on the files that black found issue with.
+    paths: Tuple[str, ...] = _black_multiple_files(ctx)
+
     for path in ctx.paths:
-        proc = log_run(['black', *_BLACK_OPTS, path], capture_output=True)
+        if not str(path).endswith(paths):
+            continue
+
+        proc = log_run(
+            [BLACK, *_black_config_args(), path],
+            capture_output=True,
+        )
         if proc.returncode:
             errors[path] = proc.stderr.decode()
     return errors
@@ -378,18 +394,30 @@ def fix_trailing_space(ctx: _Context) -> Dict[Path, str]:
 
 
 def print_format_check(
-    errors: Dict[Path, str], show_fix_commands: bool
+    errors: Dict[Path, str],
+    show_fix_commands: bool,
+    show_summary: bool = True,
+    colors: Optional[bool] = None,
+    file: TextIO = sys.stdout,
 ) -> None:
     """Prints and returns the result of a check_*_format function."""
     if not errors:
         # Don't print anything in the all-good case.
         return
+
+    if colors is None:
+        colors = file == sys.stdout
+
     # Show the format fixing diff suggested by the tooling (with colors).
-    _LOG.warning(
-        'Found %d files with formatting errors. Format changes:', len(errors)
-    )
+    if show_summary:
+        _LOG.warning(
+            'Found %d files with formatting errors. Format changes:',
+            len(errors),
+        )
     for diff in errors.values():
-        print(diff, end='')
+        if colors:
+            diff = colorize_diff(diff)
+        print(diff, end='', file=file)
 
     # Show a copy-and-pastable command to fix the issues.
     if show_fix_commands:
@@ -573,8 +601,18 @@ def presubmit_check(
             # When running as part of presubmit, show the fix command help.
             show_fix_commands=True,
         )
-        if errors:
-            raise pw_presubmit.PresubmitFailure
+        if not errors:
+            return
+
+        with ctx.failure_summary_log.open('w') as outs:
+            print_format_check(
+                errors,
+                show_summary=False,
+                show_fix_commands=False,
+                file=outs,
+            )
+
+        raise pw_presubmit.PresubmitFailure
 
     language = code_format.language.lower().replace('+', 'p').replace(' ', '_')
     check_code_format.name = f'{language}_format'
@@ -603,15 +641,17 @@ class CodeFormatter:
 
     def __init__(
         self,
-        root: Path,
+        root: Optional[Path],
         files: Iterable[Path],
         output_dir: Path,
         code_formats: Collection[CodeFormat] = CODE_FORMATS_WITH_YAPF,
+        package_root: Optional[Path] = None,
     ):
         self.root = root
         self.paths = list(files)
         self._formats: Dict[CodeFormat, List] = collections.defaultdict(list)
         self.root_output_dir = output_dir
+        self.package_root = package_root or output_dir / 'packages'
 
         for path in self.paths:
             for code_format in code_formats:
@@ -632,6 +672,7 @@ class CodeFormatter:
             root=self.root,
             output_dir=outdir,
             paths=tuple(self._formats[code_format]),
+            package_root=self.package_root,
         )
 
     def check(self) -> Dict[Path, str]:
@@ -679,6 +720,7 @@ def format_paths_in_repo(
     base: str,
     code_formats: Collection[CodeFormat] = CODE_FORMATS_WITH_YAPF,
     output_directory: Optional[Path] = None,
+    package_root: Optional[Path] = None,
 ) -> int:
     """Checks or fixes formatting for files in a Git repo."""
 
@@ -722,6 +764,7 @@ def format_paths_in_repo(
         repo=repo,
         code_formats=code_formats,
         output_directory=output_directory,
+        package_root=package_root,
     )
 
 
@@ -731,8 +774,11 @@ def format_files(
     repo: Optional[Path] = None,
     code_formats: Collection[CodeFormat] = CODE_FORMATS,
     output_directory: Optional[Path] = None,
+    package_root: Optional[Path] = None,
 ) -> int:
     """Checks or fixes formatting for the specified files."""
+
+    root: Optional[Path] = None
 
     if git_repo.is_repo():
         root = git_repo.root()
@@ -755,6 +801,7 @@ def format_files(
         code_formats=code_formats,
         root=root,
         output_dir=output_dir,
+        package_root=package_root,
     )
 
     _LOG.info('Checking formatting for %s', plural(formatter.paths, 'file'))
@@ -836,6 +883,13 @@ def arguments(
         type=Path,
         help=f"Output directory (default: {'<repo root>' / _DEFAULT_PATH})",
     )
+    parser.add_argument(
+        '--package-root',
+        type=Path,
+        default=Path(os.environ['PW_PACKAGE_ROOT']),
+        help='Package root directory',
+    )
+
     return parser
 
 

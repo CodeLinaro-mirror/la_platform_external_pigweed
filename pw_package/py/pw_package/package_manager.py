@@ -32,10 +32,15 @@ class Package:
 
     def __init__(self, name):
         self._name = name
+        self._allow_use_in_downstream = True
 
     @property
     def name(self):
         return self._name
+
+    @property
+    def allow_use_in_downstream(self):
+        return self._allow_use_in_downstream
 
     def install(
         self, path: pathlib.Path
@@ -56,16 +61,22 @@ class Package:
         if os.path.exists(path):
             shutil.rmtree(path)
 
-    def status(self, path: pathlib.Path) -> bool:  # pylint: disable=no-self-use
+    def status(  # pylint: disable=no-self-use
+        self,
+        path: pathlib.Path,  # pylint: disable=unused-argument
+    ) -> bool:
         """Returns if package is installed at path and current.
 
         This method will be skipped if the directory does not exist.
         """
+        return False
 
-    def info(
-        self, path: pathlib.Path
-    ) -> Sequence[str]:  # pylint: disable=no-self-use
+    def info(  # pylint: disable=no-self-use
+        self,
+        path: pathlib.Path,  # pylint: disable=unused-argument
+    ) -> Sequence[str]:
         """Returns a short string explaining how to enable the package."""
+        return []
 
 
 _PACKAGES: Dict[str, Package] = {}
@@ -83,6 +94,14 @@ class Packages:
     available: Tuple[str, ...]
 
 
+class UpstreamOnlyPackageError(Exception):
+    def __init__(self, pkg_name):
+        super().__init__(
+            f'Package {pkg_name} is an upstream-only package--it should be '
+            'imported as a submodule and not a package'
+        )
+
+
 class PackageManager:
     """Install and remove optional packages."""
 
@@ -91,7 +110,23 @@ class PackageManager:
         os.makedirs(root, exist_ok=True)
 
     def install(self, package: str, force: bool = False) -> None:
+        """Install the named package.
+
+        Args:
+            package: The name of the package to install.
+            force: Install the package regardless of whether it's already
+                installed or if it's not "allowed" to be installed on this
+                project.
+        """
+
         pkg = _PACKAGES[package]
+        if not pkg.allow_use_in_downstream:
+            if os.environ.get('PW_ROOT') != os.environ.get('PW_PROJECT_ROOT'):
+                if force:
+                    _LOG.warning(str(UpstreamOnlyPackageError(pkg.name)))
+                else:
+                    raise UpstreamOnlyPackageError(pkg.name)
+
         if force:
             self.remove(package)
         pkg.install(self._pkg_root / pkg.name)

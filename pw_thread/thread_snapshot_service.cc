@@ -50,6 +50,11 @@ Status ProtoEncodeThreadInfo(SnapshotThreadInfo::StreamEncoder& encoder,
     // Need stack start pointer to contextualize estimated peak.
     return Status::FailedPrecondition();
   }
+  if (thread_info.stack_pointer().has_value()) {
+    PW_TRY(
+        proto_encoder.WriteStackPointer(thread_info.stack_pointer().value()));
+  }
+
   if (thread_info.stack_peak_addr().has_value()) {
     PW_TRY(proto_encoder.WriteStackPointerEstPeak(
         thread_info.stack_peak_addr().value()));
@@ -84,7 +89,7 @@ Status DecodeThreadName(ConstByteSpan serialized_path,
   Status status;
   while (decoder.Next().ok()) {
     switch (decoder.FieldNumber()) {
-      case static_cast<uint32_t>(Thread::Fields::NAME): {
+      case static_cast<uint32_t>(Thread::Fields::kName): {
         status.Update(decoder.ReadBytes(&thread_name));
       }
     }

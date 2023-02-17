@@ -25,14 +25,20 @@ class ServerCall : public Call {
  public:
   void HandleClientStreamEnd() PW_UNLOCK_FUNCTION(rpc_lock()) {
     MarkClientStreamCompleted();
-    // TODO(b/234876851): Ensure on_client_stream_end_ is properly guarded.
-    rpc_lock().unlock();
 
 #if PW_RPC_CLIENT_STREAM_END_CALLBACK
-    if (on_client_stream_end_) {
-      on_client_stream_end_();
+    auto on_client_stream_end_local = std::move(on_client_stream_end_);
+    CallbackStarted();
+    rpc_lock().unlock();
+
+    if (on_client_stream_end_local) {
+      on_client_stream_end_local();
     }
+
+    rpc_lock().lock();
+    CallbackFinished();
 #endif  // PW_RPC_CLIENT_STREAM_END_CALLBACK
+    rpc_lock().unlock();
   }
 
  protected:
@@ -55,22 +61,23 @@ class ServerCall : public Call {
   void MoveServerCallFrom(ServerCall& other)
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock());
 
-  ServerCall(const LockedCallContext& context, MethodType type)
+  ServerCall(const LockedCallContext& context, CallProperties properties)
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock())
-      : Call(context, type) {}
+      : Call(context, properties) {}
 
   // set_on_client_stream_end is templated so that it can be conditionally
   // disabled with a helpful static_assert message.
   template <typename UnusedType = void>
   void set_on_client_stream_end(
-      [[maybe_unused]] Function<void()>&& on_client_stream_end) {
-    // TODO(b/234876851): Ensure on_client_stream_end_ is properly guarded.
+      [[maybe_unused]] Function<void()>&& on_client_stream_end)
+      PW_LOCKS_EXCLUDED(rpc_lock()) {
     static_assert(
         cfg::kClientStreamEndCallbackEnabled<UnusedType>,
         "The client stream end callback is disabled, so "
         "set_on_client_stream_end cannot be called. To enable the client end "
         "callback, set PW_RPC_CLIENT_STREAM_END_CALLBACK to 1.");
 #if PW_RPC_CLIENT_STREAM_END_CALLBACK
+    LockGuard lock(rpc_lock());
     on_client_stream_end_ = std::move(on_client_stream_end);
 #endif  // PW_RPC_CLIENT_STREAM_END_CALLBACK
   }
@@ -78,7 +85,7 @@ class ServerCall : public Call {
  private:
 #if PW_RPC_CLIENT_STREAM_END_CALLBACK
   // Called when a client stream completes.
-  Function<void()> on_client_stream_end_;
+  Function<void()> on_client_stream_end_ PW_GUARDED_BY(rpc_lock());
 #endif  // PW_RPC_CLIENT_STREAM_END_CALLBACK
 };
 

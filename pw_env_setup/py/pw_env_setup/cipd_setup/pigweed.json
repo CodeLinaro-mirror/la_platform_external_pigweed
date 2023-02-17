@@ -10,7 +10,7 @@
         "windows-amd64"
       ],
       "tags": [
-        "git_revision:70d6c60823c0233a0f35eccc25b2b640d2980bdc"
+        "git_revision:84c8431f3e03cc6226c59dd49637c15ea31169a1"
       ],
       "version_file": ".versions/gn.cipd_version"
     },
@@ -24,7 +24,7 @@
         "windows-amd64"
       ],
       "tags": [
-        "version:2@1.11.1.chromium.6"
+        "version:2@1.11.1.chromium.7"
       ]
     },
     {

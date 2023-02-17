@@ -45,10 +45,12 @@ pw_python_package("py") {
     "pw_build/pip_install_python_deps.py",
     "pw_build/project_builder.py",
     "pw_build/project_builder_argparse.py",
+    "pw_build/project_builder_context.py",
     "pw_build/project_builder_prefs.py",
     "pw_build/python_package.py",
     "pw_build/python_runner.py",
     "pw_build/python_wheels.py",
+    "pw_build/wrap_ninja.py",
     "pw_build/zip.py",
   ]
   tests = [
