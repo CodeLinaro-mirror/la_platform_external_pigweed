@@ -68,11 +68,14 @@ def _process_inclusive_language(*words):
         _ = re.compile(word)
 
     word_boundary = (
-        r'(\b|_|(?<=[a-z])(?=[A-Z])|(?<=[0-9])(?=\w)|(?<=\w)(?=[0-9]))')
+        r'(\b|_|(?<=[a-z])(?=[A-Z])|(?<=[0-9])(?=\w)|(?<=\w)(?=[0-9]))'
+    )
 
     return re.compile(
-        r"({b})(?i:{w})(e?[sd]{b}|{b})".format(w='|'.join(all_words),
-                                               b=word_boundary), )
+        r"({b})(?i:{w})(e?[sd]{b}|{b})".format(
+            w='|'.join(all_words), b=word_boundary
+        ),
+    )
 
 
 NON_INCLUSIVE_WORDS_REGEX = _process_inclusive_language()
@@ -140,7 +143,8 @@ def presubmit_check(
                         if match:
                             found_words.setdefault(path, [])
                             found_words[path].append(
-                                LineMatch(i, match.group(0)))
+                                LineMatch(i, match.group(0))
+                            )
 
                     # Not using 'continue' so this line always executes.
                     prev = line
@@ -149,19 +153,25 @@ def presubmit_check(
             # File is not text, like a gif.
             pass
 
-    for path, matches in found_words.items():
-        print('=' * 40)
-        print(path)
-        for match in matches:
-            print(match)
-
     if found_words:
+        with open(ctx.failure_summary_log, 'w') as outs:
+            for i, (path, matches) in enumerate(found_words.items()):
+                if i:
+                    print('=' * 40, file=outs)
+                print(path, file=outs)
+                for match in matches:
+                    print(match, file=outs)
+
+        print(ctx.failure_summary_log.read_text(), end=None)
+
         print()
-        print("""
+        print(
+            """
 Individual lines can be ignored with "inclusive-language: ignore". Blocks can be
 ignored with "inclusive-language: disable" and reenabled with
 "inclusive-language: enable".
-""".strip())
+""".strip()
+        )
         # Re-enable just in case: inclusive-language: enable.
 
         raise presubmit.PresubmitFailure
@@ -173,7 +183,8 @@ def inclusive_language_checker(*words):
     regex = _process_inclusive_language(*words)
 
     def inclusive_language(  # pylint: disable=redefined-outer-name
-        ctx: presubmit.PresubmitContext):
+        ctx: presubmit.PresubmitContext,
+    ):
         globals()['inclusive_language'](ctx, regex)
 
     return inclusive_language

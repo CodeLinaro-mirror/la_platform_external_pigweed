@@ -21,6 +21,12 @@ import time
 from typing import List
 import unittest
 
+from pigweed.pw_rpc.internal import packet_pb2
+from pigweed.pw_transfer import transfer_pb2
+from pw_hdlc import encode
+from pw_transfer import ProtocolVersion
+from pw_transfer.chunk import Chunk
+
 import proxy
 
 
@@ -49,7 +55,8 @@ class ProxyTest(unittest.IsolatedAsyncioTestCase):
             name="test",
             rate=0.5,
             timeout=100,
-            seed=1234567890)
+            seed=1234567890,
+        )
         transposer._rng = MockRng([0.6, 0.4])
         await transposer.process(b'aaaaaaaaaa')
         await transposer.process(b'bbbbbbbbbb')
@@ -71,7 +78,8 @@ class ProxyTest(unittest.IsolatedAsyncioTestCase):
             name="test",
             rate=0.5,
             timeout=0.100,
-            seed=1234567890)
+            seed=1234567890,
+        )
         transposer._rng = MockRng([0.4, 0.6])
         await transposer.process(b'aaaaaaaaaa')
 
@@ -95,7 +103,8 @@ class ProxyTest(unittest.IsolatedAsyncioTestCase):
         server_failure = proxy.ServerFailure(
             lambda data: append(sent_packets, data),
             name="test",
-            packets_before_failure_list=packets_before_failure.copy())
+            packets_before_failure_list=packets_before_failure.copy(),
+        )
 
         # After passing the list to ServerFailure, add a test for no
         # packets dropped
@@ -126,7 +135,8 @@ class ProxyTest(unittest.IsolatedAsyncioTestCase):
         keep_drop_queue = proxy.KeepDropQueue(
             lambda data: append(sent_packets, data),
             name="test",
-            keep_drop_queue=[2, 1, 3])
+            keep_drop_queue=[2, 1, 3],
+        )
 
         expected_sequence = [
             b'1',
@@ -162,7 +172,8 @@ class ProxyTest(unittest.IsolatedAsyncioTestCase):
         keep_drop_queue = proxy.KeepDropQueue(
             lambda data: append(sent_packets, data),
             name="test",
-            keep_drop_queue=[2, 1, 1, -1])
+            keep_drop_queue=[2, 1, 1, -1],
+        )
 
         expected_sequence = [
             b'1',
@@ -184,6 +195,66 @@ class ProxyTest(unittest.IsolatedAsyncioTestCase):
         for packet in input_packets:
             await keep_drop_queue.process(packet)
         self.assertEqual(sent_packets, expected_sequence)
+
+    async def test_window_packet_dropper(self):
+        sent_packets: List[bytes] = []
+
+        # Async helper so DataTransposer can await on it.
+        async def append(list: List[bytes], data: bytes):
+            list.append(data)
+
+        window_packet_dropper = proxy.WindowPacketDropper(
+            lambda data: append(sent_packets, data),
+            name="test",
+            window_packet_to_drop=0,
+        )
+
+        packets = [
+            _encode_rpc_frame(
+                Chunk(ProtocolVersion.VERSION_TWO, Chunk.Type.DATA, data=b'1')
+            ),
+            _encode_rpc_frame(
+                Chunk(ProtocolVersion.VERSION_TWO, Chunk.Type.DATA, data=b'2')
+            ),
+            _encode_rpc_frame(
+                Chunk(ProtocolVersion.VERSION_TWO, Chunk.Type.DATA, data=b'3')
+            ),
+            _encode_rpc_frame(
+                Chunk(ProtocolVersion.VERSION_TWO, Chunk.Type.DATA, data=b'4')
+            ),
+            _encode_rpc_frame(
+                Chunk(ProtocolVersion.VERSION_TWO, Chunk.Type.DATA, data=b'5')
+            ),
+        ]
+
+        expected_packets = packets[1:]
+
+        # Test each even twice to assure the filter does not have issues
+        # on new window bondaries.
+        events = [
+            proxy.Event.PARAMETERS_RETRANSMIT,
+            proxy.Event.PARAMETERS_CONTINUE,
+            proxy.Event.PARAMETERS_RETRANSMIT,
+            proxy.Event.PARAMETERS_CONTINUE,
+        ]
+
+        for event in events:
+            sent_packets.clear()
+            for packet in packets:
+                await window_packet_dropper.process(packet)
+            self.assertEqual(sent_packets, expected_packets)
+            window_packet_dropper.handle_event(event)
+
+
+def _encode_rpc_frame(chunk: Chunk) -> bytes:
+    packet = packet_pb2.RpcPacket(
+        type=packet_pb2.PacketType.SERVER_STREAM,
+        channel_id=101,
+        service_id=1001,
+        method_id=100001,
+        payload=chunk.to_message().SerializeToString(),
+    ).SerializeToString()
+    return encode.ui_frame(73, packet)
 
 
 if __name__ == '__main__':

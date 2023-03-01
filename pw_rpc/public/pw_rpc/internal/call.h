@@ -65,6 +65,8 @@ class Call : public IntrusiveList<Call>::Item {
   Call& operator=(const Call&) = delete;
   Call& operator=(Call&&) = delete;
 
+  ~Call() PW_LOCKS_EXCLUDED(rpc_lock());
+
   // True if the Call is active and ready to send responses.
   [[nodiscard]] bool active() const PW_LOCKS_EXCLUDED(rpc_lock()) {
     LockGuard lock(rpc_lock());
@@ -106,7 +108,7 @@ class Call : public IntrusiveList<Call>::Item {
   Status CloseAndSendResponseLocked(ConstByteSpan response, Status status)
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock()) {
     return CloseAndSendFinalPacketLocked(
-        PacketType::RESPONSE, response, status);
+        pwpb::PacketType::RESPONSE, response, status);
   }
 
   Status CloseAndSendResponse(Status status) PW_LOCKS_EXCLUDED(rpc_lock()) {
@@ -115,7 +117,8 @@ class Call : public IntrusiveList<Call>::Item {
 
   Status CloseAndSendServerErrorLocked(Status error)
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock()) {
-    return CloseAndSendFinalPacketLocked(PacketType::SERVER_ERROR, {}, error);
+    return CloseAndSendFinalPacketLocked(
+        pwpb::PacketType::SERVER_ERROR, {}, error);
   }
 
   // Public call that ends the client stream for a client call.
@@ -127,7 +130,7 @@ class Call : public IntrusiveList<Call>::Item {
   // Internal call that closes the client stream.
   Status CloseClientStreamLocked() PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock()) {
     client_stream_state_ = kClientStreamInactive;
-    return SendPacket(PacketType::CLIENT_STREAM_END, {}, {});
+    return SendPacket(pwpb::PacketType::CLIENT_STREAM_END, {}, {});
   }
 
   // Sends a payload in either a server or client stream packet.
@@ -145,7 +148,7 @@ class Call : public IntrusiveList<Call>::Item {
       PW_UNLOCK_FUNCTION(rpc_lock()) {
     // TODO(b/234876851): Ensure the call object is locked before releasing the
     //     RPC mutex.
-    if (const Status status = SendPacket(PacketType::REQUEST, payload);
+    if (const Status status = SendPacket(pwpb::PacketType::REQUEST, payload);
         !status.ok()) {
       HandleError(status);
     } else {
@@ -220,8 +223,7 @@ class Call : public IntrusiveList<Call>::Item {
         rpc_state_{},
         type_{},
         call_type_{},
-        client_stream_state_ {}
-  {}
+        client_stream_state_{} {}
 
   // Creates an active server-side Call.
   Call(const LockedCallContext& context, MethodType type)
@@ -257,33 +259,21 @@ class Call : public IntrusiveList<Call>::Item {
     on_error_ = std::move(on_error);
   }
 
-  // Calls the on_error callback without closing the RPC. This is used when the
-  // call has already completed.
-  void CallOnError(Status error) PW_UNLOCK_FUNCTION(rpc_lock()) {
-    const bool invoke = on_error_ != nullptr;
-
-    // TODO(b/234876851): Ensure on_error_ is properly guarded.
-
-    rpc_lock().unlock();
-    if (invoke) {
-      on_error_(error);
-    }
-  }
-
   void MarkClientStreamCompleted() PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock()) {
     client_stream_state_ = kClientStreamInactive;
   }
 
   Status CloseAndSendResponseLocked(Status status)
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock()) {
-    return CloseAndSendFinalPacketLocked(PacketType::RESPONSE, {}, status);
+    return CloseAndSendFinalPacketLocked(
+        pwpb::PacketType::RESPONSE, {}, status);
   }
 
   // Cancels an RPC. For client calls only.
   Status Cancel() PW_LOCKS_EXCLUDED(rpc_lock()) {
     LockGuard lock(rpc_lock());
     return CloseAndSendFinalPacketLocked(
-        PacketType::CLIENT_ERROR, {}, Status::Cancelled());
+        pwpb::PacketType::CLIENT_ERROR, {}, Status::Cancelled());
   }
 
   // Unregisters the RPC from the endpoint & marks as closed. The call may be
@@ -307,7 +297,7 @@ class Call : public IntrusiveList<Call>::Item {
        MethodType type,
        CallType call_type);
 
-  Packet MakePacket(PacketType type,
+  Packet MakePacket(pwpb::PacketType type,
                     ConstByteSpan payload,
                     Status status = OkStatus()) const
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock()) {
@@ -326,16 +316,27 @@ class Call : public IntrusiveList<Call>::Item {
     client_stream_state_ = kClientStreamInactive;
   }
 
+  // Calls the on_error callback without closing the RPC. This is used when the
+  // call has already completed.
+  void CallOnError(Status error) PW_UNLOCK_FUNCTION(rpc_lock()) {
+    auto on_error_local = std::move(on_error_);
+
+    rpc_lock().unlock();
+    if (on_error_local) {
+      on_error_local(error);
+    }
+  }
+
   // Sends a payload with the specified type. The payload may either be in a
   // previously acquired buffer or in a standalone buffer.
   //
   // Returns FAILED_PRECONDITION if the call is not active().
-  Status SendPacket(PacketType type,
+  Status SendPacket(pwpb::PacketType type,
                     ConstByteSpan payload,
                     Status status = OkStatus())
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock());
 
-  Status CloseAndSendFinalPacketLocked(PacketType type,
+  Status CloseAndSendFinalPacketLocked(pwpb::PacketType type,
                                        ConstByteSpan response,
                                        Status status)
       PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock());
@@ -355,7 +356,7 @@ class Call : public IntrusiveList<Call>::Item {
   } client_stream_state_ PW_GUARDED_BY(rpc_lock());
 
   // Called when the RPC is terminated due to an error.
-  Function<void(Status error)> on_error_;
+  Function<void(Status error)> on_error_ PW_GUARDED_BY(rpc_lock());
 
   // Called when a request is received. Only used for RPCs with client streams.
   // The raw payload buffer is passed to the callback.

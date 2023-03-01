@@ -16,10 +16,23 @@
 
 #include "gtest/gtest.h"
 
+void TestingFunction(pw::perf_test::State& state) {
+  [[maybe_unused]] int p = 0;
+  while (state.KeepRunning()) {
+    ++p;
+  }
+}
+
+// This function is intentionally left blank
+void SimpleFunction() {}
+
 namespace pw::perf_test {
 namespace {
 
-TEST(PerfTest, GeneratesCorrectly) { EXPECT_EQ(magic, 42); }
+TEST(MacroTesting, RegisterTest) {
+  PW_PERF_TEST(TestingComponentRegistration, TestingFunction);
+  PW_PERF_TEST_SIMPLE(TestingSimpleRegistration, SimpleFunction);
+}
 
 }  // namespace
 }  // namespace pw::perf_test

@@ -37,7 +37,7 @@ class TestService : public Service {
 namespace internal {
 namespace {
 
-constexpr Packet kPacket(PacketType::REQUEST, 99, 16, 8);
+constexpr Packet kPacket(pwpb::PacketType::REQUEST, 99, 16, 8);
 
 using ::pw::rpc::internal::test::FakeServerReader;
 using ::pw::rpc::internal::test::FakeServerReaderWriter;
@@ -109,7 +109,7 @@ TEST_F(ServerWriterTest, Finish_SendsResponse) {
 
   ASSERT_EQ(context_.output().total_packets(), 1u);
   const Packet& packet = context_.output().last_packet();
-  EXPECT_EQ(packet.type(), PacketType::RESPONSE);
+  EXPECT_EQ(packet.type(), pwpb::PacketType::RESPONSE);
   EXPECT_EQ(packet.channel_id(), context_.channel_id());
   EXPECT_EQ(packet.service_id(), context_.service_id());
   EXPECT_EQ(packet.method_id(), context_.get().method().id());
@@ -244,7 +244,7 @@ TEST_F(ServerReaderWriterTest, Move_MovesCallbacks) {
   reader_writer_.set_on_next([&calls](ConstByteSpan) { calls += 1; });
 
 #if PW_RPC_CLIENT_STREAM_END_CALLBACK
-  reader_writer.set_on_client_stream_end([&calls]() { calls += 1; });
+  reader_writer_.set_on_client_stream_end([&calls]() { calls += 1; });
 #endif  // PW_RPC_CLIENT_STREAM_END_CALLBACK
 
   FakeServerReaderWriter destination(std::move(reader_writer_));
