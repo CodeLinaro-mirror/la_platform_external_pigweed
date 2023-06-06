@@ -175,6 +175,10 @@ The following example shows how to write a main function that runs
    }
 
    int main() {
+     // The following line has no effect with pw_unit_test_light, but makes this
+     // test compatible with upstream GoogleTest.
+     testing::InitGoogleTest();
+
      // Since we are using pw_unit_test:light, set up an event handler.
      pw::unit_test::SimplePrintingEventHandler handler(WriteString);
      pw::unit_test::RegisterEventHandler(&handler);
@@ -212,6 +216,8 @@ test code.
      sources = [ "foo_test.cc" ]
    }
 
+.. _module-pw_unit_test-pw_test:
+
 pw_test template
 ````````````````
 ``pw_test`` defines a single unit test suite. It creates several sub-targets.
@@ -228,11 +234,18 @@ pw_test template
   ``pw_executable``.
 * ``enable_if``: Boolean indicating whether the test should be built. If false,
   replaces the test with an empty target. Default true.
+* ``source_gen_deps``: List of target labels that generate source files used by
+  this test. The labels must meet the constraints of GN's `get_target_outputs`,
+  namely they must have been previously defined in the current file. This
+  argument is required if a test uses generated source files and `enable_if` can
+  evaluate to false.
 * ``test_main``: Target label to add to the tests's dependencies to provide the
   ``main()`` function. Defaults to ``pw_unit_test_MAIN``. Set to ``""`` if
   ``main()`` is implemented in the test's ``sources``.
 * ``test_automatic_runner_args``: Array of args to pass to automatic test
   runner. Defaults to ``pw_unit_test_AUTOMATIC_RUNNER_ARGS``.
+* ``envvars``: Array of ``"key=value"`` strings representing environment
+  variables to set when invoking the automatic test runner.
 
 **Example**
 
@@ -244,6 +257,8 @@ pw_test template
      sources = [ "large_test.cc" ]
      enable_if = device_has_1m_flash
    }
+
+.. _module-pw_unit_test-pw_test_group:
 
 pw_test_group template
 ``````````````````````
@@ -553,6 +568,66 @@ Build arguments
    Type: string (path to a .cmake file)
    Usage: toolchain-controlled only
 
+Bazel
+-----
+To define simple unit tests, set the ``pw_unit_test_MAIN`` build variable to a
+target which configures the test framework as described in the
+:ref:`running-tests` section, and use the ``pw_cc_test`` rule to register your
+test code.
+
+.. code-block::
+
+   load("//pw_build:pigweed.bzl", "pw_cc_test")
+
+   pw_cc_test(
+       name = "foo_test",
+       srcs = ["foo_test.cc"],
+   }
+
+.. _module-pw_unit_test-pw_cc_test:
+
+
+pw_cc_test rule
+```````````````
+``pw_cc_test`` is a wrapper for `cc_test`_ that provides some defaults,
+such as a dep on ``@pigweed_config//:pw_unit_test_main``. It supports and passes
+through all the arguments recognized by ``cc_test``. Notably, tests can be
+enabled or disabled using ``target_compatible_with``. For example, the following
+test is skipped when `using upstream GoogleTest`_:
+
+.. code-block::
+
+   load("//pw_build:pigweed.bzl", "pw_cc_test")
+
+   pw_cc_test(
+       name = "no_upstream_test",
+       srcs = ["no_upstream_test.cc"],
+        target_compatible_with = select({
+            "//pw_unit_test:light_setting": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+   }
+
+.. _cc_test: https://bazel.build/reference/be/c-cpp#cc_test
+
+
+Build arguments
+```````````````
+.. option:: pw_unit_test_googletest_backend <target>
+
+   The GoogleTest implementation to use for Pigweed unit tests. This library
+   provides "gtest/gtest.h" and related headers. Defaults to
+   ``"@pigweed//pw_unit_test:light"``, which implements a subset of GoogleTest.
+
+   Type: string (Bazel target label)
+   Usage: toolchain-controlled only
+
+.. option:: pw_unit_test_main <target>
+
+   Implementation of a main function for ``pw_cc_test`` unit test binaries.
+
+   Type: string (Bazel target label)
+   Usage: toolchain-controlled only
 
 RPC service
 ===========
@@ -632,19 +707,22 @@ for details.
 When using upstream `GoogleTest`_ as the backend, the
 :cpp:class:`pw::unit_test::GoogleTestHandlerAdapter` can be used in conjunction
 with the above mentioned `EventHandler Interface <#the-eventhandler-interface>`_
-and `Predefined event handlers`_. An example of how you can use the adapter in
-conjunction with an ``EventHandler`` is shown below.
+and `Predefined event handlers`_. Included with this class is an implementation
+of `RegisterEventHandler` that wraps event handlers in an adapter. This allows
+the `main` functions written for `pw_unit_test:light` to work with upstream
+GoogleTest without modification, as shown below.
 
   .. code-block:: c++
 
-    testing::InitGoogleTest();
-    auto* unit_test = testing::UnitTest::GetInstance();
+    #include "gtest/gtest.h"
+    #include "pw_unit_test/logging_event_handler.h"
 
-    pw::unit_test::LoggingEventHandler logger;
-    pw::unit_test::GoogleTestHandlerAdapter listener_adapter(logger);
-    unit_test->listeners().Append(&listener_adapter);
-
-    const auto status = RUN_ALL_TESTS();
+    int main() {
+      testing::InitGoogleTest();
+      pw::unit_test::LoggingEventHandler logger;
+      pw::unit_test::RegisterEventHandler(&logger);
+      return RUN_ALL_TESTS();
+    }
 
 .. cpp:namespace-push:: pw::unit_test
 

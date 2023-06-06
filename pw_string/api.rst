@@ -3,6 +3,14 @@
 =============
 API Reference
 =============
+.. pigweed-module-subpage::
+   :name: pw_string
+   :tagline: Efficient, easy, and safe string manipulation
+   :nav:
+    getting started: module-pw_string-get-started
+    design: module-pw_string-design
+    guides: module-pw_string-guide
+    api: module-pw_string-api
 
 --------
 Overview
@@ -77,9 +85,15 @@ terminator in the vector.
 pw::string::Format()
 --------------------
 .. doxygenfile:: pw_string/format.h
-   :sections: briefdescription
-.. doxygenfunction:: pw::string::Format
-.. doxygenfunction:: pw::string::FormatVaList
+   :sections: detaileddescription
+
+.. doxygenfunction:: pw::string::Format(span<char> buffer, const char* format, ...)
+.. doxygenfunction:: pw::string::FormatVaList(span<char> buffer, const char* format, va_list args)
+.. doxygenfunction:: pw::string::Format(InlineString<>& string, const char* format, ...)
+.. doxygenfunction:: pw::string::FormatVaList(InlineString<>& string, const char* format, va_list args)
+.. doxygenfunction:: pw::string::FormatOverwrite(InlineString<>& string, const char* format, ...)
+.. doxygenfunction:: pw::string::FormatOverwriteVaList(InlineString<>& string, const char* format, va_list args)
+
 
 pw::string::NullTerminatedLength()
 ----------------------------------

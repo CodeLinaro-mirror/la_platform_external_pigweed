@@ -107,7 +107,8 @@
 // In order to receive test output, an event handler must be registered before
 // this is called:
 //
-//   int main() {
+//   int main(int argc, char** argv) {
+//     testing::InitGoogleTest(&argc, argv);
 //     MyEventHandler handler;
 //     pw::unit_test::RegisterEventHandler(&handler);
 //     return RUN_ALL_TESTS();
@@ -155,7 +156,26 @@ namespace string {
 template <typename T>
 StatusWithSize UnknownTypeToString(const T& value, span<char> buffer) {
   StringBuilder sb(buffer);
-  sb << '<' << sizeof(value) << "-byte object at 0x" << &value << '>';
+  sb << '<' << sizeof(value) << "-byte object at 0x" << &value << " |";
+
+  // Always show the first 8 bytes of the object.
+  constexpr size_t kBytesToPrint = std::min(sizeof(value), size_t{8});
+
+  // reinterpret_cast to std::byte is permitted by C++'s type aliasing rules.
+  const std::byte* bytes = reinterpret_cast<const std::byte*>(&value);
+
+  for (size_t i = 0; i < kBytesToPrint; ++i) {
+    sb << ' ' << bytes[i];
+  }
+
+  // If there's just one more byte, output it. Otherwise, output ellipsis.
+  if (sizeof(value) == kBytesToPrint + 1) {
+    sb << ' ' << bytes[sizeof(value) - 1];
+  } else if (sizeof(value) > kBytesToPrint) {
+    sb << " …";
+  }
+
+  sb << '>';
   return sb.status_with_size();
 }
 
@@ -164,11 +184,6 @@ StatusWithSize UnknownTypeToString(const T& value, span<char> buffer) {
 #endif  // PW_CXX_STANDARD_IS_SUPPORTED(17)
 
 namespace unit_test {
-
-// Sets the event handler for a test run. Must be called before RUN_ALL_TESTS()
-// to receive test output.
-void RegisterEventHandler(EventHandler* event_handler);
-
 namespace internal {
 
 class Test;
@@ -204,7 +219,7 @@ class Framework {
 
   // Sets the handler to which the framework dispatches test events. During a
   // test run, the framework owns the event handler.
-  void RegisterEventHandler(EventHandler* event_handler) {
+  inline void RegisterEventHandler(EventHandler* event_handler) {
     event_handler_ = event_handler;
   }
 
@@ -274,7 +289,7 @@ class Framework {
     // version of the arguments. This buffer is allocated on the unit test's
     // stack, so it shouldn't be too large.
     // TODO(hepler): Make this configurable.
-    [[maybe_unused]] constexpr size_t kExpectationBufferSizeBytes = 128;
+    [[maybe_unused]] constexpr size_t kExpectationBufferSizeBytes = 192;
 
     const bool success = expectation(lhs, rhs);
     CurrentTestExpectSimple(
@@ -540,7 +555,13 @@ inline void SetTestSuitesToRun(span<std::string_view> test_suites) {
 #define _PW_TEST_C_STR(lhs, rhs, op)                             \
   ::pw::unit_test::internal::Framework::Get().CurrentTestExpect( \
       [](const auto& _pw_lhs, const auto& _pw_rhs) {             \
-        return std::strcmp(_pw_lhs.c_str, _pw_rhs.c_str) op 0;   \
+        auto cmp = [](const char* l, const char* r) -> int {     \
+          if (!l || !r) {                                        \
+            return l != r;                                       \
+          }                                                      \
+          return std::strcmp(l, r);                              \
+        };                                                       \
+        return cmp(_pw_lhs.c_str, _pw_rhs.c_str) op 0;           \
       },                                                         \
       ::pw::unit_test::internal::CStringArg{lhs},                \
       ::pw::unit_test::internal::CStringArg{rhs},                \
@@ -568,9 +589,12 @@ inline void SetTestSuitesToRun(span<std::string_view> test_suites) {
   PW_MODIFY_DIAGNOSTICS_POP()
 #endif  // GCC8 or older.
 
-// Alias Test as ::testing::Test for GoogleTest compatibility.
 namespace testing {
 
+// Alias Test as ::testing::Test for GoogleTest compatibility.
 using Test = ::pw::unit_test::internal::Test;
+
+// Provide a no-op init routine for GoogleTest compatibility.
+inline void InitGoogleTest(int*, char**) {}
 
 }  // namespace testing

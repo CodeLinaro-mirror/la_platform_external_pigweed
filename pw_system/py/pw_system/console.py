@@ -49,7 +49,6 @@ from typing import (
     Optional,
     Union,
 )
-import socket
 
 import serial
 import IPython  # type: ignore
@@ -60,6 +59,8 @@ from pw_console.log_store import LogStore
 from pw_console.plugins.bandwidth_toolbar import BandwidthToolbar
 from pw_console.pyserial_wrapper import SerialWithLogging
 from pw_console.python_logging import create_temp_log_file, JsonLogFormatter
+from pw_console.socket_client import SocketClient, SocketClientWithLogging
+from pw_hdlc import rpc
 from pw_rpc.console_tools.console import flattened_rpc_completions
 from pw_system.device import Device
 from pw_tokenizer.detokenize import AutoUpdatingDetokenizer
@@ -75,14 +76,12 @@ _DEVICE_LOG = logging.getLogger('rpc_device')
 _SERIAL_DEBUG = logging.getLogger('pw_console.serial_debug_logger')
 _ROOT_LOG = logging.getLogger()
 
-PW_RPC_MAX_PACKET_SIZE = 256
-SOCKET_SERVER = 'localhost'
-SOCKET_PORT = 33000
 MKFIFO_MODE = 0o666
 
 
-def _parse_args():
-    """Parses and returns the command line arguments."""
+def get_parser() -> argparse.ArgumentParser:
+    """Gets argument parser with console arguments."""
+
     parser = argparse.ArgumentParser(
         prog="python -m pw_system.console", description=__doc__
     )
@@ -157,8 +156,13 @@ def _parse_args():
         '-s',
         '--socket-addr',
         type=str,
-        help='use socket to connect to server, type default for\
-            localhost:33000, or manually input the server address:port',
+        help=(
+            'Socket address used to connect to server. Type "default" to use '
+            'localhost:33000, pass the server address and port as '
+            'address:port, or prefix the path to a forwarded socket with '
+            f'"{SocketClient.FILE_SOCKET_SERVER}:" as '
+            f'{SocketClient.FILE_SOCKET_SERVER}:path_to_file.'
+        ),
     )
     parser.add_argument(
         "--token-databases",
@@ -207,6 +211,35 @@ def _parse_args():
         help="Don't use pw_rpc based logging.",
     )
 
+    # TODO(b/248257406) Use argparse.BooleanOptionalAction when Python 3.8 is
+    # no longer supported.
+    parser.add_argument(
+        '--hdlc-encoding',
+        action='store_true',
+        default=True,
+        help='Use HDLC encoding on transfer interfaces.',
+    )
+
+    parser.add_argument(
+        '--no-hdlc-encoding',
+        action='store_false',
+        dest='hdlc_encoding',
+        help="Don't use HDLC encoding on transfer interface.",
+    )
+
+    parser.add_argument(
+        '--channel-id',
+        type=int,
+        default=rpc.DEFAULT_CHANNEL_ID,
+        help="Channel ID used in RPC communications.",
+    )
+
+    return parser
+
+
+def _parse_args():
+    """Parses and returns the command line arguments."""
+    parser = get_parser()
     return parser.parse_args()
 
 
@@ -307,27 +340,6 @@ def _start_python_terminal(  # pylint: disable=too-many-arguments
     interactive_console.embed()
 
 
-class SocketClientImpl:
-    def __init__(self, config: str):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        socket_server = ''
-        socket_port = 0
-
-        if config == 'default':
-            socket_server = SOCKET_SERVER
-            socket_port = SOCKET_PORT
-        else:
-            socket_server, socket_port_str = config.split(':')
-            socket_port = int(socket_port_str)
-        self.socket.connect((socket_server, socket_port))
-
-    def write(self, data: bytes):
-        self.socket.sendall(data)
-
-    def read(self, num_bytes: int = PW_RPC_MAX_PACKET_SIZE):
-        return self.socket.recv(num_bytes)
-
-
 # pylint: disable=too-many-arguments,too-many-locals
 def console(
     device: str,
@@ -347,6 +359,8 @@ def console(
     merge_device_and_host_logs: bool = False,
     rpc_logging: bool = True,
     use_ipython: bool = False,
+    channel_id: int = rpc.DEFAULT_CHANNEL_ID,
+    hdlc_encoding: bool = True,
 ) -> int:
     """Starts an interactive RPC console for HDLC."""
     # argparse.FileType doesn't correctly handle '-' for binary files.
@@ -450,8 +464,10 @@ def console(
     )
 
     serial_impl = serial.Serial
+    socket_impl = SocketClient
     if serial_debug:
         serial_impl = SerialWithLogging
+        socket_impl = SocketClientWithLogging
 
     timestamp_decoder = None
     if socket_addr is None:
@@ -475,7 +491,7 @@ def console(
         timestamp_decoder = milliseconds_to_string
     else:
         try:
-            socket_device = SocketClientImpl(socket_addr)
+            socket_device = socket_impl(socket_addr)
             read = socket_device.read
             write = socket_device.write
         except ValueError:
@@ -483,7 +499,7 @@ def console(
             return 1
 
     device_client = Device(
-        1,
+        channel_id,
         read,
         write,
         protos,
@@ -491,6 +507,7 @@ def console(
         timestamp_decoder=timestamp_decoder,
         rpc_timeout_s=5,
         use_rpc_logging=rpc_logging,
+        use_hdlc_encoding=hdlc_encoding,
     )
 
     _start_python_terminal(

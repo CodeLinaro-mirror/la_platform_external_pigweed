@@ -120,6 +120,8 @@ such as a quick program for local use and a full program for automated use. The
 * ``num_jobs``: Number of jobs to run in parallel
 * ``continue_after_build_error``: For steps that compile, don't exit on the
   first compilation error
+* ``rng_seed``: Seed from ``--rng-seed`` or 1, for the few steps that need to
+  seed a random number generator
 
 The ``luci`` member is of type ``LuciContext`` and has the following members:
 
@@ -201,9 +203,9 @@ or fix code formatting.
   by Pigweed itself) and ``yapf`` (the default).
 * ``black_path``: If ``python_formatter`` is ``black``, use this as the
   executable instead of ``black``.
-
-.. TODO(b/264578594) Add exclude to pigweed.json file.
-.. * ``exclude``: List of path regular expressions to ignore.
+* ``black_config_file``: Set the config file for the black formatter.
+* ``exclude``: List of path regular expressions to ignore. Will be evaluated
+  against paths relative to the checkout root using ``re.search``.
 
 Example section from a ``pigweed.json`` file:
 
@@ -214,7 +216,11 @@ Example section from a ``pigweed.json`` file:
       "pw_presubmit": {
         "format": {
           "python_formatter": "black",
-          "black_path": "black"
+          "black_config_file": "$pw_env{PW_PROJECT_ROOT}/config/.black.toml"
+          "black_path": "black",
+          "exclude": [
+            "\\bthird_party/foo/src"
+          ]
         }
       }
     }
@@ -298,7 +304,8 @@ by adding ``pw_presubmit.gitmodules.create()`` to a presubmit program. This
 function takes an optional argument of type ``pw_presubmit.gitmodules.Config``.
 ``Config`` objects have several properties.
 
-* ``allow_non_googlesource_hosts: bool = False`` — If false, all submodules URLs
+* ``allow_submodules: bool = True`` — If false, don't allow any submodules.
+* ``allow_non_googlesource_hosts: bool = False`` — If false, all submodule URLs
   must be on a Google-managed Gerrit server.
 * ``allowed_googlesource_hosts: Sequence[str] = ()`` — If set, any
   Google-managed Gerrit URLs for submodules most be in this list. Entries
@@ -309,7 +316,7 @@ function takes an optional argument of type ``pw_presubmit.gitmodules.Config``.
   URLs are prohibited.
 * ``allow_git_corp_google_com: bool = True`` — If false, ``git.corp.google.com``
   submodule URLs are prohibited.
-* ``require_branch: bool = False`` — If True, all submodules must reference a
+* ``require_branch: bool = False`` — If true, all submodules must reference a
   branch.
 * ``validator: Callable[[PresubmitContext, Path, str, Dict[str, str]], None] = None``
   — A function that can be used for arbitrary submodule validation. It's called
@@ -327,8 +334,23 @@ C/C++ headers is ``#pragma once``. This is enabled by adding
 TODO(b/###) Formatting
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 There's a check that confirms ``TODO`` lines match a given format. Upstream
-Pigweed expects these to look like ``TODO(b/###): Explanation``, but makes it
+Pigweed expects these to look like ``TODO: b/### - Explanation``, but makes it
 easy for projects to define their own pattern instead.
+
+Some older forms are still allowed but discouraged. In order of preference we
+allow the following formats by default.
+
+.. todo-check: disable
+
+.. code-block::
+
+  # TODO: b/1234 - Explanation.
+  # TODO: username@ - Explanation.
+  # TODO: username@example.com - Explanation.
+  # TODO(b/1234): Explanation.
+  # TODO(username) Explanation.
+
+.. todo-check: enable
 
 To use this check add ``todo_check.create(todo_check.BUGS_OR_USERNAMES)`` to a
 presubmit program.
@@ -369,6 +391,11 @@ a callable as an argument that indicates, for a given file, where a controlling
 ``OWNERS`` file should be, or returns None if no ``OWNERS`` file is necessary.
 Formatting of ``OWNERS`` files is handled similary to formatting of other
 source files and is discussed in `Code Formatting`.
+
+JSON
+^^^^
+The JSON check requires all ``*.json`` files to be valid JSON files. It can be
+included by adding ``json_check.presubmit_check()`` to a presubmit program.
 
 Source in Build
 ^^^^^^^^^^^^^^^
@@ -459,11 +486,13 @@ See ``pigweed_presubmit.py`` for a more complex presubmit check script example.
   def release_build(ctx: PresubmitContext):
       build.gn_gen(ctx, build_type='release')
       build.ninja(ctx)
+      build.gn_check(ctx)  # Run after building to check generated files.
 
 
   def host_tests(ctx: PresubmitContext):
       build.gn_gen(ctx, run_host_tests='true')
       build.ninja(ctx)
+      build.gn_check(ctx)
 
 
   # Avoid running some checks on certain paths.

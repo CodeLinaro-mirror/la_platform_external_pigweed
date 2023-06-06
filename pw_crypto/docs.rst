@@ -91,8 +91,17 @@ crypto libraries.
 Mbed TLS
 ^^^^^^^^
 
+The `Mbed TLS project <https://www.trustedfirmware.org/projects/mbed-tls/>`_
+is a mature and full-featured crypto library that implements cryptographic
+primitives, X.509 certificate manipulation and the SSL/TLS and DTLS protocols.
+
+The project also has good support for interfacing to cryptographic accelerators.
+
+The small code footprint makes the project suitable and popular for embedded
+systems.
+
 To select the Mbed TLS backend, the MbedTLS library needs to be installed and
-configured.
+configured. If using GN, do,
 
 .. code-block:: sh
 
@@ -102,11 +111,26 @@ configured.
       import("//build_overrides/pigweed_environment.gni")
 
       dir_pw_third_party_mbedtls=pw_env_setup_PACKAGE_ROOT+"/mbedtls"
-      pw_crypto_SHA256_BACKEND="//pw_crypto:sha256_mbedtls"
-      pw_crypto_ECDSA_BACKEND="//pw_crypto:ecdsa_mbedtls"
+      pw_crypto_SHA256_BACKEND="//pw_crypto:sha256_mbedtls_v3"
+      pw_crypto_ECDSA_BACKEND="//pw_crypto:ecdsa_mbedtls_v3"
   '
 
   ninja -C out
+
+If using Bazel, add the Mbed TLS repository to your WORKSPACE and select
+appropriate backends by adding them to your project's `platform
+<https://bazel.build/extending/platforms>`_:
+
+.. code-block:: python
+
+  platform(
+    name = "my_platform",
+     constraint_values = [
+       "@pigweed//pw_crypto:sha256_mbedtls_backend",
+       "@pigweed//pw_crypto:ecdsa_mbedtls_backend",
+       # ... other constraint_values
+     ],
+  )
 
 For optimal code size and/or performance, the Mbed TLS library can be configured
 per product. Mbed TLS configuration is achieved by turning on and off MBEDTLS_*
@@ -135,29 +159,6 @@ a code size of ~12KiB.
    #define MBEDTLS_ASN1_PARSE_C
    #define MBEDTLS_ECP_NO_INTERNAL_RNG
    #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
-
-BoringSSL
-^^^^^^^^^
-
-To select the BoringSSL backend, the BoringSSL library needs to be installed and
-configured.
-
-.. code-block:: sh
-
-  # Install and configure BoringSSL
-  pw package install boringssl
-  gn gen out --args='
-      import("//build_overrides/pigweed_environment.gni")
-
-      dir_pw_third_party_boringssl=pw_env_setup_PACKAGE_ROOT+"/boringssl"
-      pw_crypto_SHA256_BACKEND="//pw_crypto:sha256_boringssl"
-      pw_crypto_ECDSA_BACKEND="//pw_crypto:ecdsa_boringssl"
-  '
-
-  ninja -C out
-
-BoringSSL does not provide a public configuration interface to reduce the code
-size.
 
 Micro ECC
 ^^^^^^^^^

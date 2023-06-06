@@ -33,15 +33,14 @@ pw_add_library(pw_bytes STATIC
   SOURCES
     byte_builder.cc
 )
-if(Zephyr_FOUND AND CONFIG_PIGWEED_BYTES)
-  zephyr_link_libraries(pw_bytes)
-endif()
 
 pw_add_library(pw_bytes.bit INTERFACE
   HEADERS
     public/pw_bytes/bit.h
   PUBLIC_INCLUDES
     public
+  PUBLIC_DEPS
+    pw_third_party.fuchsia.stdcompat
 )
 
 pw_add_test(pw_bytes.array_test

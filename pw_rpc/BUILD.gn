@@ -146,6 +146,7 @@ pw_source_set("synchronous_client_api") {
     "public/pw_rpc/synchronous_call.h",
     "public/pw_rpc/synchronous_call_result.h",
   ]
+  sources = [ "public/pw_rpc/internal/synchronous_call_impl.h" ]
 }
 
 # Classes shared by the server and client.
@@ -290,10 +291,10 @@ pw_source_set("test_utils") {
     "public/pw_rpc/internal/fake_channel_output.h",
     "public/pw_rpc/internal/method_impl_tester.h",
     "public/pw_rpc/internal/method_info_tester.h",
-    "public/pw_rpc/internal/test_method.h",
     "public/pw_rpc/internal/test_method_context.h",
     "public/pw_rpc/internal/test_utils.h",
     "pw_rpc_private/fake_server_reader_writer.h",
+    "pw_rpc_private/test_method.h",
   ]
   public_configs = [ ":public_include_path" ]
   public_deps = [
@@ -319,7 +320,7 @@ pw_source_set("integration_testing") {
     "$dir_pw_hdlc:pw_rpc",
     "$dir_pw_hdlc:rpc_channel_output",
     "$dir_pw_stream:socket_stream",
-    "$dir_pw_unit_test:logging_event_handler",
+    "$dir_pw_unit_test:logging",
     dir_pw_assert,
     dir_pw_function,
     dir_pw_unit_test,
@@ -515,11 +516,8 @@ pw_python_action("generate_ids_test") {
 }
 
 pw_test("ids_test") {
-  deps = [
-    ":generate_ids_test",
-    ":server",
-  ]
-  sources = get_target_outputs(":generate_ids_test")
+  deps = [ ":server" ]
+  source_gen_deps = [ ":generate_ids_test" ]
 }
 
 pw_test("packet_test") {

@@ -68,6 +68,7 @@ In ``pw_rpc``, an RPC begins when the client sends an initial packet. The server
 receives the packet, looks up the relevant service method, then calls into the
 RPC function. The RPC is considered active until the server sends a status to
 finish the RPC. The client may terminate an ongoing RPC by cancelling it.
+Multiple RPC requests to the same method may be made simultaneously.
 
 Depending the type of RPC, the client and server exchange zero or more protobuf
 request or response payloads. There are four RPC types:
@@ -96,10 +97,10 @@ The key events in the RPC lifecycle are:
   only one response and it is handled when the RPC completes.
 * **Error**. The server or client terminates the RPC abnormally with a status.
   The receiving endpoint calls a callback.
-* **Client stream end**. The client sends a message that it has finished sending
-  requests. The server calls a callback when it receives it. Some servers may
-  ignore the client stream end. The client stream end is only relevant for
-  client and bidirectional streaming RPCs.
+* **Request Completion**. The client sends a message that it would like to
+  request call completion. The server calls a callback when it receives it. Some
+  servers may ignore the request completion message. In client and bidirectional
+  streaming RPCs, this also indicates that client has finished sending requests.
 
 Status codes
 ============
@@ -593,53 +594,53 @@ These tables describe the meaning of and fields included with each packet type.
 
 Client-to-server packets
 ------------------------
-+-------------------+-------------------------------------+
-| packet type       | description                         |
-+===================+=====================================+
-| REQUEST           | Invoke an RPC                       |
-|                   |                                     |
-|                   | .. code-block:: text                |
-|                   |                                     |
-|                   |   - channel_id                      |
-|                   |   - service_id                      |
-|                   |   - method_id                       |
-|                   |   - payload                         |
-|                   |     (unary & server streaming only) |
-|                   |   - call_id (optional)              |
-|                   |                                     |
-+-------------------+-------------------------------------+
-| CLIENT_STREAM     | Message in a client stream          |
-|                   |                                     |
-|                   | .. code-block:: text                |
-|                   |                                     |
-|                   |   - channel_id                      |
-|                   |   - service_id                      |
-|                   |   - method_id                       |
-|                   |   - payload                         |
-|                   |   - call_id (if set in REQUEST)     |
-|                   |                                     |
-+-------------------+-------------------------------------+
-| CLIENT_STREAM_END | Client stream is complete           |
-|                   |                                     |
-|                   | .. code-block:: text                |
-|                   |                                     |
-|                   |   - channel_id                      |
-|                   |   - service_id                      |
-|                   |   - method_id                       |
-|                   |   - call_id (if set in REQUEST)     |
-|                   |                                     |
-+-------------------+-------------------------------------+
-| CLIENT_ERROR      | Abort an ongoing RPC                |
-|                   |                                     |
-|                   | .. code-block:: text                |
-|                   |                                     |
-|                   |   - channel_id                      |
-|                   |   - service_id                      |
-|                   |   - method_id                       |
-|                   |   - status                          |
-|                   |   - call_id (if set in REQUEST)     |
-|                   |                                     |
-+-------------------+-------------------------------------+
++---------------------------+-------------------------------------+
+| packet type               | description                         |
++===========================+=====================================+
+| REQUEST                   | Invoke an RPC                       |
+|                           |                                     |
+|                           | .. code-block:: text                |
+|                           |                                     |
+|                           |   - channel_id                      |
+|                           |   - service_id                      |
+|                           |   - method_id                       |
+|                           |   - payload                         |
+|                           |     (unary & server streaming only) |
+|                           |   - call_id (optional)              |
+|                           |                                     |
++---------------------------+-------------------------------------+
+| CLIENT_STREAM             | Message in a client stream          |
+|                           |                                     |
+|                           | .. code-block:: text                |
+|                           |                                     |
+|                           |   - channel_id                      |
+|                           |   - service_id                      |
+|                           |   - method_id                       |
+|                           |   - payload                         |
+|                           |   - call_id (if set in REQUEST)     |
+|                           |                                     |
++---------------------------+-------------------------------------+
+| CLIENT_REQUEST_COMPLETION | Client requested stream completion  |
+|                           |                                     |
+|                           | .. code-block:: text                |
+|                           |                                     |
+|                           |   - channel_id                      |
+|                           |   - service_id                      |
+|                           |   - method_id                       |
+|                           |   - call_id (if set in REQUEST)     |
+|                           |                                     |
++---------------------------+-------------------------------------+
+| CLIENT_ERROR              | Abort an ongoing RPC                |
+|                           |                                     |
+|                           | .. code-block:: text                |
+|                           |                                     |
+|                           |   - channel_id                      |
+|                           |   - service_id                      |
+|                           |   - method_id                       |
+|                           |   - status                          |
+|                           |   - call_id (if set in REQUEST)     |
+|                           |                                     |
++---------------------------+-------------------------------------+
 
 **Client errors**
 
@@ -773,13 +774,13 @@ Client streaming RPC
 --------------------
 In a client streaming RPC, the client starts the RPC by sending a ``REQUEST``
 packet with no payload. It then sends any number of messages in
-``CLIENT_STREAM`` packets, followed by a ``CLIENT_STREAM_END``. The server sends
+``CLIENT_STREAM`` packets, followed by a ``CLIENT_REQUEST_COMPLETION``. The server sends
 a single ``RESPONSE`` to finish the RPC.
 
 .. image:: client_streaming_rpc.svg
 
 The server may finish the RPC at any time by sending its ``RESPONSE`` packet,
-even if it has not yet received the ``CLIENT_STREAM_END`` packet. The client may
+even if it has not yet received the ``CLIENT_REQUEST_COMPLETION`` packet. The client may
 terminate the RPC at any time by sending a ``CLIENT_ERROR`` packet with status
 ``CANCELLED``.
 
@@ -789,14 +790,14 @@ Bidirectional streaming RPC
 --------------------^^^^^^^
 In a bidirectional streaming RPC, the client sends any number of requests and
 the server sends any number of responses. The client invokes the RPC by sending
-a ``REQUEST`` with no payload. It sends a ``CLIENT_STREAM_END`` packet when it
+a ``REQUEST`` with no payload. It sends a ``CLIENT_REQUEST_COMPLETION`` packet when it
 has finished sending requests. The server sends a ``RESPONSE`` packet to finish
 the RPC.
 
 .. image:: bidirectional_streaming_rpc.svg
 
 The server may finish the RPC at any time by sending the ``RESPONSE`` packet,
-even if it has not received the ``CLIENT_STREAM_END`` packet. The client may
+even if it has not received the ``CLIENT_REQUEST_COMPLETION`` packet. The client may
 terminate the RPC at any time by sending a ``CLIENT_ERROR`` packet with status
 ``CANCELLED``.
 
@@ -1030,10 +1031,11 @@ Client call objects provide a few common methods.
       the error codes are determined by the :cpp:class:`ChannelOutput`
       implementation
 
-  .. cpp:function:: pw::Status CloseClientStream()
+  .. cpp:function:: pw::Status RequestCompletion()
 
-    Only available on client and bidirectional streaming calls. Notifies the
-    server that no further client stream messages will be sent.
+    Notifies the server that client has requested for call completion. On
+    client and bidirectional streaming calls no further client stream messages
+    will be sent.
 
   .. cpp:function:: pw::Status Cancel()
 
@@ -1042,7 +1044,7 @@ Client call objects provide a few common methods.
 
   .. cpp:function:: void Abandon()
 
-    Closes this RPC locally. Sends a ``CLIENT_STREAM_END``, but no cancellation
+    Closes this RPC locally. Sends a ``CLIENT_REQUEST_COMPLETION``, but no cancellation
     packet. Future packets for this RPC are dropped, and the client sends a
     ``FAILED_PRECONDITION`` error in response because the call is not active.
 
@@ -1088,10 +1090,10 @@ The C++ call objects allow users to set callbacks that are invoked when RPC
     - ``void(const PayloadType&, pw::Status)``
     -
     - ✅
-  * - ``on_client_stream_end``
+  * - ``on_client_requested_completion``
     - ``void()``
     - n/a
-    - ✅ (:c:macro:`optional <PW_RPC_CLIENT_STREAM_END_CALLBACK>`)
+    - ✅ (:c:macro:`optional <PW_RPC_COMPLETION_REQUEST_CALLBACK>`)
     -
 
 Limitations and restrictions
@@ -1195,25 +1197,10 @@ instantiate as:
   implementation that copies the bytes under the span instead of copying just
   the span.
 
-Client Synchronous Call wrappers
+Client synchronous call wrappers
 ================================
-If synchronous behavior is desired when making client calls, users can use one
-of the ``SynchronousCall<RpcMethod>`` wrapper functions to make their RPC call.
-These wrappers effectively wrap the asynchronous Client RPC call with a timed
-thread notification and return once a result is known or a timeout has occurred.
-These return a ``SynchronousCallResult<Response>`` object, which can be queried
-to determine whether any error scenarios occurred and, if not, access the
-response.
-
-``SynchronousCall<RpcMethod>`` will block indefinitely, whereas
-``SynchronousCallFor<RpcMethod>`` and ``SynchronousCallUntil<RpcMethod>`` will
-block for a given timeout or until a deadline, respectively. All wrappers work
-with both the standalone static RPC functions and the generated Client member
-methods.
-
-.. note:: Use of the SynchronousCall wrappers requires a TimedThreadNotification
-   backend.
-.. note:: Only nanopb and pw_protobuf Unary RPC methods are supported.
+.. doxygenfile:: pw_rpc/synchronous_call.h
+   :sections: detaileddescription
 
 Example
 -------
@@ -1255,10 +1242,10 @@ Example
     }
   }
 
-The ``SynchronousCallResult<Response>`` is also compatible with the PW_TRY
-family of macros, but users should be aware that their use will lose information
-about the type of error. This should only be used if the caller will handle all
-error scenarios the same.
+The ``SynchronousCallResult<Response>`` is also compatible with the
+:c:macro:`PW_TRY` family of macros, but users should be aware that their use
+will lose information about the type of error. This should only be used if the
+caller will handle all error scenarios the same.
 
 .. code-block:: c++
 

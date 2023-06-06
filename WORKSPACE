@@ -59,10 +59,35 @@ cipd_repository(
 # Used in modules: None.
 http_archive(
     name = "rules_python",
-    sha256 = "a30abdfc7126d497a7698c29c46ea9901c6392d6ed315171a6df5ce433aa4502",
-    strip_prefix = "rules_python-0.6.0",
-    url = "https://github.com/bazelbuild/rules_python/archive/0.6.0.tar.gz",
+    sha256 = "9fcf91dbcc31fde6d1edb15f117246d912c33c36f44cf681976bd886538deba6",
+    strip_prefix = "rules_python-0.8.0",
+    url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.8.0.tar.gz",
 )
+
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+
+# Use Python 3.10 for bazel Python rules.
+python_register_toolchains(
+    name = "python3_10",
+    python_version = "3.10",
+)
+
+load("@python3_10//:defs.bzl", "interpreter")
+load("@rules_python//python:pip.bzl", "pip_parse")
+
+# Specify third party Python package versions with pip_parse.
+# pip_parse will generate and expose a repository for each package in the
+# requirements_lock file named @python_packages_{PACKAGE}.
+pip_parse(
+    name = "python_packages",
+    python_interpreter_target = interpreter,
+    requirements_lock = "//pw_env_setup/py/pw_env_setup/virtualenv_setup:constraint.list",
+)
+
+load("@python_packages//:requirements.bzl", "install_deps")
+
+# Run pip install for all @python_packages_*//:pkg deps.
+install_deps()
 
 # Set up Starlark library.
 # Required by: io_bazel_rules_go, com_google_protobuf.
@@ -83,7 +108,7 @@ bazel_skylib_workspace()
 
 # Set up upstream googletest and googlemock.
 # Required by: Pigweed.
-# Used in modules: //pw_analog, //pw_i2c.
+# Used in modules: //pw_analog, //pw_fuzzer, //pw_i2c.
 http_archive(
     name = "com_google_googletest",
     sha256 = "ad7fdba11ea011c1d925b3289cf4af2c66a352e18d4c7264392fead75e919363",
@@ -163,20 +188,20 @@ protobuf_deps()
 # Used in modules: pw_protobuf.
 git_repository(
     name = "com_github_nanopb_nanopb",
-    commit = "e601fca6d9ed7fb5c09e2732452753b2989f128b",
+    commit = "ee27d70d329e1718f39eea1f425178e747263173",
     remote = "https://github.com/nanopb/nanopb.git",
     shallow_since = "1641373017 +0800",
 )
 
-load("@com_github_nanopb_nanopb//:nanopb_deps.bzl", "nanopb_deps")
+load("@com_github_nanopb_nanopb//extra/bazel:nanopb_deps.bzl", "nanopb_deps")
 
 nanopb_deps()
 
-load("@com_github_nanopb_nanopb//:python_deps.bzl", "nanopb_python_deps")
+load("@com_github_nanopb_nanopb//extra/bazel:python_deps.bzl", "nanopb_python_deps")
 
-nanopb_python_deps()
+nanopb_python_deps(interpreter)
 
-load("@com_github_nanopb_nanopb//:nanopb_workspace.bzl", "nanopb_workspace")
+load("@com_github_nanopb_nanopb//extra/bazel:nanopb_workspace.bzl", "nanopb_workspace")
 
 nanopb_workspace()
 
@@ -224,14 +249,16 @@ register_gcc_arm_none_toolchain()
 # Rust Support
 #
 
-git_repository(
+http_archive(
     name = "rules_rust",
-    # Pulls in the main branch with https://github.com/bazelbuild/rules_rust/pull/1803
-    # merged.  Once a release is cut with that commit, we should switch to
-    # using a release tarbal.
-    commit = "a5853fd37053b65ee30ba4f8064b9db67c90d53f",
-    remote = "https://github.com/bazelbuild/rules_rust",
-    shallow_since = "1675302817 -0800",
+    patch_args = ["-p1"],
+    patches = [
+        # Fix rustdoc test w/ proc macros
+        # https://github.com/bazelbuild/rules_rust/pull/1952
+        "//pw_rust/bazel_patches:0001-rustdoc_test-Apply-prefix-stripping-to-proc_macro-de.patch",
+    ],
+    sha256 = "dc8d79fe9a5beb79d93e482eb807266a0e066e97a7b8c48d43ecf91f32a3a8f3",
+    urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.19.0/rules_rust-v0.19.0.tar.gz"],
 )
 
 load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_analyzer_toolchain_repository", "rust_repository_set")
@@ -282,7 +309,7 @@ rust_analyzer_dependencies()
 # Vendored third party rust crates.
 git_repository(
     name = "rust_crates",
-    commit = "c39c1d1d4e4bdf2d8145beb8882af6f6e4e6dbbc",
+    commit = "3d5b3a9260cbf98746f0e77be5a8251e1fc77af0",
     remote = "https://pigweed.googlesource.com/third_party/rust_crates",
     shallow_since = "1675359057 +0000",
 )
@@ -298,7 +325,7 @@ pigweed_config(
     build_file = "//targets:default_config.BUILD",
 )
 
-# Required by: rules_fuzzing.
+# Required by: rules_fuzzing, fuzztest
 #
 # Provided here explicitly to override an old version of absl that
 # rules_fuzzing_dependencies attempts to pull in. That version has
@@ -327,6 +354,24 @@ rules_fuzzing_dependencies()
 load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
 
 rules_fuzzing_init()
+
+# Required by: fuzztest
+http_archive(
+    name = "com_googlesource_code_re2",
+    sha256 = "f89c61410a072e5cbcf8c27e3a778da7d6fd2f2b5b1445cd4f4508bee946ab0f",
+    strip_prefix = "re2-2022-06-01",
+    url = "https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz",
+)
+
+# Required by: pigweed.
+# Used in modules: //pw_fuzzer.
+FUZZTEST_COMMIT = "f2e9e2a19a7b16101d1e6f01a87e639687517a1c"
+
+http_archive(
+    name = "com_google_fuzztest",
+    strip_prefix = "fuzztest-" + FUZZTEST_COMMIT,
+    url = "https://github.com/google/fuzztest/archive/" + FUZZTEST_COMMIT + ".zip",
+)
 
 RULES_JVM_EXTERNAL_TAG = "2.8"
 
@@ -373,6 +418,15 @@ git_repository(
     commit = "0fd67c76fc4bfb05a665c087ebfead77a3267f6d",
     remote = "https://boringssl.googlesource.com/boringssl",
     shallow_since = "1637714942 +0000",
+)
+
+git_repository(
+    name = "mbedtls",
+    build_file = "//:third_party/mbedtls/BUILD.mbedtls",
+    # mbedtls-3.2.1 released 2022-07-12
+    commit = "869298bffeea13b205343361b7a7daf2b210e33d",
+    remote = "https://pigweed.googlesource.com/third_party/github/ARMmbed/mbedtls",
+    shallow_since = "1648504566 -0700",
 )
 
 http_archive(

@@ -26,14 +26,6 @@ import subprocess
 import sys
 from typing import Callable, Iterable, List, Sequence, TextIO
 
-try:
-    import pw_presubmit
-except ImportError:
-    # Append the pw_presubmit package path to the module search path to allow
-    # running this module without installing the pw_presubmit package.
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import pw_presubmit
-
 import pw_package.pigweed_packages
 
 from pw_presubmit import (
@@ -43,23 +35,27 @@ from pw_presubmit import (
     format_code,
     git_repo,
     gitmodules,
-    call,
-    filter_paths,
     inclusive_language,
+    json_check,
     keep_sorted,
     module_owners,
     npm_presubmit,
     owners_checks,
-    plural,
-    presubmit,
-    PresubmitContext,
-    PresubmitFailure,
-    Programs,
     python_checks,
     shell_checks,
     source_in_build,
     todo_check,
 )
+from pw_presubmit.presubmit import (
+    FileFilter,
+    FormatOptions,
+    PresubmitContext,
+    PresubmitFailure,
+    Programs,
+    call,
+    filter_paths,
+)
+from pw_presubmit.tools import plural
 from pw_presubmit.install_hook import install_git_hook
 
 _LOG = logging.getLogger(__name__)
@@ -67,7 +63,7 @@ _LOG = logging.getLogger(__name__)
 pw_package.pigweed_packages.initialize()
 
 # Trigger builds if files with these extensions change.
-_BUILD_FILE_FILTER = presubmit.FileFilter(
+_BUILD_FILE_FILTER = FileFilter(
     suffix=(
         *format_code.C_FORMAT.extensions,
         '.cfg',
@@ -122,6 +118,7 @@ def gn_clang_build(ctx: PresubmitContext):
 
     build.gn_gen(ctx, pw_C_OPTIMIZATION_LEVELS=_OPTIMIZATION_LEVELS)
     build.ninja(ctx, *build_targets)
+    build.gn_check(ctx)
 
 
 _HOST_COMPILER = 'gcc' if sys.platform == 'win32' else 'clang'
@@ -141,6 +138,7 @@ def gn_full_qemu_check(ctx: PresubmitContext):
         *_at_all_optimization_levels('qemu_gcc'),
         *_at_all_optimization_levels('qemu_clang'),
     )
+    build.gn_check(ctx)
 
 
 def _gn_combined_build_check_targets() -> Sequence[str]:
@@ -190,10 +188,20 @@ gn_combined_build_check = build.GnGenNinja(
 )
 
 
+coverage = build.GnGenNinja(
+    name='coverage',
+    doc='Run coverage for the host build.',
+    path_filter=_BUILD_FILE_FILTER,
+    ninja_targets=('coverage',),
+    coverage=True,
+)
+
+
 @_BUILD_FILE_FILTER.apply_to_check()
 def gn_arm_build(ctx: PresubmitContext):
     build.gn_gen(ctx, pw_C_OPTIMIZATION_LEVELS=_OPTIMIZATION_LEVELS)
     build.ninja(ctx, *_at_all_optimization_levels('stm32f429i'))
+    build.gn_check(ctx)
 
 
 stm32f429i = build.GnGenNinja(
@@ -250,33 +258,10 @@ gn_crypto_mbedtls_build = build.GnGenNinja(
             ctx.package_root / 'mbedtls'
         ),
         'pw_crypto_SHA256_BACKEND': lambda ctx: '"{}"'.format(
-            ctx.root / 'pw_crypto:sha256_mbedtls'
+            ctx.root / 'pw_crypto:sha256_mbedtls_v3'
         ),
         'pw_crypto_ECDSA_BACKEND': lambda ctx: '"{}"'.format(
-            ctx.root / 'pw_crypto:ecdsa_mbedtls'
-        ),
-        'pw_C_OPTIMIZATION_LEVELS': _OPTIMIZATION_LEVELS,
-    },
-    ninja_targets=(
-        *_at_all_optimization_levels(f'host_{_HOST_COMPILER}'),
-        # TODO(b/240982565): SocketStream currently requires Linux.
-        *(('integration_tests',) if sys.platform.startswith('linux') else ()),
-    ),
-)
-
-gn_crypto_boringssl_build = build.GnGenNinja(
-    name='gn_crypto_boringssl_build',
-    path_filter=_BUILD_FILE_FILTER,
-    packages=('boringssl',),
-    gn_args={
-        'dir_pw_third_party_boringssl': lambda ctx: '"{}"'.format(
-            ctx.package_root / 'boringssl'
-        ),
-        'pw_crypto_SHA256_BACKEND': lambda ctx: '"{}"'.format(
-            ctx.root / 'pw_crypto:sha256_boringssl'
-        ),
-        'pw_crypto_ECDSA_BACKEND': lambda ctx: '"{}"'.format(
-            ctx.root / 'pw_crypto:ecdsa_boringssl'
+            ctx.root / 'pw_crypto:ecdsa_mbedtls_v3'
         ),
         'pw_C_OPTIMIZATION_LEVELS': _OPTIMIZATION_LEVELS,
     },
@@ -316,7 +301,7 @@ gn_teensy_build = build.GnGenNinja(
             str(ctx.package_root)
         ),
         'pw_arduino_build_CORE_NAME': 'teensy',
-        'pw_arduino_build_PACKAGE_NAME': 'teensy/avr',
+        'pw_arduino_build_PACKAGE_NAME': 'avr/1.58.1',
         'pw_arduino_build_BOARD': 'teensy40',
         'pw_C_OPTIMIZATION_LEVELS': _OPTIMIZATION_LEVELS,
     },
@@ -358,7 +343,7 @@ gn_software_update_build = build.GnGenNinja(
             ctx.package_root / 'mbedtls'
         ),
         'pw_crypto_SHA256_BACKEND': lambda ctx: '"{}"'.format(
-            ctx.root / 'pw_crypto:sha256_mbedtls'
+            ctx.root / 'pw_crypto:sha256_mbedtls_v3'
         ),
         'pw_C_OPTIMIZATION_LEVELS': _OPTIMIZATION_LEVELS,
     },
@@ -384,6 +369,52 @@ gn_pw_system_demo_build = build.GnGenNinja(
         ),
     },
     ninja_targets=('pw_system_demo',),
+)
+
+gn_googletest_build = build.GnGenNinja(
+    name='gn_googletest_build',
+    path_filter=_BUILD_FILE_FILTER,
+    packages=('googletest',),
+    gn_args={
+        'dir_pw_third_party_googletest': lambda ctx: '"{}"'.format(
+            ctx.package_root / 'googletest'
+        ),
+        'pw_unit_test_MAIN': lambda ctx: '"{}"'.format(
+            ctx.root / 'third_party/googletest:gmock_main'
+        ),
+        'pw_unit_test_GOOGLETEST_BACKEND': lambda ctx: '"{}"'.format(
+            ctx.root / 'third_party/googletest'
+        ),
+        'pw_C_OPTIMIZATION_LEVELS': _OPTIMIZATION_LEVELS,
+    },
+    ninja_targets=_at_all_optimization_levels(f'host_{_HOST_COMPILER}'),
+)
+
+gn_fuzz_build = build.GnGenNinja(
+    name='gn_fuzz_build',
+    path_filter=_BUILD_FILE_FILTER,
+    packages=('abseil-cpp', 'fuzztest', 'googletest', 're2'),
+    gn_args={
+        'dir_pw_third_party_abseil_cpp': lambda ctx: '"{}"'.format(
+            ctx.package_root / 'abseil-cpp'
+        ),
+        'dir_pw_third_party_fuzztest': lambda ctx: '"{}"'.format(
+            ctx.package_root / 'fuzztest'
+        ),
+        'dir_pw_third_party_googletest': lambda ctx: '"{}"'.format(
+            ctx.package_root / 'googletest'
+        ),
+        'dir_pw_third_party_re2': lambda ctx: '"{}"'.format(
+            ctx.package_root / 're2'
+        ),
+        'pw_unit_test_MAIN': lambda ctx: '"{}"'.format(
+            ctx.root / 'third_party/googletest:gmock_main'
+        ),
+        'pw_unit_test_GOOGLETEST_BACKEND': lambda ctx: '"{}"'.format(
+            ctx.root / 'third_party/googletest'
+        ),
+    },
+    ninja_targets=('host_clang_fuzz',),
 )
 
 gn_docs_build = build.GnGenNinja(name='gn_docs_build', ninja_targets=('docs',))
@@ -418,6 +449,7 @@ def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
 def cmake_clang(ctx: PresubmitContext):
     _run_cmake(ctx, toolchain='host_clang')
     build.ninja(ctx, 'pw_apps', 'pw_run_tests.modules')
+    build.gn_check(ctx)
 
 
 @filter_paths(
@@ -426,6 +458,7 @@ def cmake_clang(ctx: PresubmitContext):
 def cmake_gcc(ctx: PresubmitContext):
     _run_cmake(ctx, toolchain='host_gcc')
     build.ninja(ctx, 'pw_apps', 'pw_run_tests.modules')
+    build.gn_check(ctx)
 
 
 @filter_paths(
@@ -636,6 +669,10 @@ _EXCLUDE_FROM_COPYRIGHT_NOTICE: Sequence[str] = (
     r'\.pb\.h$',
     r'\_pb2.pyi?$',
     # keep-sorted: end
+    # Generated third-party files
+    # keep-sorted: start
+    r'\bthird_party/.*\.bazelrc$',
+    # keep-sorted: end
     # Diff/Patch files
     # keep-sorted: start
     r'\.diff$',
@@ -793,7 +830,7 @@ def commit_message_format(_: PresubmitContext):
     if (
         'Reland' in lines[0]
         and 'This is a reland of ' in git_repo.commit_message()
-        and "Original change's description: " in git_repo.commit_message()
+        and "Original change's description:" in git_repo.commit_message()
     ):
         _LOG.warning('Ignoring apparent Gerrit-generated reland')
         return
@@ -886,6 +923,7 @@ def static_analysis(ctx: PresubmitContext):
     """Runs all available static analysis tools."""
     build.gn_gen(ctx)
     build.ninja(ctx, 'python.lint', 'static_analysis')
+    build.gn_check(ctx)
 
 
 _EXCLUDE_FROM_TODO_CHECK = (
@@ -934,7 +972,7 @@ def owners_lint_checks(ctx: PresubmitContext):
     owners_checks.presubmit_check(ctx.paths)
 
 
-SOURCE_FILES_FILTER = presubmit.FileFilter(
+SOURCE_FILES_FILTER = FileFilter(
     endswith=_BUILD_FILE_FILTER.endswith,
     suffix=('.bazel', '.bzl', '.gn', '.gni', *_BUILD_FILE_FILTER.suffix),
     exclude=(
@@ -957,7 +995,8 @@ OTHER_CHECKS = (
     build.gn_gen_check,
     cmake_clang,
     cmake_gcc,
-    gitmodules.create(),
+    coverage,
+    gitmodules.create(gitmodules.Config(allow_submodules=False)),
     gn_clang_build,
     gn_combined_build_check,
     module_owners.presubmit_check(),
@@ -972,15 +1011,19 @@ OTHER_CHECKS = (
     # keep-sorted: end
 )
 
+ARDUINO_PICO = (
+    gn_teensy_build,
+    gn_pico_build,
+    gn_pw_system_demo_build,
+)
+
 # The misc program differs from other_checks in that checks in the misc
 # program block CQ on Linux.
 MISC = (
     # keep-sorted: start
     gn_emboss_build,
+    gn_googletest_build,
     gn_nanopb_build,
-    gn_pico_build,
-    gn_pw_system_demo_build,
-    gn_teensy_build,
     # keep-sorted: end
 )
 
@@ -988,15 +1031,15 @@ SANITIZERS = (cpp_checks.all_sanitizers(),)
 
 SECURITY = (
     # keep-sorted: start
-    gn_crypto_boringssl_build,
     gn_crypto_mbedtls_build,
     gn_crypto_micro_ecc_build,
+    gn_fuzz_build,
     gn_software_update_build,
     # keep-sorted: end
 )
 
 # Avoid running all checks on specific paths.
-PATH_EXCLUSIONS = (re.compile(r'\bthird_party/fuchsia/repo/'),)
+PATH_EXCLUSIONS = FormatOptions.load().exclude
 
 _LINTFORMAT = (
     commit_message_format,
@@ -1014,6 +1057,7 @@ _LINTFORMAT = (
     source_in_build.gn(SOURCE_FILES_FILTER),
     source_is_in_cmake_build_warn_only,
     shell_checks.shellcheck if shutil.which('shellcheck') else (),
+    json_check.presubmit_check,
     keep_sorted.presubmit_check,
     todo_check_with_exceptions,
 )
@@ -1025,8 +1069,8 @@ LINTFORMAT = (
     # (https://stackoverflow.com/q/71024130/1224002). These are cached, but
     # after a roll it can be quite slow.
     source_in_build.bazel(SOURCE_FILES_FILTER),
-    pw_presubmit.python_checks.check_python_versions,
-    pw_presubmit.python_checks.gn_python_lint,
+    python_checks.check_python_versions,
+    python_checks.gn_python_lint,
 )
 
 QUICK = (
@@ -1054,6 +1098,7 @@ FULL = (
 
 PROGRAMS = Programs(
     # keep-sorted: start
+    arduino_pico=ARDUINO_PICO,
     full=FULL,
     lintformat=LINTFORMAT,
     misc=MISC,

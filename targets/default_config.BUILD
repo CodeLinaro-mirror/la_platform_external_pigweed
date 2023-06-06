@@ -12,33 +12,20 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+# Bazel build flags.
+#
+# See for how these flags are used.
+#
+# Please keep this list sorted by name, i.e. the following command should yield
+# no output:
+#
+#   t=$(grep 'name = ' default_config.BUILD); diff <(echo $t) <(echo $t | sort)
+
 package(default_visibility = ["//visibility:public"])
 
-# TODO(b/236321905): Support backends other than boringSSL.
 label_flag(
-    name = "pw_crypto_sha256_backend",
-    build_setting_default = "@pigweed//pw_crypto:sha256_boringssl",
-)
-
-# TODO(b/236321905): Support backends other than boringSSL.
-label_flag(
-    name = "pw_crypto_ecdsa_backend",
-    build_setting_default = "@pigweed//pw_crypto:ecdsa_boringssl",
-)
-
-label_flag(
-    name = "pw_log_backend",
-    build_setting_default = "@pigweed//pw_log:backend_multiplexer",
-)
-
-label_flag(
-    name = "pw_log_string_handler_backend",
-    build_setting_default = "@pigweed//pw_log_string:handler_backend_multiplexer",
-)
-
-label_flag(
-    name = "pw_log_tokenized_handler_backend",
-    build_setting_default = "@pigweed//pw_log_tokenized:base64_over_hdlc",
+    name = "freertos_config",
+    build_setting_default = "@pigweed//third_party/freertos:freertos_config",
 )
 
 label_flag(
@@ -62,6 +49,51 @@ label_flag(
 )
 
 label_flag(
+    name = "pw_crypto_ecdsa_backend",
+    build_setting_default = "@pigweed//pw_crypto:ecdsa_backend_multiplexer",
+)
+
+label_flag(
+    name = "pw_crypto_sha256_backend",
+    build_setting_default = "@pigweed//pw_crypto:sha256_backend_multiplexer",
+)
+
+label_flag(
+    name = "pw_fuzzer_fuzztest_backend",
+    build_setting_default = "@pigweed//pw_fuzzer:fuzztest_stub",
+)
+
+label_flag(
+    name = "pw_interrupt_backend",
+    build_setting_default = "@pigweed//pw_interrupt:backend_multiplexer",
+)
+
+label_flag(
+    name = "pw_log_backend",
+    build_setting_default = "@pigweed//pw_log:backend_multiplexer",
+)
+
+label_flag(
+    name = "pw_log_string_handler_backend",
+    build_setting_default = "@pigweed//pw_log_string:handler_backend_multiplexer",
+)
+
+label_flag(
+    name = "pw_log_tokenized_handler_backend",
+    build_setting_default = "@pigweed//pw_log_tokenized:base64_over_hdlc",
+)
+
+label_flag(
+    name = "pw_malloc_backend",
+    build_setting_default = "@pigweed//pw_malloc:backend_multiplexer",
+)
+
+label_flag(
+    name = "pw_perf_test_timer_backend",
+    build_setting_default = "@pigweed//pw_perf_test:timer_multiplexer",
+)
+
+label_flag(
     name = "pw_rpc_system_server_backend",
     build_setting_default = "@pigweed//pw_rpc/system_server:system_server_backend_multiplexer",
 )
@@ -77,13 +109,13 @@ label_flag(
 )
 
 label_flag(
-    name = "pw_sync_mutex_backend",
-    build_setting_default = "@pigweed//pw_sync:mutex_backend_multiplexer",
+    name = "pw_sync_interrupt_spin_lock_backend",
+    build_setting_default = "@pigweed//pw_sync:interrupt_spin_lock_backend_multiplexer",
 )
 
 label_flag(
-    name = "pw_sync_timed_mutex_backend",
-    build_setting_default = "@pigweed//pw_sync:timed_mutex_backend_multiplexer",
+    name = "pw_sync_mutex_backend",
+    build_setting_default = "@pigweed//pw_sync:mutex_backend_multiplexer",
 )
 
 label_flag(
@@ -92,13 +124,13 @@ label_flag(
 )
 
 label_flag(
-    name = "pw_sync_interrupt_spin_lock_backend",
-    build_setting_default = "@pigweed//pw_sync:interrupt_spin_lock_backend_multiplexer",
+    name = "pw_sync_thread_notification_backend",
+    build_setting_default = "@pigweed//pw_sync:thread_notification_backend_multiplexer",
 )
 
 label_flag(
-    name = "pw_sync_thread_notification_backend",
-    build_setting_default = "@pigweed//pw_sync:thread_notification_backend_multiplexer",
+    name = "pw_sync_timed_mutex_backend",
+    build_setting_default = "@pigweed//pw_sync:timed_mutex_backend_multiplexer",
 )
 
 label_flag(
@@ -107,13 +139,13 @@ label_flag(
 )
 
 label_flag(
-    name = "pw_interrupt_backend",
-    build_setting_default = "@pigweed//pw_interrupt:backend_multiplexer",
+    name = "pw_sys_io_backend",
+    build_setting_default = "@pigweed//pw_sys_io:backend_multiplexer",
 )
 
 label_flag(
-    name = "pw_malloc_backend",
-    build_setting_default = "@pigweed//pw_malloc:backend_multiplexer",
+    name = "pw_system_target_hooks_backend",
+    build_setting_default = "@pigweed//pw_system:target_hooks_multiplexer",
 )
 
 label_flag(
@@ -132,6 +164,11 @@ label_flag(
 )
 
 label_flag(
+    name = "pw_thread_test_thread_context_backend",
+    build_setting_default = "@pigweed//pw_thread:test_thread_context_backend_multiplexer",
+)
+
+label_flag(
     name = "pw_thread_thread_backend",
     build_setting_default = "@pigweed//pw_thread:thread_backend_multiplexer",
 )
@@ -142,13 +179,8 @@ label_flag(
 )
 
 label_flag(
-    name = "pw_sys_io_backend",
-    build_setting_default = "@pigweed//pw_sys_io:backend_multiplexer",
-)
-
-label_flag(
-    name = "pw_system_target_hooks_backend",
-    build_setting_default = "@pigweed//pw_system:target_hooks_multiplexer",
+    name = "pw_trace_backend",
+    build_setting_default = "@pigweed//pw_trace:backend_multiplexer",
 )
 
 label_flag(
@@ -157,21 +189,11 @@ label_flag(
 )
 
 label_flag(
+    name = "pw_unit_test_main",
+    build_setting_default = "@pigweed//pw_unit_test:simple_printing_main",
+)
+
+label_flag(
     name = "target_rtos",
     build_setting_default = "@pigweed//pw_build/constraints/rtos:none",
-)
-
-label_flag(
-    name = "pw_perf_test_timer_backend",
-    build_setting_default = "@pigweed//pw_perf_test:timer_multiplexer",
-)
-
-label_flag(
-    name = "pw_trace_backend",
-    build_setting_default = "@pigweed//pw_trace:backend_multiplexer",
-)
-
-label_flag(
-    name = "freertos_config",
-    build_setting_default = "@pigweed//third_party/freertos:freertos_config",
 )

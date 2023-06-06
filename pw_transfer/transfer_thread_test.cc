@@ -280,6 +280,7 @@ TEST_F(TransferThreadTest, StartTransferExhausted_Client) {
       max_parameters_,
       [&status3](Status status) { status3 = status; },
       std::chrono::seconds(2),
+      std::chrono::seconds(4),
       3,
       10);
   transfer_thread_.WaitUntilEventIsProcessed();
@@ -297,6 +298,7 @@ TEST_F(TransferThreadTest, StartTransferExhausted_Client) {
       max_parameters_,
       [&status4](Status status) { status4 = status; },
       std::chrono::seconds(2),
+      std::chrono::seconds(4),
       3,
       10);
   transfer_thread_.WaitUntilEventIsProcessed();
@@ -333,10 +335,10 @@ TEST_F(TransferThreadTest, VersionTwo_NoHandler) {
   ASSERT_EQ(ctx_.total_responses(), 1u);
   Result<Chunk::Identifier> id = Chunk::ExtractIdentifier(ctx_.response());
   ASSERT_TRUE(id.ok());
-  EXPECT_EQ(id->value(), 7u);
+  EXPECT_EQ(id->value(), 421u);
   auto chunk = DecodeChunk(ctx_.response());
-  EXPECT_EQ(chunk.session_id(), 7u);
-  EXPECT_EQ(chunk.resource_id(), 7u);
+  EXPECT_EQ(chunk.session_id(), 421u);
+  EXPECT_FALSE(chunk.resource_id().has_value());
   ASSERT_TRUE(chunk.status().has_value());
   EXPECT_EQ(chunk.status().value(), Status::NotFound());
 
