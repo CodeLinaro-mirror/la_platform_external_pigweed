@@ -114,11 +114,10 @@ def main() -> int:
     response = plugin_pb2.CodeGeneratorResponse()
     process_proto_request(request, response)
 
-    # TODO(b/267367139)
     # Declare that this plugin supports optional fields in proto3.
-    # response.supported_features |= (  # type: ignore[attr-defined]
-    #     response.FEATURE_PROTO3_OPTIONAL
-    # )  # type: ignore[attr-defined]
+    response.supported_features |= (  # type: ignore[attr-defined]
+        response.FEATURE_PROTO3_OPTIONAL
+    )  # type: ignore[attr-defined]
 
     sys.stdout.buffer.write(response.SerializeToString())
     return 0
