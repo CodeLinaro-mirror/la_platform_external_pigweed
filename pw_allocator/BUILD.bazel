@@ -14,7 +14,6 @@
 
 load(
     "//pw_build:pigweed.bzl",
-    "pw_cc_library",
     "pw_cc_test",
 )
 
@@ -22,7 +21,9 @@ package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
-pw_cc_library(
+# TODO(b/310035978): Support heap poisoning.
+
+cc_library(
     name = "allocator",
     srcs = [
         "allocator.cc",
@@ -38,24 +39,22 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "allocator_metric_proxy",
-    srcs = [
-        "allocator_metric_proxy.cc",
-    ],
     hdrs = [
         "public/pw_allocator/allocator_metric_proxy.h",
     ],
     includes = ["public"],
     deps = [
         ":allocator",
+        ":metrics",
         "//pw_assert",
         "//pw_metric:metric",
         "//pw_status",
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "block",
     srcs = ["block.cc"],
     hdrs = [
@@ -72,23 +71,31 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
-    name = "fallback_allocator",
-    srcs = [
-        "fallback_allocator.cc",
+cc_library(
+    name = "buffer",
+    hdrs = [
+        "public/pw_allocator/buffer.h",
     ],
+    includes = ["public"],
+)
+
+cc_library(
+    name = "fallback_allocator",
     hdrs = [
         "public/pw_allocator/fallback_allocator.h",
     ],
     includes = ["public"],
     deps = [
         ":allocator",
-        "//pw_assert",
+        ":allocator_metric_proxy",
+        ":metrics",
+        "//pw_metric:metric",
         "//pw_status",
+        "//pw_tokenizer",
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "freelist",
     srcs = [
         "freelist.cc",
@@ -104,7 +111,7 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "freelist_heap",
     srcs = [
         "freelist_heap.cc",
@@ -120,7 +127,7 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "libc_allocator",
     srcs = [
         "libc_allocator.cc",
@@ -137,7 +144,37 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
+    name = "metrics",
+    srcs = [
+        "metrics.cc",
+    ],
+    hdrs = [
+        "public/pw_allocator/metrics.h",
+    ],
+    includes = ["public"],
+    deps = [
+        ":allocator",
+        "//pw_assert",
+        "//pw_metric:metric",
+    ],
+)
+
+cc_library(
+    name = "multiplex_allocator",
+    hdrs = [
+        "public/pw_allocator/multiplex_allocator.h",
+    ],
+    includes = ["public"],
+    deps = [
+        ":allocator",
+        ":metrics",
+        "//pw_containers:flat_map",
+        "//pw_tokenizer",
+    ],
+)
+
+cc_library(
     name = "null_allocator",
     hdrs = [
         "public/pw_allocator/null_allocator.h",
@@ -148,7 +185,7 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "simple_allocator",
     hdrs = [
         "public/pw_allocator/simple_allocator.h",
@@ -161,7 +198,7 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "split_free_list_allocator",
     srcs = [
         "split_free_list_allocator.cc",
@@ -180,8 +217,9 @@ pw_cc_library(
     ],
 )
 
-pw_cc_library(
+cc_library(
     name = "allocator_testing",
+    testonly = True,
     srcs = [
         "allocator_testing.cc",
     ],
@@ -191,11 +229,49 @@ pw_cc_library(
     includes = ["public"],
     deps = [
         ":allocator",
+        ":allocator_metric_proxy",
         ":block",
+        ":buffer",
         ":simple_allocator",
         "//pw_assert",
         "//pw_bytes",
+        "//pw_status",
         "//pw_unit_test",
+    ],
+)
+
+cc_library(
+    name = "allocator_test_harness",
+    testonly = True,
+    srcs = [
+        "allocator_test_harness.cc",
+    ],
+    hdrs = [
+        "public/pw_allocator/allocator_test_harness.h",
+    ],
+    includes = ["public"],
+    deps = [
+        ":allocator",
+        "//pw_assert",
+        "//pw_containers",
+        "//pw_random",
+        "//third_party/fuchsia:stdcompat",
+    ],
+)
+
+cc_library(
+    name = "allocator_fuzzing",
+    testonly = True,
+    srcs = [
+        "allocator_fuzzing.cc",
+    ],
+    hdrs = [
+        "public/pw_allocator/allocator_fuzzing.h",
+    ],
+    includes = ["public"],
+    deps = [
+        ":allocator_test_harness",
+        "//pw_fuzzer:fuzztest",
     ],
 )
 
@@ -218,7 +294,6 @@ pw_cc_test(
         "allocator_metric_proxy_test.cc",
     ],
     deps = [
-        ":allocator_metric_proxy",
         ":allocator_testing",
         "//pw_unit_test",
     ],
@@ -284,6 +359,19 @@ pw_cc_test(
 )
 
 pw_cc_test(
+    name = "multiplex_allocator_test",
+    srcs = [
+        "multiplex_allocator_test.cc",
+    ],
+    deps = [
+        ":allocator_testing",
+        ":multiplex_allocator",
+        "//pw_tokenizer",
+        "//pw_unit_test",
+    ],
+)
+
+pw_cc_test(
     name = "null_allocator_test",
     srcs = [
         "null_allocator_test.cc",
@@ -300,7 +388,7 @@ pw_cc_test(
         "simple_allocator_test.cc",
     ],
     deps = [
-        ":allocator_testing",
+        ":buffer",
         ":simple_allocator",
     ],
 )
@@ -311,7 +399,7 @@ pw_cc_test(
         "split_free_list_allocator_test.cc",
     ],
     deps = [
-        ":allocator_testing",
+        ":buffer",
         ":split_free_list_allocator",
         "//pw_bytes",
         "//pw_containers:vector",
