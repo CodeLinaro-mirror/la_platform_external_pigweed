@@ -25,6 +25,7 @@ class SimpleAllocator : public Allocator {
   using Block = pw::allocator::Block<>;
   using Range = typename Block::Range;
 
+  /// Constexpr constructor. Callers must explicitly call `Init`.
   constexpr SimpleAllocator() = default;
 
   /// Initialize this allocator to allocate memory from `region`.
@@ -38,6 +39,9 @@ class SimpleAllocator : public Allocator {
 
   /// Return the range of blocks for this allocator.
   Range blocks() { return Range(blocks_); }
+
+  /// Resets the object to an initial state.
+  void Reset() { blocks_ = nullptr; }
 
  private:
   /// @copydoc Allocator::Query

@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -28,8 +29,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import Optional, Dict, List, Union, Any, Type
 
-import psutil  # type: ignore
-
 from pw_emu.pigweed_emulators import pigweed_emulators
 from pw_env_setup.config_file import load as pw_config_load
 from pw_env_setup.config_file import path as pw_config_path
@@ -39,17 +38,69 @@ from serial import Serial
 _LAUNCHER_LOG = logging.getLogger('pw_qemu.core.launcher')
 
 
+def _pid_exists(pid: int) -> bool:
+    """Check if there is a process for a given pid."""
+
+    # Unix
+    if sys.platform != 'win32':
+        try:
+            # From man 2 kill:
+            #
+            # If sig is 0, then no signal is sent, but existence and
+            # permission checks are still performed; this can be used
+            # to check for the existence of a process ID or process
+            # group ID that the caller is permitted to signal.
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    # Windows
+    proc = subprocess.run(
+        ['tasklist', '/fi', f'pid eq {pid}', '/nh'],
+        capture_output=True,
+        text=True,
+    )
+    return f'{pid}' in proc.stdout
+
+
 def _stop_process(pid: int) -> None:
-    """Gracefully stop a running process."""
+    """Gracefully stops a running process."""
+
+    # SIGTERM works on both Unix and Windows
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+
+    timeout = 10
+    deadline = time.monotonic() + timeout
+    while _pid_exists(pid):
+        time.sleep(0.1)
+        if time.monotonic() > deadline:
+            break
+
+    if not _pid_exists(pid):
+        return
+
+    _LAUNCHER_LOG.warning(
+        "Process %s still running after %d seconds.", pid, timeout
+    )
+
+    # On Windows there is nothing else we can do
+    if sys.platform == 'win32':
+        return
+
+    _LAUNCHER_LOG.warning("Sending SIGKILL...")
+
+    # Avoid mypy false positive on win32.
+    assert sys.platform != 'win32'
 
     try:
-        proc = psutil.Process(pid)
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except psutil.TimeoutExpired:
-            proc.kill()
-    except psutil.NoSuchProcess:
+        # pylint: disable=no-member
+        # Avoid pylint false positive on win32.
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
         pass
 
 
@@ -132,7 +183,7 @@ class InvalidChannelType(Error):
 
 
 class WrongEmulator(Error):
-    """Exception raised if an different backend is running."""
+    """Exception raised if a different backend is running."""
 
     def __init__(self, exp: str, found: str) -> None:
         super().__init__(f'wrong emulator: expected `{exp}, found {found}`')
@@ -143,6 +194,8 @@ class RunError(Error):
 
     def __init__(self, proc: str, msg: str) -> None:
         super().__init__(f'error running `{proc}`: {msg}')
+        self.proc = proc
+        self.msg = msg
 
 
 class InvalidPropertyPath(Error):
@@ -160,7 +213,7 @@ class InvalidProperty(Error):
 
 
 class HandlesError(Error):
-    """Exception raised while trying to load emulator handles."""
+    """Exception raised if the load of an emulator handle fails."""
 
     def __init__(self, msg: str) -> None:
         super().__init__(f'error loading handles: {msg}')
@@ -244,33 +297,33 @@ class Handles:
         self.procs: Dict[str, Handles.Proc] = {}
 
     def add_channel_tcp(self, name: str, host: str, port: int) -> None:
-        """Add a TCP channel."""
+        """Adds a TCP channel."""
 
         self.channels[name] = self.TcpChannel(host, port)
 
     def add_channel_pty(self, name: str, path: str) -> None:
-        """Add a pty channel."""
+        """Adds a pty channel."""
 
         self.channels[name] = self.PtyChannel(path)
 
     def add_proc(self, name: str, pid: int) -> None:
-        """Add a pid."""
+        """Adds a process ID."""
 
         self.procs[name] = self.Proc(pid)
 
     def set_target(self, target: str) -> None:
-        """Set the target."""
+        """Sets the target."""
 
         self.target = target
 
     def set_gdb_cmd(self, cmd: List[str]) -> None:
-        """Set the gdb command."""
+        """Sets the ``gdb`` command."""
 
         self.gdb_cmd = cmd.copy()
 
 
 def _stop_processes(handles: Handles, wdir: Path) -> None:
-    """Stop all processes for a (partially) running emulator instance.
+    """Stops all processes for a (partially) running emulator instance.
 
     Remove pid files as well.
     """
@@ -291,16 +344,16 @@ class Config:
         target: Optional[str] = None,
         emu: Optional[str] = None,
     ) -> None:
-        """Load the emulator configuration.
+        """Loads the emulator configuration.
 
         If no configuration file path is given, the root project
         configuration is used.
 
-        This method set ups the generic configuration (e.g. gdb).
+        This method set ups the generic configuration (e.g. ``gdb``).
 
-        It loads emulator target files and gathers them under the 'targets' key
-        for each emulator backend. The 'targets' settings in the configuration
-        file takes precedence over the loaded target files.
+        It loads emulator target files and gathers them under the ``targets``
+        key for each emulator backend. The ``targets`` settings in the
+        configuration file takes precedence over the loaded target files.
 
         """
         try:
@@ -336,7 +389,8 @@ class Config:
     def set_target(self, target: str) -> None:
         """Sets the current target.
 
-        The current target is used by the get_target method.
+        The current target is used by the
+        :py:meth:`pw_emu.core.Config.get_target` method.
 
         """
 
@@ -383,19 +437,21 @@ class Config:
         optional: bool = True,
         entry_type: Optional[Type] = None,
     ) -> Any:
-        """Get a config entry.
+        """Gets a config entry.
 
-        keys is a list of string that identifies the config entry, e.g.
-        ['targets', 'test-target'] is going to look in the config dicionary for
-        ['targets']['test-target'].
+        ``keys`` identifies the config entry, e.g.
+        ``['targets', 'test-target']`` looks in the config dictionary for
+        ``['targets']['test-target']``.
 
-        If the option is not found and optional is True it returns None if
-        entry_type is none or a new (empty) object of type entry_type.
+        If the option is not found and optional is ``True`` it returns ``None``
+        if ``entry_type`` is ``None`` or a new (empty) object of type
+        ``entry_type``.
 
-        If the option is not found an optional is False it raises ConfigError.
+        If the option is not found and ``optional`` is ``False`` it raises
+        ``ConfigError``.
 
-        If entry_type is not None it will check the option to be of
-        that type. If it is not it will raise ConfigError.
+        If ``entry_type`` is not ``None`` it checks the option to be of
+        that type. If it is not it will raise ``ConfigError``.
 
         """
 
@@ -435,7 +491,7 @@ class Config:
         optional: bool = True,
         entry_type: Optional[Type] = None,
     ) -> Any:
-        """Get a config option starting at ['targets'][target]."""
+        """Gets a config option starting at ``['targets'][target]``."""
 
         if not self._target:
             raise Error('target not set')
@@ -447,7 +503,7 @@ class Config:
         optional: bool = True,
         entry_type: Optional[Type] = None,
     ) -> Any:
-        """Get a config option starting at [emu]."""
+        """Gets a config option starting at ``[emu]``."""
 
         if not self._emu:
             raise Error('emu not set')
@@ -459,7 +515,7 @@ class Config:
         optional: bool = True,
         entry_type: Optional[Type] = None,
     ) -> Any:
-        """Get a config option starting at ['targets'][target][emu]."""
+        """Gets a config option starting at ``['targets'][target][emu]``."""
 
         if not self._emu or not self._target:
             raise Error('emu or target not set')
@@ -469,7 +525,7 @@ class Config:
 
 
 class Connector(ABC):
-    """Interface between a running emulator and the user visible APIs."""
+    """Interface between a running emulator and the user-visible APIs."""
 
     def __init__(self, wdir: Path) -> None:
         self._wdir = wdir
@@ -479,7 +535,7 @@ class Connector(ABC):
 
     @staticmethod
     def get(wdir: Path) -> Any:
-        """Return a connector instace for a given emulator type."""
+        """Returns a connector instance for a given emulator type."""
         handles = Handles.load(wdir)
         config = Config(handles.config)
         emu = handles.emu
@@ -496,7 +552,7 @@ class Connector(ABC):
         return self._handles.emu
 
     def get_gdb_cmd(self) -> List[str]:
-        """Returns the configured gdb command."""
+        """Returns the configured ``gdb`` command."""
         return self._handles.gdb_cmd
 
     def get_config_path(self) -> Path:
@@ -519,8 +575,8 @@ class Connector(ABC):
             raise InvalidChannelName(name, self._target, channels)
 
     def get_channel_path(self, name: str) -> str:
-        """Returns the channel path. Raises InvalidChannelType if this
-        is not a pty channel.
+        """Returns the channel path. Raises ``InvalidChannelType`` if this
+        is not a ``pty`` channel.
 
         """
 
@@ -532,8 +588,8 @@ class Connector(ABC):
             raise InvalidChannelName(name, self._target, self._channels.keys())
 
     def get_channel_addr(self, name: str) -> tuple:
-        """Returns a pair of (host, port) for the channel. Raises
-        InvalidChannelType if this is not a tcp channel.
+        """Returns a pair of ``(host, port)`` for the channel. Raises
+        ``InvalidChannelType`` if this is not a ``tcp`` channel.
 
         """
 
@@ -549,11 +605,11 @@ class Connector(ABC):
         name: str,
         timeout: Optional[float] = None,
     ) -> io.RawIOBase:
-        """Returns a file object for a given host exposed device.
+        """Returns a file object for a given host-exposed device.
 
-        If timeout is None than reads and writes are blocking. If
-        timeout is zero the stream is operating in non-blocking
-        mode. Otherwise read and write will timeout after the given
+        If ``timeout`` is ``None`` then reads and writes are blocking. If
+        ``timeout`` is ``0`` the stream is operating in non-blocking
+        mode. Otherwise reads and writes will timeout after the given
         value.
 
         """
@@ -579,8 +635,14 @@ class Connector(ABC):
     def get_channels(self) -> List[str]:
         return self._handles.channels.keys()
 
+    def get_logs(self) -> str:
+        """Returns the emulator logs."""
+
+        log_path = self._wdir / f'{self._handles.emu}.log'
+        return log_path.read_text()
+
     def stop(self) -> None:
-        """Stop the emulator."""
+        """Stops the emulator."""
 
         _stop_processes(self._handles, self._wdir)
 
@@ -591,25 +653,25 @@ class Connector(ABC):
 
     def proc_running(self, proc: str) -> bool:
         try:
-            return psutil.pid_exists(self._handles.procs[proc].pid)
+            return _pid_exists(self._handles.procs[proc].pid)
         except (NotRunning, KeyError):
             return False
 
     def running(self) -> bool:
-        """Check if the main emulator process is already running."""
+        """Checks if the main emulator process is already running."""
 
         try:
-            return psutil.pid_exists(self._handles.procs[self._handles.emu].pid)
+            return _pid_exists(self._handles.procs[self._handles.emu].pid)
         except (NotRunning, KeyError):
             return False
 
     @abstractmethod
     def reset(self) -> None:
-        """Perform a software reset."""
+        """Performs a software reset."""
 
     @abstractmethod
     def cont(self) -> None:
-        """Resume the emulator's execution."""
+        """Resumes the emulator's execution."""
 
     @abstractmethod
     def list_properties(self, path: str) -> List[Any]:
@@ -632,7 +694,7 @@ class Launcher(ABC):
         emu: str,
         config_path: Optional[Path] = None,
     ) -> None:
-        """Initializes a Launcher instance."""
+        """Initializes a ``Launcher`` instance."""
 
         self._wdir: Optional[Path] = None
         """Working directory"""
@@ -673,7 +735,7 @@ class Launcher(ABC):
         debug: bool = False,
         args: Optional[str] = None,
     ) -> List[str]:
-        """Pre start work, returns command to start the emulator.
+        """Pre-start work, returns command to start the emulator.
 
         The target and emulator configuration can be accessed through
         :py:attr:`pw_emu.core.Launcher._config` with
@@ -685,9 +747,9 @@ class Launcher(ABC):
 
     @abstractmethod
     def _post_start(self) -> None:
-        """Post start work, finalize emulator handles.
+        """Post-start work, finalize emulator handles.
 
-        Perform any post start emulator initialization and finalize the emulator
+        Perform any post-start emulator initialization and finalize the emulator
         handles information.
 
         Typically an internal monitor channel is used to inquire information
@@ -700,7 +762,7 @@ class Launcher(ABC):
 
     @abstractmethod
     def _get_connector(self, wdir: Path) -> Connector:
-        """Get a connector for this emulator type."""
+        """Gets a connector for this emulator type."""
 
     def _path(self, name: Union[Path, str]) -> Path:
         """Returns the full path for a given emulator file."""
@@ -895,26 +957,26 @@ class Launcher(ABC):
         foreground: bool = False,
         args: Optional[str] = None,
     ) -> Connector:
-        """Start the emulator for the given target.
+        """Starts the emulator for the given target.
 
-        If file is set that the emulator will load the file before starting.
+        If ``file`` is set the emulator loads that file before starting.
 
-        If pause is True the emulator is paused.
+        If ``pause`` is ``True`` the emulator gets paused.
 
-        If debug is True the emulator is run in foreground with debug output
-        enabled. This is useful for seeing errors, traces, etc.
+        If ``debug`` is ``True`` the emulator runs in the foreground with
+        debug output enabled. This is useful for seeing errors, traces, etc.
 
-        If foreground is True the emulator is run in foreground otherwise it is
-        started in daemon mode. This is useful when there is another process
-        controlling the emulator's life cycle (e.g. cuttlefish)
+        If ``foreground`` is ``True`` the emulator is run in the foreground
+        otherwise it is started in daemon mode. This is useful when there is
+        another process controlling the emulator's life cycle, e.g. cuttlefish.
 
-        args are passed directly to the emulator
+        ``args`` are passed directly to the emulator.
 
         """
 
         try:
             handles = Handles.load(wdir)
-            if psutil.pid_exists(handles.procs[handles.emu].pid):
+            if _pid_exists(handles.procs[handles.emu].pid):
                 raise AlreadyRunning(wdir)
         except NotRunning:
             pass
@@ -946,7 +1008,15 @@ class Launcher(ABC):
             self._stop_procs()
             raise err
 
-        self._post_start()
+        try:
+            self._post_start()
+        except RunError as err:
+            self._handles.save(wdir)
+            connector = self._get_connector(self._wdir)
+            if not connector.running():
+                msg = err.msg + '; dumping logs:\n' + connector.get_logs()
+                raise RunError(err.proc, msg)
+            raise err
         self._handles.save(wdir)
 
         if proc:
