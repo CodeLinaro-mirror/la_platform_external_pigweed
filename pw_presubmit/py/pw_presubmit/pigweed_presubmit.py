@@ -168,9 +168,12 @@ def _gn_combined_build_check_targets() -> Sequence[str]:
         *_at_all_optimization_levels(f'host_{_HOST_COMPILER}'),
         'python.tests',
         'python.lint',
-        'docs',
         'pigweed_pypi_distribution',
     ]
+
+    # TODO: b/315998985 - Add docs back to Mac ARM build.
+    if sys.platform != 'darwin' or platform.machine() != 'arm64':
+        build_targets.append('docs')
 
     # C headers seem to be missing when building with pw_minimal_cpp_stdlib, so
     # skip it on Windows.
@@ -229,12 +232,14 @@ coverage = PigweedGnGenNinja(
             owner='pigweed-infra@google.com',
             bug_component='503634',
         ),
-        codesearch=build.CodeSearchCoverageOptions(
-            host='pigweed-internal',
-            project='codesearch',
-            add_prefix='pigweed',
-            ref='refs/heads/main',
-            source='infra:main',
+        codesearch=(
+            build.CodeSearchCoverageOptions(
+                host='pigweed-internal',
+                project='codesearch',
+                add_prefix='pigweed',
+                ref='refs/heads/main',
+                source='infra:main',
+            ),
         ),
         gerrit=build.GerritCoverageOptions(
             project='pigweed/pigweed',
@@ -328,8 +333,11 @@ gn_teensy_build = PigweedGnGenNinja(
 gn_pico_build = PigweedGnGenNinja(
     name='gn_pico_build',
     path_filter=_BUILD_FILE_FILTER,
-    packages=('pico_sdk',),
+    packages=('pico_sdk', 'freertos'),
     gn_args={
+        'dir_pw_third_party_freertos': lambda ctx: '"{}"'.format(
+            str(ctx.package_root / 'freertos')
+        ),
         'PICO_SRC_DIR': lambda ctx: '"{}"'.format(
             str(ctx.package_root / 'pico_sdk')
         ),
@@ -669,9 +677,29 @@ def bazel_test(ctx: PresubmitContext) -> None:
     build.bazel(
         ctx,
         'test',
-        '--test_output=errors',
         '--',
         '//...',
+    )
+
+    # Run tests for non-default config options
+
+    # pw_rpc
+    build.bazel(
+        ctx,
+        'test',
+        '--//pw_rpc:config_override='
+        '//pw_rpc:completion_request_callback_config_enabled',
+        '--',
+        '//pw_rpc/...',
+    )
+
+    # pw_grpc
+    build.bazel(
+        ctx,
+        'test',
+        '--//pw_rpc:config_override=//pw_grpc:pw_rpc_config',
+        '--',
+        '//pw_grpc/...',
     )
 
 
@@ -759,6 +787,17 @@ def bazel_build(ctx: PresubmitContext) -> None:
         '//pw_system:system_example',
     )
 
+    # Build the fuzztest example.
+    #
+    # TODO: b/324652164 - This doesn't work on MacOS yet.
+    if sys.platform != 'darwin':
+        build.bazel(
+            ctx,
+            'build',
+            '--config=fuzztest',
+            '//pw_fuzzer/examples/fuzztest:metrics_fuzztest',
+        )
+
 
 def pw_transfer_integration_test(ctx: PresubmitContext) -> None:
     """Runs the pw_transfer cross-language integration test only.
@@ -840,6 +879,7 @@ def edit_compile_commands(
 _EXCLUDE_FROM_COPYRIGHT_NOTICE: Sequence[str] = (
     # Configuration
     # keep-sorted: start
+    r'MODULE.bazel.lock',
     r'\bDoxyfile$',
     r'\bPW_PLUGINS$',
     r'\bconstraint.list$',
@@ -1217,7 +1257,6 @@ SOURCE_FILES_FILTER = FileFilter(
 
 OTHER_CHECKS = (
     # keep-sorted: start
-    # TODO: b/235277910 - Enable all Bazel tests when they're fixed.
     bazel_test,
     build.gn_gen_check,
     cmake_clang,

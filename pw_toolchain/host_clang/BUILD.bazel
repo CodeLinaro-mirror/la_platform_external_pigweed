@@ -14,9 +14,8 @@
 
 load(
     "@pw_toolchain//cc_toolchain:defs.bzl",
-    "ALL_CPP_COMPILER_ACTIONS",
-    "ALL_C_COMPILER_ACTIONS",
-    "ALL_LINK_ACTIONS",
+    "pw_cc_action_files",
+    "pw_cc_feature",
     "pw_cc_flag_set",
     "pw_cc_toolchain",
 )
@@ -29,15 +28,20 @@ licenses(["notice"])
 filegroup(name = "empty")
 
 pw_cc_flag_set(
-    name = "macos_stdlib",
-    actions = ALL_LINK_ACTIONS,
-    flags = ["external/llvm_toolchain/lib/libc++.a"],
+    name = "macos_link_libs",
+    actions = ["@pw_toolchain//actions:all_link_actions"],
+    flags = [
+        # Force dropping the system libc++.
+        "-nostdlib++",
+        # Use libc++ provided by the toolchain.
+        "external/llvm_toolchain/lib/libc++.a",
+    ],
     target_compatible_with = ["@platforms//os:macos"],
 )
 
 pw_cc_flag_set(
     name = "linux_link_libs",
-    actions = ALL_LINK_ACTIONS,
+    actions = ["@pw_toolchain//actions:all_link_actions"],
     flags = [
         "-pthread",
         "-stdlib=libc++",
@@ -47,12 +51,21 @@ pw_cc_flag_set(
     target_compatible_with = ["@platforms//os:linux"],
 )
 
+pw_cc_flag_set(
+    name = "libtool_darwin_flags",
+    actions = ["@pw_toolchain//actions:cpp_link_static_library"],
+    flags = ["-no_warning_for_no_symbols"],
+)
+
 # Although we use similar warnings for clang and arm_gcc, we don't have one
 # centralized list, since we might want to use different warnings based on the
 # compiler in the future.
 pw_cc_flag_set(
     name = "warnings",
-    actions = ALL_C_COMPILER_ACTIONS + ALL_CPP_COMPILER_ACTIONS,
+    actions = [
+        "@pw_toolchain//actions:all_c_compiler_actions",
+        "@pw_toolchain//actions:all_cpp_compiler_actions",
+    ],
     flags = [
         "-Wall",
         "-Wextra",
@@ -63,15 +76,54 @@ pw_cc_flag_set(
     ],
 )
 
+# Thread safety warnings are only supported by Clang.
+pw_cc_flag_set(
+    name = "thread_safety_warnings",
+    actions = [
+        "@pw_toolchain//actions:all_c_compiler_actions",
+        "@pw_toolchain//actions:all_cpp_compiler_actions",
+    ],
+    flags = [
+        "-Wthread-safety",
+        "-D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS=1",
+    ],
+)
+
+pw_cc_flag_set(
+    name = "verbose_compiler_flags",
+    actions = [
+        "@pw_toolchain//actions:all_asm_actions",
+        "@pw_toolchain//actions:all_c_compiler_actions",
+        "@pw_toolchain//actions:all_cpp_compiler_actions",
+        "@pw_toolchain//actions:all_link_actions",
+    ],
+    flags = ["-v"],
+)
+
+# A feature that can be easily toggled to include extra compiler output to help
+# debug things like include search path ordering and showing all the flags
+# passed to the compiler.
+#
+# Add `--features=verbose_compiler_output` to your Bazel invocation to enable.
+pw_cc_feature(
+    name = "verbose_compiler_output",
+    enabled = False,
+    feature_name = "verbose_compiler_output",
+    flag_sets = [":verbose_compiler_flags"],
+)
+
 pw_cc_flag_set(
     name = "no_unknown_warning_option",
-    actions = ALL_C_COMPILER_ACTIONS + ALL_CPP_COMPILER_ACTIONS,
+    actions = [
+        "@pw_toolchain//actions:all_c_compiler_actions",
+        "@pw_toolchain//actions:all_cpp_compiler_actions",
+    ],
     flags = [
         "-Wno-unknown-warning-option",
     ],
 )
 
-filegroup(
+pw_cc_action_files(
     name = "sysroot_files",
     srcs = select({
         "@platforms//os:linux": [
@@ -79,31 +131,14 @@ filegroup(
         ],
         "//conditions:default": [],
     }),
+    actions = [
+        "@pw_toolchain//actions:all_compiler_actions",
+        "@pw_toolchain//actions:all_link_actions",
+    ],
 )
 
 pw_cc_toolchain(
     name = "host_toolchain",
-    action_config_flag_sets = select({
-        "@platforms//os:macos": [
-            "@pw_toolchain//flag_sets:no_default_cpp_stdlib",
-            ":macos_stdlib",
-        ],
-        "@platforms//os:linux": [
-            ":linux_link_libs",
-        ],
-    }) + [
-        ":warnings",
-        "@pw_toolchain//flag_sets:c++17",
-        "@pw_toolchain//flag_sets:debugging",
-        "@pw_toolchain//flag_sets:reduced_size",
-        "@pw_toolchain//flag_sets:no_canonical_prefixes",
-        "@pw_toolchain//flag_sets:no_rtti",
-        "@pw_toolchain//flag_sets:wno_register",
-        "@pw_toolchain//flag_sets:wnon_virtual_dtor",
-    ] + select({
-        "//pw_build:kythe": [":no_unknown_warning_option"],
-        "//conditions:default": [],
-    }),
     action_configs = [
         "@llvm_toolchain//:ar",
         "@llvm_toolchain//:clang",
@@ -118,10 +153,10 @@ pw_cc_toolchain(
         "@platforms//os:macos": XCODE_SDK_PATH,
         "@platforms//os:linux": "external/linux_sysroot",
     }),
-    compiler_files = ":sysroot_files",
     cxx_builtin_include_directories = select({
         "@platforms//os:macos": [
             "%sysroot%/usr/include",
+            "%sysroot%/System/Library/Frameworks/CoreFoundation.framework/Headers",
             "%package(@llvm_toolchain//)%/include/c++/v1",
             "%package(@llvm_toolchain//)%/lib/clang/18/include",
         ],
@@ -134,19 +169,42 @@ pw_cc_toolchain(
             "%sysroot%/usr/include",
         ],
     }),
-    linker_files = ":sysroot_files",
-    supports_param_files = 0,
+    extra_action_files = [":sysroot_files"],
+    flag_sets = select({
+        "@platforms//os:macos": [
+            ":macos_link_libs",
+            ":libtool_darwin_flags",
+        ],
+        "@platforms//os:linux": [
+            ":linux_link_libs",
+        ],
+    }) + [
+        ":warnings",
+        ":thread_safety_warnings",
+        "@pw_toolchain//flag_sets:c++17",
+        "@pw_toolchain//flag_sets:debugging",
+        "@pw_toolchain//flag_sets:reduced_size",
+        "@pw_toolchain//flag_sets:no_canonical_prefixes",
+        "@pw_toolchain//flag_sets:no_rtti",
+        "@pw_toolchain//flag_sets:wno_register",
+        "@pw_toolchain//flag_sets:wnon_virtual_dtor",
+    ] + select({
+        "//pw_build:kythe": [":no_unknown_warning_option"],
+        "//conditions:default": [],
+    }),
     # The implementations of some "legacy features" built into Bazel use
     # `target_libc` to determine if a toolchain targets MacOS,
     # https://github.com/bazelbuild/bazel/blob/release-7.0.0-pre.20230816.3rc1/src/main/java/com/google/devtools/build/lib/rules/cpp/CcModule.java#L1301-L1304
-    target_cpu = select({
-        "@platforms//os:macos": "darwin",
-        "//conditions:default": None,
-    }),
+    #
+    # `target_cpu` appears to only potentially do magic things for the Android
+    # NDK, so it's omitted here.
     target_libc = select({
         "@platforms//os:macos": "macosx",
         "//conditions:default": None,
     }),
+    toolchain_features = [
+        ":verbose_compiler_output",
+    ],
     toolchain_identifier = "host-toolchain",
 )
 

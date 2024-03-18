@@ -14,16 +14,8 @@
 
 load(
     "@pw_toolchain//cc_toolchain:defs.bzl",
-    "ALL_AR_ACTIONS",
-    "ALL_ASM_ACTIONS",
-    "ALL_COVERAGE_ACTIONS",
-    "ALL_CPP_COMPILER_ACTIONS",
-    "ALL_C_COMPILER_ACTIONS",
-    "ALL_LINK_ACTIONS",
-    "ALL_OBJCOPY_ACTIONS",
-    "ALL_OBJDUMP_ACTIONS",
-    "ALL_STRIP_ACTIONS",
     "pw_cc_action_config",
+    "pw_cc_action_files",
     "pw_cc_tool",
 )
 
@@ -36,8 +28,9 @@ licenses(["notice"])
 
 exports_files(glob(["**"]))
 
-filegroup(
+pw_cc_action_files(
     name = "all",
+    actions = ["@pw_toolchain//actions:all_actions"],
     srcs = glob(["**"]),
     visibility = ["//visibility:public"],
 )
@@ -49,10 +42,14 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-ar",
-    action_names = ALL_AR_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_ar_actions"],
+    # Unlike most legacy features required to compile code, these features
+    # aren't enabled by default, and are instead only implied by the built-in
+    # action configs. We imply the features here to match the behavior of the
+    # built-in action configs so flags are actually passed to `ar`.
     implies = [
-        "archiver_flags",
-        "linker_param_file",
+        "@pw_toolchain//features/legacy:archiver_flags",
+        "@pw_toolchain//features/legacy:linker_param_file",
     ],
     tools = [":arm-none-eabi-ar_tool"],
 )
@@ -72,7 +69,7 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-g++",
-    action_names = ALL_CPP_COMPILER_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_cpp_compiler_actions"],
     tools = [":arm-none-eabi-g++_tool"],
 )
 
@@ -93,7 +90,10 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-gcc",
-    action_names = ALL_ASM_ACTIONS + ALL_C_COMPILER_ACTIONS,
+    action_names = [
+        "@pw_toolchain//actions:all_asm_actions",
+        "@pw_toolchain//actions:all_c_compiler_actions",
+    ],
     tools = [":arm-none-eabi-gcc_tool"],
 )
 
@@ -115,7 +115,7 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-ld",
-    action_names = ALL_LINK_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_link_actions"],
     tools = [":arm-none-eabi-ld_tool"],
 )
 
@@ -126,7 +126,7 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-gcov",
-    action_names = ALL_COVERAGE_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_coverage_actions"],
     tools = [":arm-none-eabi-gcov_tool"],
 )
 
@@ -137,7 +137,7 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-objcopy",
-    action_names = ALL_OBJCOPY_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_objcopy_actions"],
     tools = [":arm-none-eabi-objcopy_tool"],
 )
 
@@ -148,7 +148,7 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-objdump",
-    action_names = ALL_OBJDUMP_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_objdump_actions"],
     tools = [":arm-none-eabi-objdump_tool"],
 )
 
@@ -159,6 +159,6 @@ pw_cc_tool(
 
 pw_cc_action_config(
     name = "arm-none-eabi-strip",
-    action_names = ALL_STRIP_ACTIONS,
+    action_names = ["@pw_toolchain//actions:all_strip_actions"],
     tools = [":arm-none-eabi-strip_tool"],
 )

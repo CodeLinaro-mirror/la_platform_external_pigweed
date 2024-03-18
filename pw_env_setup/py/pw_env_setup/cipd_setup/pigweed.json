@@ -10,7 +10,7 @@
         "windows-amd64"
       ],
       "tags": [
-        "git_revision:85944ebc24a90ec1e489e85a46fdc68542c3146f"
+        "git_revision:0a2b8eac80f164f10b2cbc126890db0d295790cd"
       ],
       "version_file": ".versions/gn.cipd_version"
     },
@@ -32,6 +32,16 @@
       "platforms": [
         "linux-amd64",
         "mac-amd64"
+      ],
+      "tags": [
+        "git_revision:c057ba4f43db0506d4ba8c096925b054b02a8bd3"
+      ],
+      "version_file": ".versions/bloaty.cipd_version"
+    },
+    {
+      "path": "fuchsia/third_party/bloaty/mac-amd64",
+      "platforms": [
+        "mac-arm64"
       ],
       "tags": [
         "git_revision:c057ba4f43db0506d4ba8c096925b054b02a8bd3"
@@ -61,7 +71,7 @@
         "windows-amd64"
       ],
       "tags": [
-        "git_revision:725656bdd885483c39f482a01ea25d67acf39c46"
+        "git_revision:c58bc24fcf678c55b0bf522be89eff070507a005"
       ],
       "version_file": ".versions/clang.cipd_version"
     },
@@ -103,10 +113,11 @@
       "platforms": [
         "linux-amd64",
         "linux-arm64",
-        "mac-amd64"
+        "mac-amd64",
+        "mac-arm64"
       ],
       "tags": [
-        "git_revision:a342ce9dfeed8088c426e5d51d4a7e47f3764b84"
+        "git_revision:1600b9f46b1bd08b00fe86c46ef6dbb48cbe10d6"
       ],
       "version_file": ".versions/qemu.cipd_version"
     },
@@ -127,7 +138,7 @@
         "linux-amd64"
       ],
       "tags": [
-        "version:2@renode-1.14.0"
+        "version:2@1.14.0+20240213git9ffe8a98a"
       ]
     }
   ]

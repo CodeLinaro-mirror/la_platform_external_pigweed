@@ -36,6 +36,13 @@ http_archive(
     ],
 )
 
+http_archive(
+    name = "rules_cc",
+    sha256 = "2037875b9a4456dce4a79d112a8ae885bbc4aad968e6587dca6e64f3a0900cdf",
+    strip_prefix = "rules_cc-0.0.9",
+    urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.0.9/rules_cc-0.0.9.tar.gz"],
+)
+
 local_repository(
     name = "pw_toolchain",
     path = "pw_toolchain_bazel",
@@ -76,6 +83,40 @@ load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
 
+# Used in modules: //pw_grpc
+http_archive(
+    name = "io_bazel_rules_go",
+    sha256 = "7c76d6236b28ff695aa28cf35f95de317a9472fd1fb14ac797c9bf684f09b37c",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.44.2/rules_go-v0.44.2.zip",
+        "https://github.com/bazelbuild/rules_go/releases/download/v0.44.2/rules_go-v0.44.2.zip",
+    ],
+)
+
+# Used in modules: //pw_grpc
+http_archive(
+    name = "bazel_gazelle",
+    sha256 = "32938bda16e6700063035479063d9d24c60eda8d79fd4739563f50d331cb3209",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.35.0/bazel-gazelle-v0.35.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.35.0/bazel-gazelle-v0.35.0.tar.gz",
+    ],
+)
+
+load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
+load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
+
+go_rules_dependencies()
+
+go_register_toolchains(version = "1.21.5")
+
+gazelle_dependencies()
+
+load("//pw_grpc:deps.bzl", "pw_grpc_deps")
+
+# gazelle:repository_macro pw_grpc/deps.bzl%pw_grpc_deps
+pw_grpc_deps()
+
 http_archive(
     name = "rules_proto",
     sha256 = "dc3fb206a2cb3441b485eb1e423165b231235a1ea9b031b4433cf7bc1fa460dd",
@@ -88,23 +129,24 @@ http_archive(
 # Set up Python support.
 # Required by: rules_fuzzing, com_github_nanopb_nanopb.
 # Used in modules: None.
-http_archive(
+# TODO: b/310293060 - Switch to an official release when it includes the fix for
+# macOS hosts running Python <=3.8.
+git_repository(
     name = "rules_python",
-    sha256 = "9acc0944c94adb23fba1c9988b48768b1bacc6583b52a2586895c5b7491e2e31",
-    strip_prefix = "rules_python-0.27.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.27.0/rules_python-0.27.0.tar.gz",
+    commit = "e06b4bae446706db3414e75d301f56821001b554",
+    remote = "https://github.com/bazelbuild/rules_python.git",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
 
 py_repositories()
 
-# Use Python 3.10 for bazel Python rules.
+# Use Python 3.11 for bazel Python rules.
 python_register_toolchains(
     name = "python3",
     # Allows building as root in a docker container. Required by oss-fuzz.
     ignore_root_user_error = True,
-    python_version = "3.10",
+    python_version = "3.11",
 )
 
 load("@python3//:defs.bzl", "interpreter")
@@ -150,11 +192,12 @@ git_repository(
 # Set up Protobuf rules.
 # Required by: pigweed.
 # Used in modules: //pw_protobuf.
+# TODO: pwbug.dev/319717451 - Keep this in sync with the pip requirements.
 http_archive(
     name = "com_google_protobuf",
-    sha256 = "c6003e1d2e7fefa78a3039f19f383b4f3a61e81be8c19356f85b6461998ad3db",
-    strip_prefix = "protobuf-3.17.3",
-    url = "https://github.com/protocolbuffers/protobuf/archive/v3.17.3.tar.gz",
+    sha256 = "616bb3536ac1fff3fb1a141450fa28b875e985712170ea7f1bfe5e5fc41e2cd8",
+    strip_prefix = "protobuf-24.4",
+    url = "https://github.com/protocolbuffers/protobuf/releases/download/v24.4/protobuf-24.4.tar.gz",
 )
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")

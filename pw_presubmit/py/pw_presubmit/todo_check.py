@@ -16,7 +16,7 @@
 import logging
 from pathlib import Path
 import re
-from typing import Iterable, Pattern, Sequence, Union
+from typing import Dict, Iterable, List, Pattern, Sequence, Union
 
 from pw_presubmit import presubmit_context
 from pw_presubmit.presubmit import filter_paths
@@ -41,10 +41,15 @@ EXCLUDE: Sequence[str] = (
 )
 
 # todo-check: disable
+# pylint: disable=line-too-long
 BUGS_ONLY = re.compile(
     r'(?:\bTODO\(b/\d+(?:, ?b/\d+)*\).*\w)|'
     r'(?:\bTODO: b/\d+(?:, ?b/\d+)* - )|'
-    r'(?:\bTODO: https://issues.pigweed.dev/issues/\d+ - )'
+    r'(?:\bTODO: https://issues.pigweed.dev/issues/\d+ - )|'
+    r'(?:\bTODO: https://pwbug.dev/\d+ - )|'
+    r'(?:\bTODO: pwbug.dev/\d+ - )|'
+    r'(?:\bTODO: <pwbug.dev/\d+> - )|'
+    r'(?:\bTODO: https://github\.com/bazelbuild/[a-z][-_a-z0-9]*/issues/\d+[ ]-[ ])'
 )
 BUGS_OR_USERNAMES = re.compile(
     r"""
@@ -59,6 +64,9 @@ BUGS_OR_USERNAMES = re.compile(
     \bTODO:[ ]
     (?:
         b/\d+|  # Bug.
+        https://pwbug.dev/\d+| # Short URL
+        pwbug.dev/\d+| # Even shorter URL
+        <pwbug.dev/\d+>| # Markdown compatible even shorter URL
         https://issues.pigweed.dev/issues/\d+| # Fully qualified bug for rustdoc
         # Username@ with optional domain.
         [a-z]+@(?:[a-z][-a-z0-9]*(?:\.[a-z][-a-z0-9]*)+)?
@@ -78,11 +86,20 @@ BUGS_OR_USERNAMES = re.compile(
         (?:,[ ]?(?:fxbug\.dev/\d+|[a-z]+))*  # Additional usernames or bugs.
     \)
 .*\w  # Explanation.
+)|
+(?:  # Bazel GitHub issues. No usernames allowed.
+    \bTODO:[ ]
+    (?:
+        https://github\.com/bazelbuild/[a-z][-_a-z0-9]*/issues/\d+
+    )
+[ ]-[ ].*\w  # Explanation.
 )
     """,
     re.VERBOSE,
 )
-_TODO = re.compile(r'\bTODO\b')
+# pylint: enable=line-too-long
+
+_TODO_OR_FIXME = re.compile(r'(\bTODO\b)|(\bFIXME\b)')
 # todo-check: enable
 
 # If seen, ignore this line and the next.
@@ -100,7 +117,7 @@ def _process_file(ctx: PresubmitContext, todo_pattern: re.Pattern, path: Path):
         prev = ''
 
         try:
-            summary = []
+            summary: List[str] = []
             for i, line in enumerate(ins, 1):
                 if _DISABLE in line:
                     enabled = False
@@ -111,25 +128,24 @@ def _process_file(ctx: PresubmitContext, todo_pattern: re.Pattern, path: Path):
                     prev = line
                     continue
 
-                if _TODO.search(line):
+                if _TODO_OR_FIXME.search(line):
                     if not todo_pattern.search(line):
                         # todo-check: ignore
                         ctx.fail(f'Bad TODO on line {i}:', path)
                         ctx.fail(f'    {line.strip()}')
-                        summary.append(
-                            f'{path.relative_to(ctx.root)}:{i}:{line.strip()}'
-                        )
+                        ctx.fail('Prefer this format in new code:')
+                        # todo-check: ignore
+                        ctx.fail('    TODO: b/XXXXX - info here')
+                        summary.append(f'{i}:{line.strip()}')
 
                 prev = line
 
-            if summary:
-                with ctx.failure_summary_log.open('w') as outs:
-                    for line in summary:
-                        print(line, file=outs)
+            return summary
 
         except UnicodeDecodeError:
             # File is not text, like a gif.
             _LOG.debug('File %s is not a text file', path)
+            return []
 
 
 def create(
@@ -142,7 +158,16 @@ def create(
     def todo_check(ctx: PresubmitContext):
         """Check that TODO lines are valid."""  # todo-check: ignore
         ctx.paths = presubmit_context.apply_exclusions(ctx)
+        summary: Dict[Path, List[str]] = {}
         for path in ctx.paths:
-            _process_file(ctx, todo_pattern, path)
+            if file_summary := _process_file(ctx, todo_pattern, path):
+                summary[path] = file_summary
+
+        if summary:
+            with ctx.failure_summary_log.open('w') as outs:
+                for path, lines in summary.items():
+                    print('====', path.relative_to(ctx.root), file=outs)
+                    for line in lines:
+                        print(line, file=outs)
 
     return todo_check
