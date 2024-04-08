@@ -182,11 +182,11 @@ def _split_args(kwargs, filter_dict):
     the tuple.
 
     Args:
-        kwargs: Dictionary of args to split.
+        kwargs: dictionary of args to split.
         filter_dict: The dictionary used as the filter.
 
     Returns:
-        Tuple[Dict, Dict]
+        tuple[dict, dict]
     """
     filtered_args = {}
     remainder = {}
@@ -253,6 +253,10 @@ def pw_cc_toolchain(name, action_config_flag_sets = None, **kwargs):
     pw_cc_toolchain_config(
         name = config_name,
         visibility = ["//visibility:private"],
+        compatible_with = kwargs.get("compatible_with", None),
+        target_compatible_with = kwargs.get("target_compatible_with", None),
+        exec_compatible_with = kwargs.get("exec_compatible_with", None),
+        tags = kwargs.get("tags", None),
         **cc_toolchain_config_args
     )
 
@@ -263,6 +267,10 @@ def pw_cc_toolchain(name, action_config_flag_sets = None, **kwargs):
             config = config_name,
             actions = actions,
             visibility = ["//visibility:private"],
+            compatible_with = kwargs.get("compatible_with", None),
+            target_compatible_with = kwargs.get("target_compatible_with", None),
+            exec_compatible_with = kwargs.get("exec_compatible_with", None),
+            tags = kwargs.get("tags", None),
         )
         cc_toolchain_args[group] = group_name
 

@@ -258,6 +258,11 @@ Whenever possible, document APIs in the source code and use Sphinx to generate
 documentation for them. This keeps the documentation in sync with the code and
 reduces duplication.
 
+C/C++
+-----
+Doxygen comments in C and C++ are surfaced in Sphinx using the Breathe
+extension. See :ref:`docs-pw-style-doxygen` for usage.
+
 Python
 ------
 Include Python API documentation from docstrings with `autodoc directives`_.
@@ -643,3 +648,12 @@ Auto-generated source code and issues URLS
 In the site nav there's a ``Source code`` and ``Issues`` URL for each module.
 These links are auto-generated. The auto-generation logic lives in
 ``//pw_docgen/py/pw_docgen/sphinx/module_metadata.py``.
+
+Breadcrumbs
+===========
+.. _breadcrumbs: https://en.wikipedia.org/wiki/Breadcrumb_navigation
+
+The `breadcrumbs`_ at the top of each page (except the homepage) is implemented
+in ``//docs/layout/page.html``. The CSS for this UI is in
+``//docs/_static/css/pigweed.css`` under the ``.breadcrumbs`` and
+``.breadcrumb`` classes.

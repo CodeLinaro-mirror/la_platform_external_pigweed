@@ -25,7 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Callable, Iterable, List, Sequence, TextIO
+from typing import Callable, Iterable, Sequence, TextIO
 
 import pw_package.pigweed_packages
 
@@ -148,17 +148,6 @@ _HOST_COMPILER = 'gcc' if sys.platform == 'win32' else 'clang'
 def gn_quick_build_check(ctx: PresubmitContext):
     """Checks the state of the GN build by running gn gen and gn check."""
     build.gn_gen(ctx)
-
-
-@_BUILD_FILE_FILTER.apply_to_check()
-def gn_full_qemu_check(ctx: PresubmitContext):
-    build.gn_gen(ctx, pw_C_OPTIMIZATION_LEVELS=_OPTIMIZATION_LEVELS)
-    build.ninja(
-        ctx,
-        *_at_all_optimization_levels('qemu_gcc'),
-        *_at_all_optimization_levels('qemu_clang'),
-    )
-    build.gn_check(ctx)
 
 
 def _gn_combined_build_check_targets() -> Sequence[str]:
@@ -635,6 +624,7 @@ gn_host_tools = PigweedGnGenNinja(
 
 def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
     build.install_package(ctx, 'nanopb')
+    build.install_package(ctx, 'emboss')
 
     env = None
     if 'clang' in toolchain:
@@ -647,6 +637,7 @@ def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
         '-DCMAKE_EXPORT_COMPILE_COMMANDS=1',
         f'-Ddir_pw_third_party_nanopb={ctx.package_root / "nanopb"}',
         '-Dpw_third_party_nanopb_ADD_SUBDIRECTORY=ON',
+        f'-Ddir_pw_third_party_emboss={ctx.package_root / "emboss"}',
         env=env,
     )
 
@@ -656,7 +647,12 @@ def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
 )
 def cmake_clang(ctx: PresubmitContext):
     _run_cmake(ctx, toolchain='host_clang')
-    build.ninja(ctx, 'pw_apps', 'pw_run_tests.modules')
+    build.ninja(
+        ctx,
+        'pw_apps',
+        'pw_run_tests.modules',
+        'pw_run_tests.pw_bluetooth',
+    )
     build.gn_check(ctx)
 
 
@@ -825,7 +821,7 @@ def pw_transfer_integration_test(ctx: PresubmitContext) -> None:
 #
 
 
-def _clang_system_include_paths(lang: str) -> List[str]:
+def _clang_system_include_paths(lang: str) -> list[str]:
     """Generate default system header paths.
 
     Returns the list of system include paths used by the host
@@ -848,7 +844,7 @@ def _clang_system_include_paths(lang: str) -> List[str]:
     # Parse the command output to retrieve system include paths.
     # The paths are listed one per line.
     output = process.stdout.decode(errors='backslashreplace')
-    include_paths: List[str] = []
+    include_paths: list[str] = []
     for line in output.splitlines():
         path = line.strip()
         if os.path.exists(path):
@@ -1032,9 +1028,11 @@ def source_is_in_cmake_build_warn_only(ctx: PresubmitContext):
     """Checks that source files are in the CMake build."""
 
     _run_cmake(ctx)
-    missing = build.check_compile_commands_for_files(
-        ctx.output_dir / 'compile_commands.json',
-        (f for f in ctx.paths if f.suffix in format_code.CPP_SOURCE_EXTS),
+    missing = SOURCE_FILES_FILTER_CMAKE_EXCLUDE.filter(
+        build.check_compile_commands_for_files(
+            ctx.output_dir / 'compile_commands.json',
+            (f for f in ctx.paths if f.suffix in format_code.CPP_SOURCE_EXTS),
+        )
     )
     if missing:
         _LOG.warning(
@@ -1251,6 +1249,22 @@ SOURCE_FILES_FILTER = FileFilter(
     ),
 )
 
+SOURCE_FILES_FILTER_GN_EXCLUDE = FileFilter(
+    exclude=(
+        # keep-sorted: start
+        r'\bpw_bluetooth_sapphire/fuchsia',
+        # keep-sorted: end
+    ),
+)
+
+SOURCE_FILES_FILTER_CMAKE_EXCLUDE = FileFilter(
+    exclude=(
+        # keep-sorted: start
+        r'\bpw_bluetooth_sapphire/fuchsia',
+        # keep-sorted: end
+    ),
+)
+
 #
 # Presubmit check programs
 #
@@ -1328,7 +1342,9 @@ _LINTFORMAT = (
     cpp_checks.pragma_once,
     build.bazel_lint,
     owners_lint_checks,
-    source_in_build.gn(SOURCE_FILES_FILTER),
+    source_in_build.gn(SOURCE_FILES_FILTER).with_file_filter(
+        SOURCE_FILES_FILTER_GN_EXCLUDE
+    ),
     source_is_in_cmake_build_warn_only,
     shell_checks.shellcheck if shutil.which('shellcheck') else (),
     javascript_checks.eslint if shutil.which('npm') else (),

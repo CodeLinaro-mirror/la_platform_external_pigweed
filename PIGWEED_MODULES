@@ -23,6 +23,7 @@ pw_bluetooth_sapphire
 pw_boot
 pw_boot_cortex_m
 pw_build
+pw_build_android
 pw_build_info
 pw_build_mcuxpresso
 pw_bytes
@@ -45,6 +46,7 @@ pw_cpu_exception
 pw_cpu_exception_cortex_m
 pw_crypto
 pw_digital_io
+pw_digital_io_linux
 pw_digital_io_mcuxpresso
 pw_digital_io_rp2040
 pw_docgen
@@ -68,6 +70,7 @@ pw_interrupt_cortex_m
 pw_interrupt_xtensa
 pw_interrupt_zephyr
 pw_intrusive_ptr
+pw_json
 pw_kvs
 pw_libc
 pw_libcxx

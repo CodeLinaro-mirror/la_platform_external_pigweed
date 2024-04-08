@@ -111,6 +111,7 @@ pw_proto_filegroup(
 proto_library(
     name = "metric_proto",
     srcs = [":metric_proto_and_options"],
+    strip_import_prefix = "/pw_metric",
 )
 
 py_proto_library(

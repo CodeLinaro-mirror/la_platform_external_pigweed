@@ -22,11 +22,57 @@ load(
     _link_cc = "link_cc",
 )
 
-# Used by `pw_cc_test`.
-FUZZTEST_OPTS = [
-    "-Wno-sign-compare",
-    "-Wno-unused-parameter",
-]
+def pw_facade(name, srcs = None, backend = None, **kwargs):
+    """Create a cc_library with a facade.
+
+    This macro simplifies instantiating Pigweed's facade pattern. It generates
+    two targets:
+
+    * cc_library with the label "name". This is the complete library target.
+      Users of the functionality provided by this library should depend on this
+      target.  It has a public dependency on the "backend".
+    * cc_library with the label "name.facade". This library exposes only the
+      headers. Implementations of the backend should depend on it.
+
+    Args:
+      name: The name of the cc_library.
+      srcs: The source files of the cc_library.
+      backend: The backend for the facade. This should be a label_flag or other
+        target that allows swapping out the backend implementation at build
+        time. (In a downstream project an alias with an "actual = select(...)"
+        attribute may also be appropriate, but in upstream Pigweed use only a
+        label_flag.).
+      **kwargs: Passed on to cc_library.
+    """
+    if type(backend) != "string":
+        fail(
+            "The 'backend' attribute must be a single label, " +
+            "got {} of type {}".format(backend, type(backend)),
+        )
+
+    facade_kwargs = dict(**kwargs)
+
+    # A facade has no srcs, so it can only have public deps. Don't specify any
+    # implementation_deps on the facade target.
+    facade_kwargs.pop("implementation_deps", [])
+    native.cc_library(
+        name = name + ".facade",
+        **facade_kwargs
+    )
+
+    kwargs["deps"] = kwargs.get("deps", []) + [backend]
+    native.cc_library(
+        name = name,
+        srcs = srcs,
+        **kwargs
+    )
+
+    # For simplifying the migration to this macro only. Do not depend on this
+    # target from new code: depend directly on the .facade target instead.
+    native.alias(
+        name = name + "_facade",
+        actual = ":" + name + ".facade",
+    )
 
 def pw_cc_binary(**kwargs):
     """Wrapper for cc_binary providing some defaults.
@@ -63,22 +109,12 @@ def pw_cc_test(**kwargs):
       **kwargs: Passed to cc_test.
     """
     kwargs["deps"] = kwargs.get("deps", []) + \
-                     ["@pigweed//targets:pw_unit_test_main"]
+                     ["@pigweed//pw_unit_test:main"]
 
     # TODO: b/234877642 - Remove this implicit dependency once we have a better
     # way to handle the facades without introducing a circular dependency into
     # the build.
     kwargs["deps"] = kwargs["deps"] + ["@pigweed//pw_build:default_link_extra_lib"]
-
-    # Some tests may include FuzzTest, which includes headers that trigger
-    # warnings. This check must be done here and not in `add_defaults`, since
-    # the `use_fuzztest` config setting can refer by label to a library which
-    # itself calls `add_defaults`.
-    extra_copts = select({
-        "@pigweed//pw_fuzzer:use_fuzztest": FUZZTEST_OPTS,
-        "//conditions:default": [],
-    })
-    kwargs["copts"] = kwargs.get("copts", []) + extra_copts
 
     native.cc_test(**kwargs)
 
@@ -117,20 +153,9 @@ def pw_cc_perf_test(**kwargs):
     """
     kwargs["deps"] = kwargs.get("deps", []) + \
                      ["@pigweed//pw_perf_test:logging_main"]
-    kwargs["deps"] = kwargs["deps"] + ["@pigweed//targets:pw_assert_backend_impl"]
+    kwargs["deps"] = kwargs["deps"] + ["@pigweed//pw_assert:backend_impl"]
+    kwargs["testonly"] = True
     native.cc_binary(**kwargs)
-
-def pw_cc_facade(**kwargs):
-    # Bazel facades should be source only cc_library's this is to simplify
-    # lazy header evaluation. Bazel headers are not 'precompiled' so the build
-    # system does not check to see if the build has the right dependant headers
-    # in the sandbox. If a source file is declared here and includes a header
-    # file the toolchain will compile as normal and complain about the missing
-    # backend headers.
-    if "srcs" in kwargs.keys():
-        fail("'srcs' attribute does not exist in pw_cc_facade, please use \
-        main implementing target.")
-    native.cc_library(**kwargs)
 
 def host_backend_alias(name, backend):
     """An alias that resolves to the backend for host platforms."""

@@ -54,6 +54,7 @@ declare_args() {
   dir_pw_boot = get_path_info("../pw_boot", "abspath")
   dir_pw_boot_cortex_m = get_path_info("../pw_boot_cortex_m", "abspath")
   dir_pw_build = get_path_info("../pw_build", "abspath")
+  dir_pw_build_android = get_path_info("../pw_build_android", "abspath")
   dir_pw_build_info = get_path_info("../pw_build_info", "abspath")
   dir_pw_build_mcuxpresso = get_path_info("../pw_build_mcuxpresso", "abspath")
   dir_pw_bytes = get_path_info("../pw_bytes", "abspath")
@@ -78,6 +79,7 @@ declare_args() {
       get_path_info("../pw_cpu_exception_cortex_m", "abspath")
   dir_pw_crypto = get_path_info("../pw_crypto", "abspath")
   dir_pw_digital_io = get_path_info("../pw_digital_io", "abspath")
+  dir_pw_digital_io_linux = get_path_info("../pw_digital_io_linux", "abspath")
   dir_pw_digital_io_mcuxpresso =
       get_path_info("../pw_digital_io_mcuxpresso", "abspath")
   dir_pw_digital_io_rp2040 = get_path_info("../pw_digital_io_rp2040", "abspath")
@@ -103,6 +105,7 @@ declare_args() {
   dir_pw_interrupt_xtensa = get_path_info("../pw_interrupt_xtensa", "abspath")
   dir_pw_interrupt_zephyr = get_path_info("../pw_interrupt_zephyr", "abspath")
   dir_pw_intrusive_ptr = get_path_info("../pw_intrusive_ptr", "abspath")
+  dir_pw_json = get_path_info("../pw_json", "abspath")
   dir_pw_kvs = get_path_info("../pw_kvs", "abspath")
   dir_pw_libc = get_path_info("../pw_libc", "abspath")
   dir_pw_libcxx = get_path_info("../pw_libcxx", "abspath")
@@ -232,6 +235,7 @@ declare_args() {
     dir_pw_boot,
     dir_pw_boot_cortex_m,
     dir_pw_build,
+    dir_pw_build_android,
     dir_pw_build_info,
     dir_pw_build_mcuxpresso,
     dir_pw_bytes,
@@ -254,6 +258,7 @@ declare_args() {
     dir_pw_cpu_exception_cortex_m,
     dir_pw_crypto,
     dir_pw_digital_io,
+    dir_pw_digital_io_linux,
     dir_pw_digital_io_mcuxpresso,
     dir_pw_digital_io_rp2040,
     dir_pw_docgen,
@@ -277,6 +282,7 @@ declare_args() {
     dir_pw_interrupt_xtensa,
     dir_pw_interrupt_zephyr,
     dir_pw_intrusive_ptr,
+    dir_pw_json,
     dir_pw_kvs,
     dir_pw_libc,
     dir_pw_libcxx,
@@ -395,6 +401,7 @@ declare_args() {
     "$dir_pw_boot:tests",
     "$dir_pw_boot_cortex_m:tests",
     "$dir_pw_build:tests",
+    "$dir_pw_build_android:tests",
     "$dir_pw_build_info:tests",
     "$dir_pw_build_mcuxpresso:tests",
     "$dir_pw_bytes:tests",
@@ -417,6 +424,7 @@ declare_args() {
     "$dir_pw_cpu_exception_cortex_m:tests",
     "$dir_pw_crypto:tests",
     "$dir_pw_digital_io:tests",
+    "$dir_pw_digital_io_linux:tests",
     "$dir_pw_digital_io_mcuxpresso:tests",
     "$dir_pw_digital_io_rp2040:tests",
     "$dir_pw_docgen:tests",
@@ -440,6 +448,7 @@ declare_args() {
     "$dir_pw_interrupt_xtensa:tests",
     "$dir_pw_interrupt_zephyr:tests",
     "$dir_pw_intrusive_ptr:tests",
+    "$dir_pw_json:tests",
     "$dir_pw_kvs:tests",
     "$dir_pw_libc:tests",
     "$dir_pw_libcxx:tests",
@@ -558,6 +567,7 @@ declare_args() {
     "$dir_pw_boot:docs",
     "$dir_pw_boot_cortex_m:docs",
     "$dir_pw_build:docs",
+    "$dir_pw_build_android:docs",
     "$dir_pw_build_info:docs",
     "$dir_pw_build_mcuxpresso:docs",
     "$dir_pw_bytes:docs",
@@ -580,6 +590,7 @@ declare_args() {
     "$dir_pw_cpu_exception_cortex_m:docs",
     "$dir_pw_crypto:docs",
     "$dir_pw_digital_io:docs",
+    "$dir_pw_digital_io_linux:docs",
     "$dir_pw_digital_io_mcuxpresso:docs",
     "$dir_pw_digital_io_rp2040:docs",
     "$dir_pw_docgen:docs",
@@ -603,6 +614,7 @@ declare_args() {
     "$dir_pw_interrupt_xtensa:docs",
     "$dir_pw_interrupt_zephyr:docs",
     "$dir_pw_intrusive_ptr:docs",
+    "$dir_pw_json:docs",
     "$dir_pw_kvs:docs",
     "$dir_pw_libc:docs",
     "$dir_pw_libcxx:docs",

@@ -23,6 +23,12 @@
 
 namespace pw::allocator {
 
+/// This tag type is used to explicitly select the constructor which adds
+/// the tracking allocator's metrics group as a child of the tracking
+/// allocator it is wrapping.
+static constexpr struct AddTrackingAllocatorAsChild {
+} kAddTrackingAllocatorAsChild = {};
+
 /// Wraps an `Allocator` and records details of its usage.
 ///
 /// Metric collection is performed using the provided template parameter type.
@@ -32,45 +38,30 @@ namespace pw::allocator {
 /// default metrics implementation, or `TrackingAllocatorForTest` which
 /// always uses the real metrics implementation.
 template <typename MetricsType>
-class TrackingAllocatorImpl : public AllocatorWithMetrics<MetricsType> {
+class TrackingAllocatorImpl : public Allocator {
  public:
-  using metrics_type = MetricsType;
-  using Base = AllocatorWithMetrics<MetricsType>;
+  using metric_type = MetricsType;
 
-  /// Constexpr constructor. Callers must explicitly call `Init`.
-  constexpr explicit TrackingAllocatorImpl(metric::Token token)
-      : metrics_(token) {}
+  TrackingAllocatorImpl(metric::Token token, Allocator& allocator)
+      : allocator_(allocator), metrics_(token) {}
 
-  /// Non-constexpr constructor that autmatically invokes `Init`.
+  template <typename OtherMetrics>
   TrackingAllocatorImpl(metric::Token token,
-                        Allocator& allocator,
-                        size_t capacity)
-      : TrackingAllocatorImpl(token) {
-    Init(allocator, capacity);
+                        TrackingAllocatorImpl<OtherMetrics>& parent,
+                        const AddTrackingAllocatorAsChild&)
+      : allocator_(parent), metrics_(token) {
+    parent.metric_group().Add(metric_group());
   }
 
-  bool initialized() const { return allocator_ != nullptr; }
+  const metric::Group& metric_group() const { return metrics_.group(); }
+  metric::Group& metric_group() { return metrics_.group(); }
 
-  metrics_type& metric_group() override { return metrics_; }
-  const metrics_type& metric_group() const override { return metrics_; }
-
-  /// Sets the wrapped allocator.
-  ///
-  /// All other methods will fail until this method is called.
-  ///
-  /// @param[in]  allocator   The allocator to wrap and record.
-  void Init(Allocator& allocator, size_t capacity) {
-    allocator_ = &allocator;
-    metrics_.Init(capacity);
-  }
+  const MetricsType& metrics() const { return metrics_.metrics(); }
 
  private:
   /// @copydoc Allocator::Allocate
   void* DoAllocate(Layout layout) override {
-    if (allocator_ == nullptr) {
-      return nullptr;
-    }
-    void* ptr = allocator_->Allocate(layout);
+    void* ptr = allocator_.Allocate(layout);
     if (ptr == nullptr) {
       metrics_.RecordFailure();
       return nullptr;
@@ -81,18 +72,13 @@ class TrackingAllocatorImpl : public AllocatorWithMetrics<MetricsType> {
 
   /// @copydoc Allocator::Deallocate
   void DoDeallocate(void* ptr, Layout layout) override {
-    if (allocator_ != nullptr && ptr != nullptr) {
-      allocator_->Deallocate(ptr, layout);
-      metrics_.RecordDeallocation(layout.size());
-    }
+    allocator_.Deallocate(ptr, layout);
+    metrics_.RecordDeallocation(layout.size());
   }
 
   /// @copydoc Allocator::Resize
   bool DoResize(void* ptr, Layout layout, size_t new_size) override {
-    if (allocator_ == nullptr) {
-      return false;
-    }
-    if (!allocator_->Resize(ptr, layout, new_size)) {
+    if (!allocator_.Resize(ptr, layout, new_size)) {
       metrics_.RecordFailure();
       return false;
     }
@@ -100,22 +86,9 @@ class TrackingAllocatorImpl : public AllocatorWithMetrics<MetricsType> {
     return true;
   }
 
-  /// @copydoc Allocator::GetLayout
-  Result<Layout> DoGetLayout(const void* ptr) const override {
-    return allocator_->GetLayout(ptr);
-  }
-
-  /// @copydoc Allocator::Query
-  Status DoQuery(const void* ptr, Layout layout) const override {
-    return allocator_->Query(ptr, layout);
-  }
-
   /// @copydoc Allocator::Reallocate
   void* DoReallocate(void* ptr, Layout layout, size_t new_size) override {
-    if (allocator_ == nullptr) {
-      return nullptr;
-    }
-    void* new_ptr = allocator_->Reallocate(ptr, layout, new_size);
+    void* new_ptr = allocator_.Reallocate(ptr, layout, new_size);
     if (new_ptr == nullptr) {
       metrics_.RecordFailure();
       return nullptr;
@@ -124,15 +97,50 @@ class TrackingAllocatorImpl : public AllocatorWithMetrics<MetricsType> {
     return new_ptr;
   }
 
-  Allocator* allocator_ = nullptr;
-  metrics_type metrics_;
+  /// @copydoc Allocator::GetLayout
+  Result<Layout> DoGetLayout(const void* ptr) const override {
+    return allocator_.GetLayout(ptr);
+  }
+
+  /// @copydoc Allocator::Query
+  Status DoQuery(const void* ptr, Layout layout) const override {
+    return allocator_.Query(ptr, layout);
+  }
+
+  Allocator& allocator_;
+  internal::Metrics<MetricsType> metrics_;
 };
 
-/// Allocator metric proxy that uses the default metrics implementation.
-///
-/// Depending on the value of the `pw_allocator_COLLECT_METRICS` build argument,
-/// the `internal::DefaultMetrics` type is an alias for either the real or stub
-/// metrics implementation.
-using TrackingAllocator = TrackingAllocatorImpl<internal::DefaultMetrics>;
+// TODO(b/326509341): This is an interim class to facilitate refactoring
+// downstream consumers of `TrackingAllocator` to add a template parameter.
+//
+// The migration will be performed as follows:
+// 1. Downstream consumers will be updated to use `TrackingAllocatorImpl<...>`.
+// 2. The iterim `TrackingAllocator` class will be removed.
+// 3. `TrackingAllocatorImpl<...>` will be renamed to `TrackingAllocator<...>`,
+//    with a `TrackingAllocatorImpl<...>` alias pointing to it.
+// 4. Downstream consumers will be updated to use `TrackingAllocator<...>`.
+// 5. The `TrackingAllocatorImpl<...>` alias will be removed.
+class TrackingAllocator : public TrackingAllocatorImpl<AllMetrics> {
+ public:
+  TrackingAllocator(metric::Token token, Allocator& allocator)
+      : TrackingAllocatorImpl<AllMetrics>(token, allocator) {}
+  uint32_t allocated_bytes() const { return metrics().allocated_bytes.value(); }
+  uint32_t peak_allocated_bytes() const {
+    return metrics().peak_allocated_bytes.value();
+  }
+  uint32_t cumulative_allocated_bytes() const {
+    return metrics().cumulative_allocated_bytes.value();
+  }
+  uint32_t num_allocations() const { return metrics().num_allocations.value(); }
+  uint32_t num_deallocations() const {
+    return metrics().num_deallocations.value();
+  }
+  uint32_t num_resizes() const { return metrics().num_resizes.value(); }
+  uint32_t num_reallocations() const {
+    return metrics().num_reallocations.value();
+  }
+  uint32_t num_failures() const { return metrics().num_failures.value(); }
+};
 
 }  // namespace pw::allocator
