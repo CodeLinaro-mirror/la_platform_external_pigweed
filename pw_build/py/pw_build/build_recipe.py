@@ -14,6 +14,8 @@
 # the License.
 """Watch build config dataclasses."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
@@ -214,7 +216,7 @@ class BuildCommand:
 class BuildRecipeStatus:
     """Stores the status of a build recipe."""
 
-    recipe: 'BuildRecipe'
+    recipe: BuildRecipe
     current_step: str = ''
     percent: float = 0.0
     error_count: int = 0
@@ -433,12 +435,15 @@ class BuildRecipe:
             is set for all included steps.
         steps: List of BuildCommands to run.
         title: Custom title. The build_dir is used if this is ommited.
+        auto_create_build_dir: Auto create the build directory and all necessary
+            parent directories before running any build commands.
     """
 
     build_dir: Path
     steps: list[BuildCommand] = field(default_factory=list)
     title: str | None = None
     enabled: bool = True
+    auto_create_build_dir: bool = True
 
     def __hash__(self):
         return hash((self.build_dir, self.title, len(self.steps)))
@@ -454,7 +459,7 @@ class BuildRecipe:
         self.error_logger: logging.Logger | None = None
         self._logfile: Path | None = None
         self._status: BuildRecipeStatus = BuildRecipeStatus(self)
-        self.project_builder: 'ProjectBuilder | None' = None
+        self.project_builder: ProjectBuilder | None = None
 
     def toggle_enabled(self) -> None:
         self.enabled = not self.enabled
@@ -513,7 +518,7 @@ class BuildRecipe:
         return message
 
 
-def create_build_recipes(prefs: 'ProjectBuilderPrefs') -> list[BuildRecipe]:
+def create_build_recipes(prefs: ProjectBuilderPrefs) -> list[BuildRecipe]:
     """Create a list of BuildRecipes from ProjectBuilderPrefs."""
     build_recipes: list[BuildRecipe] = []
 

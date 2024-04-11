@@ -27,9 +27,13 @@ cc_library(
     name = "allocator",
     srcs = [
         "allocator.cc",
+        "unique_ptr.cc",
     ],
     hdrs = [
         "public/pw_allocator/allocator.h",
+        "public/pw_allocator/capability.h",
+        "public/pw_allocator/layout.h",
+        "public/pw_allocator/unique_ptr.h",
     ],
     includes = ["public"],
     deps = [
@@ -211,9 +215,6 @@ cc_library(
 cc_library(
     name = "testing",
     testonly = True,
-    srcs = [
-        "testing.cc",
-    ],
     hdrs = [
         "public/pw_allocator/testing.h",
     ],
@@ -429,7 +430,7 @@ cc_library(
     hdrs = ["public/pw_allocator/size_reporter.h"],
     includes = ["public"],
     deps = [
-        ":allocator",
+        ":null_allocator",
         "//pw_bloat:bloat_this_binary",
         "//pw_bytes",
     ],
