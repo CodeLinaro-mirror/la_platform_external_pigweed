@@ -149,6 +149,12 @@ class PW_NODISCARD_STR(
   }
   constexpr T&& operator*() && noexcept { return std::move(*value_); }
 
+  /// Ignores the ``Poll`` value.
+  ///
+  /// This method does nothing except prevent ``no_discard`` or
+  /// unused variable warnings from firing.
+  constexpr void IgnorePoll() const {}
+
  private:
   template <typename U>
   friend class Poll;
@@ -265,8 +271,11 @@ inline StatusWithSize ToString(const async2::Poll<T>& poll, span<char> buffer) {
 }
 
 template <>
-inline StatusWithSize ToString(const async2::Poll<>&, span<char> buffer) {
-  return ToString(async2::ReadyType{}, buffer);
+inline StatusWithSize ToString(const async2::Poll<>& poll, span<char> buffer) {
+  if (poll.IsReady()) {
+    return ToString(async2::ReadyType{}, buffer);
+  }
+  return ToString(async2::PendingType{}, buffer);
 }
 
 }  // namespace pw
