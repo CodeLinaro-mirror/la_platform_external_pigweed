@@ -50,6 +50,13 @@
       "C++20"
     ]
   },
+  "pw_cli": {
+    "tagline": "Enhance and accelerate custom command-line tooling",
+    "status": "stable",
+    "languages": [
+      "Python"
+    ]
+  },
   "pw_console": {
     "tagline": "Multi-purpose pluggable interactive console for dev & manufacturing",
     "status": "stable",
@@ -199,6 +206,14 @@
   "pw_span": {
     "tagline": "std::span for C++17",
     "status": "stable",
+    "languages": [
+      "C++17",
+      "C++20"
+    ]
+  },
+  "pw_spi_linux": {
+    "tagline": "SPI interface for Linux userspace",
+    "status": "unstable",
     "languages": [
       "C++17",
       "C++20"

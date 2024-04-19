@@ -144,10 +144,12 @@ declare_args() {
   dir_pw_rpc = get_path_info("../pw_rpc", "abspath")
   dir_pw_rpc_transport = get_path_info("../pw_rpc_transport", "abspath")
   dir_pw_rust = get_path_info("../pw_rust", "abspath")
+  dir_pw_sensor = get_path_info("../pw_sensor", "abspath")
   dir_pw_snapshot = get_path_info("../pw_snapshot", "abspath")
   dir_pw_software_update = get_path_info("../pw_software_update", "abspath")
   dir_pw_span = get_path_info("../pw_span", "abspath")
   dir_pw_spi = get_path_info("../pw_spi", "abspath")
+  dir_pw_spi_linux = get_path_info("../pw_spi_linux", "abspath")
   dir_pw_spi_mcuxpresso = get_path_info("../pw_spi_mcuxpresso", "abspath")
   dir_pw_spi_rp2040 = get_path_info("../pw_spi_rp2040", "abspath")
   dir_pw_status = get_path_info("../pw_status", "abspath")
@@ -324,10 +326,12 @@ declare_args() {
     dir_pw_rpc,
     dir_pw_rpc_transport,
     dir_pw_rust,
+    dir_pw_sensor,
     dir_pw_snapshot,
     dir_pw_software_update,
     dir_pw_span,
     dir_pw_spi,
+    dir_pw_spi_linux,
     dir_pw_spi_mcuxpresso,
     dir_pw_spi_rp2040,
     dir_pw_status,
@@ -494,10 +498,12 @@ declare_args() {
     "$dir_pw_rpc:tests",
     "$dir_pw_rpc_transport:tests",
     "$dir_pw_rust:tests",
+    "$dir_pw_sensor:tests",
     "$dir_pw_snapshot:tests",
     "$dir_pw_software_update:tests",
     "$dir_pw_span:tests",
     "$dir_pw_spi:tests",
+    "$dir_pw_spi_linux:tests",
     "$dir_pw_spi_mcuxpresso:tests",
     "$dir_pw_spi_rp2040:tests",
     "$dir_pw_status:tests",
@@ -664,10 +670,12 @@ declare_args() {
     "$dir_pw_rpc:docs",
     "$dir_pw_rpc_transport:docs",
     "$dir_pw_rust:docs",
+    "$dir_pw_sensor:docs",
     "$dir_pw_snapshot:docs",
     "$dir_pw_software_update:docs",
     "$dir_pw_span:docs",
     "$dir_pw_spi:docs",
+    "$dir_pw_spi_linux:docs",
     "$dir_pw_spi_mcuxpresso:docs",
     "$dir_pw_spi_rp2040:docs",
     "$dir_pw_status:docs",
