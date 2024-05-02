@@ -29,13 +29,23 @@ import '@material/web/iconbutton/icon-button.js';
 import '@material/web/menu/menu.js';
 import '@material/web/menu/menu-item.js';
 
+/**
+ * Create an instance of log-viewer
+ * @param logSources - collection of sources from where logs originate
+ * @param root - HTML component to append log-viewer to
+ * @param state - handles state between sessions, defaults to localStorage
+ * @param logStore - stores and handles management of all logs
+ * @param columnOrder - defines column order between severity and message
+ *   undefined fields are appended between defined order and message.
+ */
 export function createLogViewer(
+  logSources: LogSource | LogSource[],
   root: HTMLElement,
   state: StateStore = new LocalStorageState(),
-  logStore: LogStore,
-  ...logSources: LogSource[]
+  logStore: LogStore = new LogStore(),
+  columnOrder: string[] = ['log_source', 'time', 'timestamp'],
 ) {
-  const logViewer = new RootComponent(state);
+  const logViewer = new RootComponent(state, columnOrder);
   root.appendChild(logViewer);
   let lastUpdateTimeoutId: NodeJS.Timeout;
 
@@ -56,7 +66,9 @@ export function createLogViewer(
     }
   };
 
-  logSources.forEach((logSource: LogSource) => {
+  const sourcesArray = Array.isArray(logSources) ? logSources : [logSources];
+
+  sourcesArray.forEach((logSource: LogSource) => {
     // Add the event listener to the LogSource instance
     logSource.addEventListener('log-entry', logEntryListener);
   });
@@ -67,7 +79,7 @@ export function createLogViewer(
       logViewer.parentNode.removeChild(logViewer);
     }
 
-    logSources.forEach((logSource: LogSource) => {
+    sourcesArray.forEach((logSource: LogSource) => {
       logSource.removeEventListener('log-entry', logEntryListener);
     });
   };
