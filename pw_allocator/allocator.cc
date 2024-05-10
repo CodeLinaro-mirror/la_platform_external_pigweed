@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <cstring>
 
-namespace pw::allocator {
+namespace pw {
+
+using ::pw::allocator::Layout;
 
 Result<Layout> Allocator::GetRequestedLayout(const Allocator& allocator,
                                              const void* ptr) {
@@ -70,7 +72,7 @@ void* Allocator::DoReallocate(void* ptr, Layout old_layout, size_t new_size) {
   if (!allocated.ok()) {
     return nullptr;
   }
-  void* new_ptr = DoAllocate(Layout(new_size, old_layout.alignment()));
+  void* new_ptr = Allocate(Layout(new_size, old_layout.alignment()));
   if (new_ptr == nullptr) {
     return nullptr;
   }
@@ -93,4 +95,4 @@ Result<Layout> Allocator::DoGetAllocatedLayout(const void*) const {
   return Status::Unimplemented();
 }
 
-}  // namespace pw::allocator
+}  // namespace pw
