@@ -16,23 +16,26 @@
 #include <memory>
 #include <utility>
 
-namespace pw::allocator {
+namespace pw {
 
 // Forward declaration.
 class Deallocator;
 
-namespace internal {
+namespace allocator::internal {
 
-/// This class simply provides a type-erased static method to deallocate the
-/// memory in a unique pointer. This allows ``UniquePtr<T>`` to be declared
-/// without a complete declaration of ``Deallocator``, breaking the
+/// This class simply provides type-erased static methods to check capabilities
+/// and deallocate memory in a unique pointer. This allows ``UniquePtr<T>`` to
+/// be declared without a complete declaration of ``Deallocator``, breaking the
 /// dependency cycle between ``UniquePtr<T>` and ``Allocator::MakeUnique<T>()``.
 class BaseUniquePtr {
  protected:
+  using Capability = ::pw::allocator::Capability;
+
+  static bool HasCapability(Deallocator* deallocator, Capability capability);
   static void Deallocate(Deallocator* deallocator, void* ptr);
 };
 
-}  // namespace internal
+}  // namespace allocator::internal
 
 /// An RAII pointer to a value of type ``T`` stored in memory provided by a
 /// ``Deallocator``.
@@ -41,8 +44,10 @@ class BaseUniquePtr {
 /// in order to support ``Deallocator`` and encourage safe usage. Most
 /// notably, ``UniquePtr<T>`` cannot be constructed from a ``T*``.
 template <typename T>
-class UniquePtr : public internal::BaseUniquePtr {
+class UniquePtr : public allocator::internal::BaseUniquePtr {
  public:
+  using Base = ::pw::allocator::internal::BaseUniquePtr;
+
   /// Creates an empty (``nullptr``) instance.
   ///
   /// NOTE: Instances of this type are most commonly constructed using
@@ -102,7 +107,10 @@ class UniquePtr : public internal::BaseUniquePtr {
   ///
   /// After this function returns, this ``UniquePtr`` will be in an "empty"
   /// (``nullptr``) state until a new value is assigned.
-  UniquePtr& operator=(std::nullptr_t) { Reset(); }
+  UniquePtr& operator=(std::nullptr_t) {
+    Reset();
+    return *this;
+  }
 
   /// Destructs and deallocates any currently-held value.
   ~UniquePtr() { Reset(); }
@@ -126,11 +134,14 @@ class UniquePtr : public internal::BaseUniquePtr {
   /// After this function returns, this ``UniquePtr`` will be in an "empty"
   /// (``nullptr``) state until a new value is assigned.
   void Reset() {
-    if (value_ != nullptr) {
-      std::destroy_at(value_);
-      internal::BaseUniquePtr::Deallocate(deallocator_, value_);
-      Release();
+    if (value_ == nullptr) {
+      return;
     }
+    if (!Base::HasCapability(deallocator_, Capability::kSkipsDestroy)) {
+      std::destroy_at(value_);
+    }
+    Base::Deallocate(deallocator_, value_);
+    Release();
   }
 
   /// ``operator bool`` is not provided in order to ensure that there is no
@@ -200,4 +211,11 @@ class UniquePtr : public internal::BaseUniquePtr {
   friend class Deallocator;
 };
 
-}  // namespace pw::allocator
+namespace allocator {
+
+// Alias for module consumers using the older name for the above type.
+template <typename T>
+using UniquePtr = ::pw::UniquePtr<T>;
+
+}  // namespace allocator
+}  // namespace pw
