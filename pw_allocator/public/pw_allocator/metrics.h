@@ -87,36 +87,37 @@ PW_ALLOCATOR_METRICS_DECLARE(unfulfilled_bytes);
   static_assert(!::pw::allocator::has_##metric_name<void>::value); \
   PW_METRIC(metric_name, #metric_name, 0U)
 
-/// A predefined metric struct that enables all allocator metrics.
-struct AllMetrics {
-  PW_ALLOCATOR_METRICS_ENABLE(requested_bytes);
-  PW_ALLOCATOR_METRICS_ENABLE(peak_requested_bytes);
-  PW_ALLOCATOR_METRICS_ENABLE(cumulative_requested_bytes);
-
-  PW_ALLOCATOR_METRICS_ENABLE(allocated_bytes);
-  PW_ALLOCATOR_METRICS_ENABLE(peak_allocated_bytes);
-  PW_ALLOCATOR_METRICS_ENABLE(cumulative_allocated_bytes);
-
-  PW_ALLOCATOR_METRICS_ENABLE(num_allocations);
-  PW_ALLOCATOR_METRICS_ENABLE(num_deallocations);
-  PW_ALLOCATOR_METRICS_ENABLE(num_resizes);
-  PW_ALLOCATOR_METRICS_ENABLE(num_reallocations);
-
-  PW_ALLOCATOR_METRICS_ENABLE(num_failures);
-  PW_ALLOCATOR_METRICS_ENABLE(unfulfilled_bytes);
-};
-
 /// A predefined metric struct that enables no allocator metrics.
 struct NoMetrics {};
 
 namespace internal {
 
+/// A metrics type that enables all metrics for testing.
+///
+/// Warning! Do not use in production code. If metrics are added to it later,
+/// code using this struct may unexpected grow in code size, memory usage,
+/// and/or performance overhead.
+struct AllMetrics {
+  PW_ALLOCATOR_METRICS_ENABLE(requested_bytes);
+  PW_ALLOCATOR_METRICS_ENABLE(peak_requested_bytes);
+  PW_ALLOCATOR_METRICS_ENABLE(cumulative_requested_bytes);
+  PW_ALLOCATOR_METRICS_ENABLE(allocated_bytes);
+  PW_ALLOCATOR_METRICS_ENABLE(peak_allocated_bytes);
+  PW_ALLOCATOR_METRICS_ENABLE(cumulative_allocated_bytes);
+  PW_ALLOCATOR_METRICS_ENABLE(num_allocations);
+  PW_ALLOCATOR_METRICS_ENABLE(num_deallocations);
+  PW_ALLOCATOR_METRICS_ENABLE(num_resizes);
+  PW_ALLOCATOR_METRICS_ENABLE(num_reallocations);
+  PW_ALLOCATOR_METRICS_ENABLE(num_failures);
+  PW_ALLOCATOR_METRICS_ENABLE(unfulfilled_bytes);
+};
+
 /// Encapsulates the metrics struct for ``pw::allocator::TrackingAllocator``.
 ///
 /// This class uses the type traits from ``PW_ALLOCATOR_METRICS_DECLARE`` to
 /// conditionally include or exclude code to update metrics based on calls to
-/// the ``pw::allocator::Allocator`` API. This minimizes code size without
-/// adding additional conditions to be evaluated at runtime.
+/// the ``pw::Allocator`` API. This minimizes code size without adding
+/// additional conditions to be evaluated at runtime.
 ///
 /// @tparam   MetricsType   The struct defining which metrics are enabled.
 template <typename MetricsType>

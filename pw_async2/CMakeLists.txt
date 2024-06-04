@@ -110,3 +110,44 @@ pw_add_test(pw_async2.pendable_as_task_test
   PRIVATE_DEPS
     pw_async2.pendable_as_task
 )
+
+pw_add_library(pw_async2.allocate_task INTERFACE
+  HEADERS
+    public/pw_async2/allocate_task.h
+  PUBLIC_DEPS
+    pw_async2.dispatcher
+    pw_allocator.allocator
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_test(pw_async2.allocate_task_test
+  SOURCES
+    allocate_task_test.cc
+  PRIVATE_DEPS
+    pw_async2.allocate_task
+    pw_allocator.testing
+)
+
+if(NOT "cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+  pw_add_library(pw_async2.coro INTERFACE
+    HEADERS
+      public/pw_async2/coro.h
+    PUBLIC_DEPS
+      pw_allocator.allocator
+      pw_async2.dispatcher
+    PUBLIC_INCLUDES
+      public
+  )
+
+  pw_add_test(pw_async2.coro_test
+    SOURCES
+      coro_test.cc
+    PRIVATE_DEPS
+      pw_allocator.null_allocator
+      pw_allocator.testing
+      pw_async2.coro
+  )
+endif()
+
+add_subdirectory(examples)
