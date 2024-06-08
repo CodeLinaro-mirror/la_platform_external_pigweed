@@ -12,18 +12,15 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-import { TableColumn } from '../shared/interfaces';
+#pragma once
 
-interface AddViewEvent extends CustomEvent {
-  detail: {
-    columnData: TableColumn[];
-  };
+#include <stdlib.h>
+
+namespace chre {
+
+template <typename T>
+inline T* memoryAlignedAlloc() {
+  return static_cast<T*>(aligned_alloc(alignof(T), sizeof(T)));
 }
 
-declare global {
-  interface GlobalEventHandlersEventMap {
-    'add-view': AddViewEvent;
-  }
-}
-
-export default AddViewEvent;
+}  // namespace chre
