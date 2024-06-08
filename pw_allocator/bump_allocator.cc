@@ -15,27 +15,31 @@
 #include "pw_allocator/bump_allocator.h"
 
 #include "pw_allocator/buffer.h"
+#include "pw_bytes/alignment.h"
 
 namespace pw::allocator {
 
-BumpAllocator::BumpAllocator(ByteSpan region)
-    : Allocator(kCapabilities), remaining_(region) {}
-
-BumpAllocator::~BumpAllocator() {
-  if (owned_ != nullptr) {
-    owned_->Destroy();
-  }
+void BumpAllocator::Init(ByteSpan region) {
+  Reset();
+  remaining_ = region;
 }
 
 void* BumpAllocator::DoAllocate(Layout layout) {
-  Result<ByteSpan> region = GetAlignedSubspan(remaining_, layout.alignment());
-  if (!region.ok() || region->size() < layout.size()) {
+  ByteSpan region = GetAlignedSubspan(remaining_, layout.alignment());
+  if (region.size() < layout.size()) {
     return nullptr;
   }
-  remaining_ = region->subspan(layout.size());
-  return region->data();
+  remaining_ = region.subspan(layout.size());
+  return region.data();
 }
 
 void BumpAllocator::DoDeallocate(void*) {}
+
+void BumpAllocator::Reset() {
+  if (owned_ != nullptr) {
+    owned_->Destroy();
+  }
+  remaining_ = ByteSpan();
+}
 
 }  // namespace pw::allocator
