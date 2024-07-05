@@ -19,13 +19,16 @@ include("$ENV{PW_ROOT}/pw_build/pigweed.cmake")
 pw_add_library(pw_allocator.allocator STATIC
   HEADERS
     public/pw_allocator/allocator.h
+    public/pw_allocator/as_pmr_allocator.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
     pw_allocator.deallocator
+    pw_assert.check
     pw_result
   SOURCES
     allocator.cc
+    as_pmr_allocator.cc
 )
 
 pw_add_library(pw_allocator.allocator_as_pool STATIC
@@ -93,6 +96,7 @@ pw_add_library(pw_allocator.block_allocator_base STATIC
   PUBLIC_DEPS
     pw_allocator.allocator
     pw_allocator.block
+    pw_allocator.fragmentation
     pw_bytes.alignment
     pw_result
     pw_status
@@ -124,6 +128,7 @@ pw_add_library(pw_allocator.bucket_block_allocator INTERFACE
   PUBLIC_DEPS
     pw_allocator.block_allocator_base
     pw_allocator.bucket
+    pw_status
 )
 
 pw_add_library(pw_allocator.buddy_allocator STATIC
@@ -140,12 +145,13 @@ pw_add_library(pw_allocator.buddy_allocator STATIC
     pw_containers.vector
   PRIVATE_DEPS
     pw_allocator.buffer
+    pw_bytes.alignment
     pw_assert
   SOURCES
     buddy_allocator.cc
 )
 
-pw_add_library(pw_allocator.buffer STATIC
+pw_add_library(pw_allocator.buffer INTERFACE
   HEADERS
     public/pw_allocator/buffer.h
   PUBLIC_INCLUDES
@@ -153,11 +159,6 @@ pw_add_library(pw_allocator.buffer STATIC
   PUBLIC_DEPS
     pw_bytes
     pw_result
-  PRIVATE_DEPS
-    pw_assert
-    pw_bytes.alignment
-  SOURCES
-    buffer.cc
 )
 
 pw_add_library(pw_allocator.bump_allocator STATIC
@@ -170,6 +171,7 @@ pw_add_library(pw_allocator.bump_allocator STATIC
     pw_bytes
   PRIVATE_DEPS
     pw_allocator.buffer
+    pw_bytes.alignment
   SOURCES
     bump_allocator.cc
 )
@@ -185,6 +187,7 @@ pw_add_library(pw_allocator.chunk_pool STATIC
     pw_result
   PRIVATE_DEPS
     pw_allocator.buffer
+    pw_bytes.alignment
     pw_assert.check
   SOURCES
     chunk_pool.cc
@@ -192,7 +195,6 @@ pw_add_library(pw_allocator.chunk_pool STATIC
 
 pw_add_library(pw_allocator.deallocator STATIC
   SOURCES
-    deallocator.cc
     unique_ptr.cc
   HEADERS
     public/pw_allocator/capability.h
@@ -240,6 +242,15 @@ pw_add_library(pw_allocator.first_fit_block_allocator INTERFACE
     public
   PUBLIC_DEPS
     pw_allocator.block_allocator_base
+)
+
+pw_add_library(pw_allocator.fragmentation STATIC
+  HEADERS
+    public/pw_allocator/fragmentation.h
+  PUBLIC_INCLUDES
+    public
+  SOURCES
+    fragmentation.cc
 )
 
 pw_add_library(pw_allocator.freelist STATIC
@@ -447,6 +458,18 @@ pw_add_test(pw_allocator.allocator_test
     pw_allocator
 )
 
+pw_add_test(pw_allocator.as_pmr_allocator_test
+  SOURCES
+    as_pmr_allocator_test.cc
+  PRIVATE_DEPS
+    pw_allocator.allocator
+    pw_allocator.testing
+    pw_unit_test
+  GROUPS
+    modules
+    pw_allocator
+)
+
 pw_add_test(pw_allocator.best_fit_block_allocator_test
   SOURCES
     best_fit_block_allocator_test.cc
@@ -550,6 +573,16 @@ pw_add_test(pw_allocator.first_fit_block_allocator_test
     pw_allocator.block_allocator_testing
     pw_allocator.buffer
     pw_allocator.first_fit_block_allocator
+  GROUPS
+    modules
+    pw_allocator
+)
+
+pw_add_test(pw_allocator.fragmentation_test
+  SOURCES
+    fragmentation_test.cc
+  PRIVATE_DEPS
+    pw_allocator.fragmentation
   GROUPS
     modules
     pw_allocator

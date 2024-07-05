@@ -198,6 +198,13 @@ AllocatorAsPool
 .. doxygenclass:: pw::allocator::AllocatorAsPool
    :members:
 
+.. _module-pw_allocator-api-as_pmr_allocator:
+
+AsPmrAllocator
+==============
+.. doxygenclass:: pw::allocator::AsPmrAllocator
+   :members:
+
 .. _module-pw_allocator-api-fallback_allocator:
 
 FallbackAllocator
@@ -263,11 +270,18 @@ following macros:
 .. doxygendefine:: PW_ALLOCATOR_METRICS_DECLARE
 .. doxygendefine:: PW_ALLOCATOR_METRICS_ENABLE
 
+.. _module-pw_allocator-api-fragmentation:
+
+Fragmentation
+=============
+.. doxygenstruct:: pw::allocator::Fragmentation
+   :members:
+
 .. _module-pw_allocator-api-size_reporter:
 
 SizeReporter
 ============
-This modules includes a utility class for generating size reports. It is
+This module includes a utility class for generating size reports. It is
 intended for allocator implementers and not for module consumers.
 
 .. doxygenclass:: pw::allocator::SizeReporter
@@ -278,16 +292,10 @@ Buffer management
 .. doxygenclass:: pw::allocator::WithBuffer
    :members:
 
-The following utility functions are available to allocator implementers. They
-are not intended to be used by module consumers.
-
-.. doxygenfunction:: pw::allocator::GetAlignedSubspan
-.. doxygenfunction:: pw::allocator::IsWithin
-
 ------------
 Test support
 ------------
-This modules includes test utilities for allocator implementers. These
+This module includes test utilities for allocator implementers. These
 facilitate writing unit tests and fuzz tests for both concrete and forwarding
 allocator implementations. They are not intended to be used by module consumers.
 

@@ -56,12 +56,6 @@ pw_test("header_chunk_region_tracker_test") {
     dir_pw_status,
   ]
   sources = [ "header_chunk_region_tracker_test.cc" ]
-
-  # TODO: https://pwbug.dev/325509758 - Doesn't work on the Pico yet; hangs
-  # indefinitely.
-  if (pw_build_EXECUTABLE_TARGET_TYPE == "pico_executable") {
-    enable_if = false
-  }
 }
 
 pw_source_set("single_chunk_region_tracker") {
@@ -92,12 +86,6 @@ pw_test("chunk_test") {
     "$dir_pw_allocator:testing",
   ]
   sources = [ "chunk_test.cc" ]
-
-  # TODO: https://pwbug.dev/325509758 - Doesn't work on the Pico yet; hangs
-  # indefinitely.
-  if (pw_build_EXECUTABLE_TARGET_TYPE == "pico_executable") {
-    enable_if = false
-  }
 }
 
 pw_source_set("pw_multibuf") {
@@ -112,16 +100,10 @@ pw_source_set("pw_multibuf") {
 
 pw_test("multibuf_test") {
   deps = [
+    ":internal_test_utils",
     ":pw_multibuf",
-    ":test_utils",
   ]
   sources = [ "multibuf_test.cc" ]
-
-  # TODO: https://pwbug.dev/325509758 - Doesn't work on the Pico yet; hangs
-  # indefinitely.
-  if (pw_build_EXECUTABLE_TARGET_TYPE == "pico_executable") {
-    enable_if = false
-  }
 }
 
 pw_source_set("allocator") {
@@ -181,13 +163,23 @@ pw_source_set("stream") {
 pw_test("stream_test") {
   enable_if = pw_async2_DISPATCHER_BACKEND != ""
   deps = [
+    ":internal_test_utils",
     ":stream",
-    ":test_utils",
   ]
   sources = [ "stream_test.cc" ]
 }
 
-pw_source_set("test_utils") {
+pw_source_set("testing") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_multibuf/simple_allocator_for_test.h" ]
+  public_deps = [
+    ":simple_allocator",
+    "$dir_pw_allocator:testing",
+    dir_pw_assert,
+  ]
+}
+
+pw_source_set("internal_test_utils") {
   sources = [ "pw_multibuf_private/test_utils.h" ]
   public_deps = [
     ":header_chunk_region_tracker",

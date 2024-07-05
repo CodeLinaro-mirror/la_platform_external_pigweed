@@ -39,6 +39,7 @@ class BlockAllocatorTestBase : public ::testing::Test {
   static constexpr size_t kDefaultBlockOverhead = Block<>::kBlockOverhead;
 
   // Size of the memory region to use in the tests below.
+  // This must be large enough so that BlockType::Init does not fail.
   static constexpr size_t kCapacity = 1024;
 
   // The number of allocated pointers cached by the test fixture.
@@ -104,7 +105,6 @@ class BlockAllocatorTestBase : public ::testing::Test {
   void ResizeSmallSmaller();
   void ResizeSmallLarger();
   void ResizeSmallLargerFailure();
-  void CanGetLayoutFromValidPointer();
 
  private:
   std::array<void*, kNumPtrs> ptrs_;
@@ -141,7 +141,7 @@ class BlockAllocatorTest : public BlockAllocatorTestBase {
   static void CanAutomaticallyInit(BlockAllocatorType& allocator);
   void CanExplicitlyInit(BlockAllocatorType& allocator);
   void IterateOverBlocks();
-  void CannotGetLayoutFromInvalidPointer();
+  void CanMeasureFragmentation();
 
  private:
   BlockAllocatorType& allocator_;
@@ -202,7 +202,7 @@ struct Preallocation {
 
 template <typename BlockAllocatorType>
 Allocator& BlockAllocatorTest<BlockAllocatorType>::GetAllocator() {
-  EXPECT_EQ(allocator_.Init(GetBytes()), OkStatus());
+  allocator_.Init(GetBytes());
   return allocator_;
 }
 
@@ -222,7 +222,6 @@ Allocator& BlockAllocatorTest<BlockAllocatorType>::GetAllocator(
   }
 
   Result<BlockType*> result = BlockType::Init(GetBytes());
-  PW_ASSERT(result.ok());
   BlockType* block = *result;
   void* begin = block->UsableSpace();
 
@@ -243,7 +242,8 @@ Allocator& BlockAllocatorTest<BlockAllocatorType>::GetAllocator(
     size_t inner_size = outer_size - BlockType::kBlockOverhead;
 
     block->MarkFree();
-    PW_ASSERT(BlockType::AllocFirst(block, inner_size, 1).ok());
+    Layout layout(inner_size, 1);
+    PW_ASSERT(BlockType::AllocFirst(block, layout).ok());
     if (!block->Last()) {
       block->Next()->MarkUsed();
     }
@@ -276,16 +276,18 @@ Allocator& BlockAllocatorTest<BlockAllocatorType>::GetAllocator(
     block->MarkFree();
   }
   block = BlockType::FromUsableSpace(begin);
-  PW_ASSERT(allocator_.Init(block).ok());
+  allocator_.Init(block);
   return allocator_;
 }
 
 template <typename BlockAllocatorType>
 void* BlockAllocatorTest<BlockAllocatorType>::NextAfter(size_t index) {
-  if (index > kNumPtrs) {
+  void* ptr = Fetch(index);
+  if (ptr == nullptr) {
     return nullptr;
   }
-  auto* block = BlockType::FromUsableSpace(Fetch(index));
+
+  auto* block = BlockType::FromUsableSpace(ptr);
   while (!block->Last()) {
     block = block->Next();
     if (block->Used()) {
@@ -317,7 +319,7 @@ template <typename BlockAllocatorType>
 void BlockAllocatorTest<BlockAllocatorType>::CanExplicitlyInit(
     BlockAllocatorType& allocator) {
   EXPECT_EQ(*(allocator.blocks().begin()), nullptr);
-  EXPECT_EQ(allocator.Init(GetBytes()), pw::OkStatus());
+  allocator.Init(GetBytes());
   EXPECT_NE(*(allocator.blocks().begin()), nullptr);
 }
 
@@ -351,28 +353,32 @@ void BlockAllocatorTest<BlockAllocatorType>::IterateOverBlocks() {
 }
 
 template <typename BlockAllocatorType>
-void BlockAllocatorTest<
-    BlockAllocatorType>::CannotGetLayoutFromInvalidPointer() {
+void BlockAllocatorTest<BlockAllocatorType>::CanMeasureFragmentation() {
   Allocator& allocator = GetAllocator({
-      {kLargerOuterSize, 0},
-      {kLargeOuterSize, Preallocation::kIndexFree},
-      {kSmallOuterSize, 2},
-      {kSmallerOuterSize, Preallocation::kIndexFree},
-      {kSmallOuterSize, 4},
-      {kLargeOuterSize, Preallocation::kIndexFree},
-      {kLargerOuterSize, 6},
+      {0x020, Preallocation::kIndexFree},
+      {0x040, Preallocation::kIndexNext},
+      {0x080, Preallocation::kIndexFree},
+      {0x100, Preallocation::kIndexNext},
+      {0x200, Preallocation::kIndexFree},
+      {Preallocation::kSizeRemaining, Preallocation::kIndexNext},
   });
 
-  Result<Layout> result0 = allocator.GetLayout(nullptr);
-  EXPECT_EQ(result0.status(), Status::NotFound());
-
   auto& block_allocator = static_cast<BlockAllocatorType&>(allocator);
-  for (const auto& block : block_allocator.blocks()) {
+  constexpr size_t alignment = BlockAllocatorType::BlockType::kAlignment;
+  size_t sum_of_squares = 0;
+  size_t sum = 0;
+  for (const auto block : block_allocator.blocks()) {
     if (!block->Used()) {
-      Result<Layout> result1 = allocator.GetLayout(block->UsableSpace());
-      EXPECT_EQ(result1.status(), Status::FailedPrecondition());
+      size_t inner_size = block->InnerSize() / alignment;
+      sum_of_squares += inner_size * inner_size;
+      sum += inner_size;
     }
   }
+
+  Fragmentation fragmentation = block_allocator.MeasureFragmentation();
+  EXPECT_EQ(fragmentation.sum_of_squares.hi, 0U);
+  EXPECT_EQ(fragmentation.sum_of_squares.lo, sum_of_squares);
+  EXPECT_EQ(fragmentation.sum, sum);
 }
 
 }  // namespace pw::allocator::test

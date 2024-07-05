@@ -156,8 +156,12 @@ class AnyChannel {
     return (properties_ & Property::kWritable) != 0;
   }
 
+  /// True if the channel is open for reading. Always false for write-only
+  /// channels.
   [[nodiscard]] constexpr bool is_read_open() const { return read_open_; }
 
+  /// True if the channel is open for writing. Always false for read-only
+  /// channels.
   [[nodiscard]] constexpr bool is_write_open() const { return write_open_; }
 
   [[nodiscard]] constexpr bool is_read_or_write_open() const {
@@ -423,10 +427,10 @@ class AnyChannel {
 
   // `AnyChannel` may only be constructed by deriving from `Channel`.
   explicit constexpr AnyChannel(DataType type, uint8_t properties)
-      : read_open_(true),
-        write_open_(true),
-        data_type_(type),
-        properties_(properties) {}
+      : data_type_(type),
+        properties_(properties),
+        read_open_(readable()),
+        write_open_(writable()) {}
 
   // Virtual interface
 
@@ -457,10 +461,10 @@ class AnyChannel {
   // Common functions
   virtual async2::Poll<Status> DoPendClose(async2::Context& cx) = 0;
 
-  bool read_open_;
-  bool write_open_;
   DataType data_type_;
   uint8_t properties_;
+  bool read_open_;
+  bool write_open_;
 };
 
 /// The basic `Channel` type. Unlike `AnyChannel`, the `Channel`'s properties
@@ -481,12 +485,26 @@ using ByteChannel = Channel<DataType::kByte, kProperties...>;
 template <Property... kProperties>
 using DatagramChannel = Channel<DataType::kDatagram, kProperties...>;
 
+/// Unreliable byte-oriented `Channel` that supports reading.
+using ByteReader = ByteChannel<kReadable>;
+/// Unreliable byte-oriented `Channel` that supports writing.
+using ByteWriter = ByteChannel<kWritable>;
+/// Unreliable byte-oriented `Channel` that supports reading and writing.
+using ByteReaderWriter = ByteChannel<kReadable, kWritable>;
+
 /// Reliable byte-oriented `Channel` that supports reading.
-using ByteReader = ByteChannel<kReliable, kReadable>;
+using ReliableByteReader = ByteChannel<kReliable, kReadable>;
 /// Reliable byte-oriented `Channel` that supports writing.
-using ByteWriter = ByteChannel<kReliable, kWritable>;
+using ReliableByteWriter = ByteChannel<kReliable, kWritable>;
 /// Reliable byte-oriented `Channel` that supports reading and writing.
-using ByteReaderWriter = ByteChannel<kReliable, kReadable, kWritable>;
+using ReliableByteReaderWriter = ByteChannel<kReliable, kReadable, kWritable>;
+
+/// Unreliable datagram-oriented `Channel` that supports reading.
+using DatagramReader = DatagramChannel<kReadable>;
+/// Unreliable datagram-oriented `Channel` that supports writing.
+using DatagramWriter = DatagramChannel<kWritable>;
+/// Unreliable datagram-oriented `Channel` that supports reading and writing.
+using DatagramReaderWriter = DatagramChannel<kReadable, kWritable>;
 
 /// Reliable datagram-oriented `Channel` that supports reading.
 using ReliableDatagramReader = DatagramChannel<kReliable, kReadable>;
@@ -495,13 +513,6 @@ using ReliableDatagramWriter = DatagramChannel<kReliable, kWritable>;
 /// Reliable datagram-oriented `Channel` that supports reading and writing.
 using ReliableDatagramReaderWriter =
     DatagramChannel<kReliable, kReadable, kWritable>;
-
-/// Unreliable datagram-oriented `Channel` that supports reading.
-using DatagramReader = DatagramChannel<kReadable>;
-/// Unreliable datagram-oriented `Channel` that supports writing.
-using DatagramWriter = DatagramChannel<kWritable>;
-/// Unreliable datagram-oriented `Channel` that supports reading and writing.
-using DatagramReaderWriter = DatagramChannel<kReadable, kWritable>;
 
 /// @}
 

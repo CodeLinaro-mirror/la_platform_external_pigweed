@@ -19,8 +19,6 @@ including C, C++, Go, Rust, Shell, Batch and Python.
    pw_assert/docs
    pw_async/docs
    pw_async2/docs
-   pw_async2_basic/docs
-   pw_async2_epoll/docs
    pw_base64/docs
    pw_bloat/docs
    pw_blob_store/docs
@@ -40,6 +38,7 @@ including C, C++, Go, Rust, Shell, Batch and Python.
    pw_chre/docs
    pw_chrono/docs
    pw_cli/docs
+   pw_clock_tree/docs
    pw_compilation_testing/docs
    pw_config_loader/docs
    pw_console/docs
@@ -95,7 +94,6 @@ including C, C++, Go, Rust, Shell, Batch and Python.
    pw_software_update/docs
    pw_span/docs
    pw_spi/docs
-   pw_spi_rp2040/docs
    pw_status/docs
    pw_stm32cube_build/docs
    pw_stream/docs

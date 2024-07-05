@@ -69,7 +69,7 @@ TEST_F(DualFirstFitBlockAllocatorTest, AllocateAlignmentFailure) {
 
 TEST_F(DualFirstFitBlockAllocatorTest, AllocatesUsingThreshold) {
   auto& allocator = GetAllocator({
-      {kLargerOuterSize, Preallocation::kIndexFree},
+      {kLargeOuterSize, Preallocation::kIndexFree},
       {kSmallerOuterSize, 1},
       {kSmallOuterSize, Preallocation::kIndexFree},
       {Preallocation::kSizeRemaining, 3},
@@ -134,14 +134,6 @@ TEST_F(DualFirstFitBlockAllocatorTest, ResizeSmallLargerFailure) {
   ResizeSmallLargerFailure();
 }
 
-TEST_F(DualFirstFitBlockAllocatorTest, CanGetLayoutFromValidPointer) {
-  CanGetLayoutFromValidPointer();
-}
-
-TEST_F(DualFirstFitBlockAllocatorTest, CannotGetLayoutFromInvalidPointer) {
-  CannotGetLayoutFromInvalidPointer();
-}
-
 TEST_F(DualFirstFitBlockAllocatorTest, ResizeLargeSmallerAcrossThreshold) {
   auto& allocator = GetAllocator({{kDualFitThreshold * 2, 0}});
   // Shrinking succeeds, and the pointer is unchanged even though it is now
@@ -162,6 +154,10 @@ TEST_F(DualFirstFitBlockAllocatorTest, ResizeSmallLargerAcrossThreshold) {
   size_t new_size = kDualFitThreshold * 2;
   ASSERT_TRUE(allocator.Resize(Fetch(1), new_size));
   UseMemory(Fetch(1), kDualFitThreshold * 2);
+}
+
+TEST_F(DualFirstFitBlockAllocatorTest, CanMeasureFragmentation) {
+  CanMeasureFragmentation();
 }
 
 }  // namespace

@@ -19,12 +19,11 @@
 #include "pw_async2/dispatcher.h"
 #include "pw_bytes/suffix.h"
 #include "pw_channel/channel.h"
-#include "pw_multibuf/simple_allocator.h"
+#include "pw_multibuf/simple_allocator_for_test.h"
 #include "pw_status/status.h"
 
 namespace {
 
-using ::pw::allocator::test::AllocatorForTest;
 using ::pw::async2::Context;
 using ::pw::async2::Dispatcher;
 using ::pw::async2::Pending;
@@ -32,34 +31,11 @@ using ::pw::async2::Poll;
 using ::pw::async2::Ready;
 using ::pw::async2::Task;
 using ::pw::operator"" _b;
-using ::pw::channel::ByteReader;
 using ::pw::channel::DatagramReader;
 using ::pw::channel::LoopbackByteChannel;
 using ::pw::channel::LoopbackDatagramChannel;
-using ::pw::multibuf::MultiBuf;
-using ::pw::multibuf::MultiBufAllocator;
-using ::pw::multibuf::SimpleAllocator;
-
-class SimpleAllocatorForTest {
- public:
-  SimpleAllocatorForTest() : simple_allocator_(data_area_, meta_alloc_) {}
-  MultiBufAllocator& operator*() { return simple_allocator_; }
-  MultiBufAllocator* operator->() { return &simple_allocator_; }
-
-  MultiBuf BufWith(std::initializer_list<std::byte> data) {
-    std::optional<MultiBuf> buffer = simple_allocator_.Allocate(data.size());
-    PW_CHECK(buffer.has_value());
-    std::copy(data.begin(), data.end(), buffer->begin());
-    return std::move(*buffer);
-  }
-
- private:
-  static constexpr size_t kArbitraryDataSize = 256;
-  static constexpr size_t kArbitraryMetaSize = 2048;
-  std::array<std::byte, kArbitraryDataSize> data_area_;
-  AllocatorForTest<kArbitraryMetaSize> meta_alloc_;
-  SimpleAllocator simple_allocator_;
-};
+using ::pw::channel::ReliableByteReader;
+using ::pw::multibuf::test::SimpleAllocatorForTest;
 
 template <typename ChannelKind>
 class ReaderTask : public Task {
@@ -92,7 +68,7 @@ class ReaderTask : public Task {
 
 TEST(LoopbackDatagramChannel, LoopsEmptyDatagrams) {
   SimpleAllocatorForTest alloc;
-  LoopbackDatagramChannel channel(*alloc);
+  LoopbackDatagramChannel channel(alloc);
   ReaderTask<DatagramReader> read_task(channel);
 
   Dispatcher dispatcher;
@@ -112,7 +88,7 @@ TEST(LoopbackDatagramChannel, LoopsEmptyDatagrams) {
 
 TEST(LoopbackDatagramChannel, LoopsDatagrams) {
   SimpleAllocatorForTest alloc;
-  LoopbackDatagramChannel channel(*alloc);
+  LoopbackDatagramChannel channel(alloc);
   ReaderTask<DatagramReader> read_task(channel);
 
   Dispatcher dispatcher;
@@ -133,8 +109,8 @@ TEST(LoopbackDatagramChannel, LoopsDatagrams) {
 
 TEST(LoopbackByteChannel, IgnoresEmptyWrites) {
   SimpleAllocatorForTest alloc;
-  LoopbackByteChannel channel(*alloc);
-  ReaderTask<ByteReader> read_task(channel);
+  LoopbackByteChannel channel(alloc);
+  ReaderTask<ReliableByteReader> read_task(channel);
 
   Dispatcher dispatcher;
   dispatcher.Post(read_task);
@@ -153,8 +129,8 @@ TEST(LoopbackByteChannel, IgnoresEmptyWrites) {
 
 TEST(LoopbackByteChannel, LoopsData) {
   SimpleAllocatorForTest alloc;
-  LoopbackByteChannel channel(*alloc);
-  ReaderTask<ByteReader> read_task(channel);
+  LoopbackByteChannel channel(alloc);
+  ReaderTask<ReliableByteReader> read_task(channel);
 
   Dispatcher dispatcher;
   dispatcher.Post(read_task);

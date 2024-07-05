@@ -45,6 +45,11 @@ To get setup:
       $ bootstrap.bat         (On Windows)
       ...
 
+   .. tip::
+
+      If you use the `Fish shell <https://fishshell.com/>`_ run `source
+      ./bootstrap.fish` instead.
+
 #. Configure the GN build.
 
    .. code-block:: bash
@@ -104,8 +109,8 @@ bootstrap may take several minutes to complete, so please be patient.
 
 .. code-block:: bash
 
-   $ git clone https://pigweed.googlesource.com/pigweed/pigweed ~/pigweed
-   $ cd ~/pigweed
+   $ git clone https://pigweed.googlesource.com/pigweed/pigweed pigweed
+   $ cd pigweed
    $ source ./bootstrap.sh
 
 **Windows**

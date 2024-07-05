@@ -1,14 +1,12 @@
 .. _module-pw_bytes:
 
-=========
+========
 pw_bytes
-=========
-pw_bytes is a collection of utilities for manipulating binary data.
+========
+.. pigweed-module::
+   :name: pw_bytes
 
--------------
-Compatibility
--------------
-C++17
+pw_bytes is a collection of utilities for manipulating binary data.
 
 ------------
 Dependencies
@@ -24,6 +22,18 @@ Features
 pw_bytes/alignment.h
 ====================
 Functions for aligning sizes and addresses to memory alignment boundaries.
+
+ .. doxygenfunction:: pw::AlignDown(size_t value, size_t alignment)
+
+ .. doxygenfunction:: pw::AlignDown(T* value, size_t alignment)
+
+ .. doxygenfunction:: pw::AlignUp(size_t value, size_t alignment)
+
+ .. doxygenfunction:: pw::AlignUp(T* value, size_t alignment)
+
+ .. doxygenfunction:: pw::Padding
+
+ .. doxygenfunction:: pw::GetAlignedSubspan
 
 pw_bytes/array.h
 ================

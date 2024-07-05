@@ -2,6 +2,9 @@
 
 Bazel
 =====
+.. pigweed-module-subpage::
+   :name: pw_build
+
 Bazel is currently very experimental, and only builds for host and ARM Cortex-M
 microcontrollers.
 
@@ -35,6 +38,14 @@ rule for handling linker scripts with Bazel. e.g.
          "PW_BOOT_VECTOR_TABLE_BEGIN=0x08000000",
          "PW_BOOT_VECTOR_TABLE_SIZE=512",
      ],
+     deps = [":some_header_library"],
+   )
+
+   # You can include headers provided by targets specified in deps.
+   cc_library(
+     name = "some_header_library",
+     hdrs = ["test_header.h"],
+     includes = ["."],
    )
 
    # You can include the linker script in the deps.
@@ -242,7 +253,7 @@ Example
 ^^^^^^^
 **BUILD.bazel**
 
-.. code-block::
+.. code-block:: python
 
    pw_cc_blob_info(
      name = "foo_blob",
@@ -314,7 +325,7 @@ pw_cc_binary_with_map
 The ``pw_cc_binary_with_map`` rule can be used to build a binary like
 ``cc_binary`` does but also generate a .map file from the linking step.
 
-.. code-block::
+.. code-block:: python
 
    pw_cc_binary_with_map(
      name = "test",
@@ -325,6 +336,40 @@ This should result in a ``test.map`` file generated next to the ``test`` binary.
 
 Note that it's only partially compatible with the ``cc_binary`` interface and
 certain things are not implemented like make variable substitution.
+
+pw_elf_to_bin
+-------------
+The ``pw_elf_to_bin`` rule takes in a binary executable target and produces a
+file using the ``-Obinary`` option to ``objcopy``. This is only suitable for use
+with binaries where all the segments are non-overlapping. A common use case for
+this type of file is booting directly on hardware with no bootloader.
+
+.. code-block:: python
+
+   load("@pigweed//pw_build:binary_tools.bzl", "pw_elf_to_bin")
+
+   pw_elf_to_bin(
+     name = "bin",
+     elf_input = ":main",
+     bin_out = "main.bin",
+   )
+
+pw_elf_to_dump
+--------------
+The ``pw_elf_to_dump`` rule takes in a binary executable target and produces a
+text file containing the output of the toolchain's ``objdump -xd`` command. This
+contains the full binary layout, symbol table and disassembly which is often
+useful when debugging embedded firmware.
+
+.. code-block:: python
+
+   load("@pigweed//pw_build:binary_tools.bzl", "pw_elf_to_dump")
+
+   pw_elf_to_dump(
+     name = "dump",
+     elf_input = ":main",
+     dump_out = "main.dump",
+   )
 
 Miscellaneous utilities
 -----------------------

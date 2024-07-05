@@ -153,12 +153,8 @@ TEST_F(BucketBlockAllocatorTest, ResizeSmallLargerFailure) {
   ResizeSmallLargerFailure();
 }
 
-TEST_F(BucketBlockAllocatorTest, CanGetLayoutFromValidPointer) {
-  CanGetLayoutFromValidPointer();
-}
-
-TEST_F(BucketBlockAllocatorTest, CannotGetLayoutFromInvalidPointer) {
-  CannotGetLayoutFromInvalidPointer();
+TEST_F(BucketBlockAllocatorTest, CanMeasureFragmentation) {
+  CanMeasureFragmentation();
 }
 
 }  // namespace

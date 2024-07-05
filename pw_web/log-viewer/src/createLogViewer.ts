@@ -13,7 +13,7 @@
 // the License.
 
 import { LogViewer as RootComponent } from './components/log-viewer';
-import { StateStore, LocalStorageState } from './shared/state';
+import { LogViewerState } from './shared/state';
 import { LogSourceEvent } from '../src/shared/interfaces';
 import { LogSource } from '../src/log-source';
 import { LogStore } from './log-store';
@@ -29,6 +29,9 @@ import '@material/web/iconbutton/icon-button.js';
 import '@material/web/menu/menu.js';
 import '@material/web/menu/menu-item.js';
 
+// Shoelace imports
+import '@shoelace-style/shoelace/dist/components/split-panel/split-panel.js';
+
 /**
  * Create an instance of log-viewer
  * @param logSources - collection of sources from where logs originate
@@ -41,7 +44,7 @@ import '@material/web/menu/menu-item.js';
 export function createLogViewer(
   logSources: LogSource | LogSource[],
   root: HTMLElement,
-  state: StateStore = new LocalStorageState(),
+  state?: LogViewerState,
   logStore: LogStore = new LogStore(),
   columnOrder: string[] = ['log_source', 'time', 'timestamp'],
 ) {

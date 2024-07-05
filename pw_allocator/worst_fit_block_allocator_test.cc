@@ -109,12 +109,8 @@ TEST_F(WorstFitBlockAllocatorTest, ResizeSmallLargerFailure) {
   ResizeSmallLargerFailure();
 }
 
-TEST_F(WorstFitBlockAllocatorTest, CanGetLayoutFromValidPointer) {
-  CanGetLayoutFromValidPointer();
-}
-
-TEST_F(WorstFitBlockAllocatorTest, CannotGetLayoutFromInvalidPointer) {
-  CannotGetLayoutFromInvalidPointer();
+TEST_F(WorstFitBlockAllocatorTest, CanMeasureFragmentation) {
+  CanMeasureFragmentation();
 }
 
 }  // namespace

@@ -30,6 +30,10 @@
           "module": "pw_emu.__main__",
           "function": "main"
         },
+        "clang-tidy-fix": {
+          "module": "pw_toolchain.clang_apply_replacements",
+          "function": "main"
+        },
         "ffx": {
           "module": "pw_cli.pigweed_aliases",
           "function": "ffx"
@@ -123,6 +127,30 @@
         "pw_emu/qemu-netduinoplus2.json",
         "pw_emu/renode-stm32f4_discovery.json"
       ]
+    },
+    "bazel_presubmit": {
+      "remote_cache": true,
+      "upload_local_results": true,
+      "programs": {
+        "default": [
+          [
+            "build",
+            "//..."
+          ],
+          [
+            "test",
+            "//..."
+          ]
+        ],
+        "integration": [
+          [
+            "test",
+            "--build_tag_filters=integration",
+            "--test_tag_filters=integration",
+            "//..."
+          ]
+        ]
+      }
     }
   }
 }

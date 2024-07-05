@@ -160,15 +160,47 @@ details abstracted behind the :ref:`module-pw_allocator-api-allocator`
 interface. One exception to this guidance is when integrating allocators into
 existing code that assumes ``malloc`` and ``free`` semantics. Notably, ``free``
 does not take any parameters beyond a pointer describing the memory to be freed.
-To implement such a method using ``Deallocate``, you may need to violate the
-abstraction and only use allocators that implement the optional ``GetLayout``
-method:
 
 .. literalinclude:: examples/block_allocator.cc
    :language: cpp
    :linenos:
    :start-after: [pw_allocator-examples-block_allocator-malloc_free]
    :end-before: [pw_allocator-examples-block_allocator-malloc_free]
+
+.. _module-pw_allocator-use-standard-library-containers:
+
+Use standard library containers
+===============================
+All of C++'s standard library containers are `AllocatorAwareContainers`_, with
+the exception of ``std::array``. These types include a template parameter used
+to specify an allocator type, and a constructor which takes a reference to an
+object of this type.
+
+While there are
+:ref:`module-pw_allocator-design-differences-with-polymorphic-allocators`, an
+:ref:`module-pw_allocator-api-allocator` can be used with these containers by
+wrapping them with a PMR adapter type,
+:ref:`module-pw_allocator-api-as_pmr_allocator`:
+
+.. literalinclude:: examples/pmr.cc
+   :language: cpp
+   :linenos:
+   :start-after: [pw_allocator-examples-pmr]
+   :end-before: [pw_allocator-examples-pmr]
+
+.. Warning::
+   Some of the standard library containers may add a significant amount of
+   additional code size and/or memory overhead. In particular, implementations
+   of ``std::deque`` are known to preallocate significant memory in order to
+   meet its complexity requirements, e.g. O(1) insertion at the front of the
+   deque.
+
+.. Warning::
+   The standard library containers expect their allocators to throw an exception
+   on allocation failure, and do not check for failure themselves. If
+   exceptions are disabled, :ref:`module-pw_allocator-api-as_pmr_allocator`
+   instead **asserts** that allocation succeeded. Care must be taken in this
+   case to ensure that memory is not exhausted.
 
 --------------------------
 Choose the right allocator
@@ -237,12 +269,13 @@ Consult the :ref:`module-pw_allocator-api` for additional details.
 
 - :ref:`module-pw_allocator-api-fallback_allocator`: Dispatches first to a
   primary allocator, and, if that fails, to a secondary allocator.
+- :ref:`module-pw_allocator-api-as_pmr_allocator`: Adapts an allocator to be a
+  ``std::pmr::polymorphic_allocator``, which can be used with standard library
+  containers that `use allocators`_, such as ``std::pmr::vector<T>``.
 - :ref:`module-pw_allocator-api-synchronized_allocator`: Synchronizes access to
   another allocator, allowing it to be used by multiple threads.
 - :ref:`module-pw_allocator-api-tracking_allocator`: Wraps another allocator and
   records its usage.
-
-.. TODO: b/328076428 - Add MemoryResource.
 
 .. _module-pw_allocator-guide-custom_allocator:
 
@@ -276,10 +309,8 @@ There are also several optional methods you can provide:
 - If an implementation of ``DoReallocate`` isn't provided, then ``Reallocate``
   will try to ``Resize``, and, if unsuccessful, try to ``Allocate``, copy, and
   ``Deallocate``.
-- If an implementation of ``DoGetLayout`` isn't provided, then ``GetLayout``
+- If an implementation of ``DoGetInfo`` isn't provided, then ``GetInfo``
   will always return ``pw::Status::Unimplmented``.
-- If an implementation of ``DoQuery`` isn't provided, then ``Query`` will
-  always return ``pw::Status::Unimplmented``.
 
 Custom allocators can indicate which optional methods they implement and what
 optional behaviors they want from the base class by specifying
@@ -363,6 +394,31 @@ the same underlying allocator:
    :linenos:
    :start-after: [pw_allocator-examples-metrics-multiple_trackers]
    :end-before: [pw_allocator-examples-metrics-multiple_trackers]
+
+Measure fragmentation
+=====================
+
+If you are using a :ref:`module-pw_allocator-api-block_allocator`, you can use
+the ``MeasureFragmentation`` method to examine how fragmented the heap is. This
+method returns a :ref:`module-pw_allocator-api-fragmentation` struct, which
+includes the "sum of squares" and the sum of the inner sizes of the current free
+blocks. On a platform or host with floating point support, you can divide the
+square root of the sum of squares by the sum to obtain a number that ranges from
+0 to 1 to indicate maximal and minimal fragmenation, respectively. Subtracting
+this number from 1 can give a more intuitive "fragmenation score".
+
+For example, consider a heap consisting of the following blocks:
+
+- 100 bytes in use.
+- 200 bytes free.
+- 50 bytes in use.
+- 10 bytes free.
+- 200 bytes in use.
+- 300 bytes free.
+
+For such a heap, ``MeasureFragmentation`` will return 130100 and 510. The above
+calculation gives a fragmentation score of ``1 - sqrt(130100) / 510``, which is
+approximately ``0.29``.
 
 .. TODO: b/328648868 - Add guide for heap-viewer and link to cli.rst.
 
@@ -475,6 +531,8 @@ The size report produced by this rule would render as:
 
 .. include:: examples/custom_allocator_size_report
 
+.. _AllocatorAwareContainers: https://en.cppreference.com/w/cpp/named_req/AllocatorAwareContainer
 .. _NVI: https://en.wikipedia.org/wiki/Non-virtual_interface_pattern
 .. _RAII: https://en.cppreference.com/w/cpp/language/raii
 .. _repository: https://bazel.build/concepts/build-ref#repositories
+.. _use allocators: https://en.cppreference.com/w/cpp/memory/uses_allocator
