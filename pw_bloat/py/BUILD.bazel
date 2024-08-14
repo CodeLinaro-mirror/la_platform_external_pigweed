@@ -13,7 +13,7 @@
 # the License.
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
-load("//pw_build:selects.bzl", "TARGET_COMPATIBLE_WITH_HOST_SELECT")
+load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -30,7 +30,7 @@ py_library(
     data = ["@bloaty//:all"],
     imports = ["."],
     deps = [
-        "@pigweed//pw_cli/py:pw_cli",
+        "//pw_cli/py:pw_cli",
         "@python_packages_pyelftools//:pkg",
         "@rules_python//python/runfiles",
     ],
@@ -40,6 +40,6 @@ py_binary(
     name = "bloat",
     srcs = ["pw_bloat/__main__.py"],
     main = "pw_bloat/__main__.py",
-    target_compatible_with = select(TARGET_COMPATIBLE_WITH_HOST_SELECT),
+    target_compatible_with = incompatible_with_mcu(),
     deps = [":pw_bloat"],
 )
