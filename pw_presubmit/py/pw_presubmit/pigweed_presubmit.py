@@ -1030,6 +1030,7 @@ _EXCLUDE_FROM_COPYRIGHT_NOTICE: Sequence[str] = (
     r'\bAUTHORS$',
     r'\bLICENSE$',
     r'\bPIGWEED_MODULES$',
+    r'\b\.vscodeignore$',
     r'\bgo.(mod|sum)$',
     r'\bpackage-lock.json$',
     r'\bpackage.json$',
@@ -1220,6 +1221,14 @@ def commit_message_format(_: PresubmitContext):
     if not lines:
         _LOG.error('The commit message is too short!')
         raise PresubmitFailure
+
+    # Ignore merges.
+    repo = git_repo.LoggingGitRepo(Path.cwd())
+    parents = repo.commit_parents()
+    _LOG.debug('parents: %r', parents)
+    if len(parents) > 1:
+        _LOG.warning('Ignoring multi-parent commit')
+        return
 
     # Ignore Gerrit-generated reverts.
     if (
@@ -1478,8 +1487,9 @@ _LINTFORMAT = (
     format_code.presubmit_checks(),
     inclusive_language.presubmit_check.with_filter(
         exclude=(
-            r'\byarn.lock$',
+            r'\bgo.sum$',
             r'\bpackage-lock.json$',
+            r'\byarn.lock$',
         )
     ),
     cpp_checks.pragma_once,
