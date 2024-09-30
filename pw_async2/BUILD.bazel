@@ -219,6 +219,7 @@ cc_library(
     deps = [
         ":dispatcher",
         "//pw_allocator:allocator",
+        "//pw_function",
     ],
 )
 
@@ -271,6 +272,7 @@ cc_library(
     includes = ["public"],
     deps = [
         ":dispatcher",
+        "//pw_chrono:virtual_clock",
         "//pw_containers:intrusive_list",
         "//pw_sync:interrupt_spin_lock",
         "//pw_toolchain:no_destructor",
