@@ -33,6 +33,12 @@ licenses(["notice"])
 filegroup(name = "empty")
 
 pw_cc_flag_set(
+    name = "link_with_lld",
+    actions = ["@pw_toolchain//actions:all_link_actions"],
+    flags = ["-fuse-ld=lld"],
+)
+
+pw_cc_flag_set(
     name = "macos_link_libs",
     actions = ["@pw_toolchain//actions:all_link_actions"],
     flags = [
@@ -213,6 +219,28 @@ pw_cc_feature_set(
     all_of = [":rules_rust_unsupported_feature"],
 )
 
+bool_flag(
+    name = "fuzztest",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "fuzztest_enabled",
+    flag_values = {
+        ":fuzztest": "true",
+    },
+)
+
+pw_cc_feature(
+    name = "fuzztest_feature",
+    enabled = select({
+        ":fuzztest_enabled": True,
+        "//conditions:default": False,
+    }),
+    feature_name = "fuzztest",
+    flag_sets = ["@pw_toolchain//flag_sets:fuzztest"],
+)
+
 # This is a sentinel feature defined by rules_rust. It is by definition
 # unsupported: rules_rust will disable this feature when linking Rust code.
 pw_cc_feature(
@@ -325,6 +353,7 @@ pw_cc_toolchain(
         "//conditions:default": [],
     }) + [
         ":thread_safety_warnings",
+        ":link_with_lld",
         "@pw_toolchain//flag_sets:debugging",
         "@pw_toolchain//flag_sets:reduced_size",
         "@pw_toolchain//flag_sets:no_canonical_prefixes",

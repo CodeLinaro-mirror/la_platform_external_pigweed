@@ -24,14 +24,14 @@ package pw.protobuf;
 // code generator.
 message FieldOptions {
   // Maximum number of entries for repeated fields.
-  int32 max_count = 1;
+  optional int32 max_count = 1;
 
   // Maximum size for bytes and string fields (excludes null terminator).
-  int32 max_size = 2;
+  optional int32 max_size = 2;
 }
 
 extend google.protobuf.FieldOptions {
   // Extension 1155 is reserved upstream for PW protobuf compiler.
   // https://github.com/protocolbuffers/protobuf/blob/main/docs/options.md
-  FieldOptions pwpb = 1155;
+  optional FieldOptions pwpb = 1155;
 }
