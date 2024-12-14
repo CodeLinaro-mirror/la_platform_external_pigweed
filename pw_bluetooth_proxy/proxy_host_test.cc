@@ -25,9 +25,11 @@
 #include "pw_bluetooth/hci_events.emb.h"
 #include "pw_bluetooth/hci_h4.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
+#include "pw_bluetooth/rfcomm_frames.emb.h"
 #include "pw_bluetooth_proxy/h4_packet.h"
 #include "pw_containers/flat_map.h"
 #include "pw_function/function.h"
+#include "pw_log/log.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
 #include "pw_unit_test/framework.h"  // IWYU pragma: keep
@@ -80,8 +82,8 @@ Result<EmbossT> CreateAndPopulateToHostEventView(H4PacketWithHci& h4_packet,
 
 // Send an LE_Read_Buffer_Size (V2) CommandComplete event to `proxy` to request
 // the reservation of a number of LE ACL send credits.
-Status SendReadBufferResponseFromController(ProxyHost& proxy,
-                                            uint8_t num_credits_to_reserve) {
+Status SendLeReadBufferResponseFromController(ProxyHost& proxy,
+                                              uint8_t num_credits_to_reserve) {
   std::array<
       uint8_t,
       emboss::LEReadBufferSizeV2CommandCompleteEventWriter::SizeInBytes()>
@@ -95,6 +97,25 @@ Status SendReadBufferResponseFromController(ProxyHost& proxy,
   view.command_complete().command_opcode_enum().Write(
       emboss::OpCode::LE_READ_BUFFER_SIZE_V2);
   view.total_num_le_acl_data_packets().Write(num_credits_to_reserve);
+
+  proxy.HandleH4HciFromController(std::move(h4_packet));
+  return OkStatus();
+}
+
+Status SendReadBufferResponseFromController(ProxyHost& proxy,
+                                            uint8_t num_credits_to_reserve) {
+  std::array<uint8_t,
+             emboss::ReadBufferSizeCommandCompleteEventWriter::SizeInBytes()>
+      hci_arr{};
+  H4PacketWithHci h4_packet{emboss::H4PacketType::UNKNOWN, hci_arr};
+  PW_TRY_ASSIGN(auto view,
+                CreateAndPopulateToHostEventView<
+                    emboss::ReadBufferSizeCommandCompleteEventWriter>(
+                    h4_packet, emboss::EventCode::COMMAND_COMPLETE));
+  view.command_complete().command_opcode_enum().Write(
+      emboss::OpCode::READ_BUFFER_SIZE);
+  view.total_num_acl_data_packets().Write(num_credits_to_reserve);
+  EXPECT_TRUE(view.Ok());
 
   proxy.HandleH4HciFromController(std::move(h4_packet));
   return OkStatus();
@@ -191,6 +212,26 @@ L2capCoc BuildCoc(ProxyHost& proxy, CocParameters params) {
                             std::move(params.receive_fn),
                             std::move(params.event_fn));
   return std::move(channel.value());
+}
+
+struct RfcommParameters {
+  uint16_t handle = 123;
+  RfcommChannel::Config rx_config = {
+      .cid = 234, .max_information_length = 900, .credits = 10};
+  RfcommChannel::Config tx_config = {
+      .cid = 456, .max_information_length = 900, .credits = 10};
+  uint8_t rfcomm_channel = 3;
+};
+
+RfcommChannel BuildRfcomm(ProxyHost& proxy, RfcommParameters params) {
+  pw::Result<RfcommChannel> channel =
+      proxy.AcquireRfcommChannel(params.handle,
+                                 params.rx_config,
+                                 params.tx_config,
+                                 params.rfcomm_channel,
+                                 nullptr);
+  PW_TEST_EXPECT_OK(channel);
+  return std::move((channel.value()));
 }
 
 // ########## Examples
@@ -627,6 +668,54 @@ TEST(BadPacketTest, TooShortCommandCompleteEventToHost) {
 
 // ########## ReserveLeAclCredits Tests
 
+// Proxy Host should reserve requested ACL credits from controller's ACL credits
+// when using ReadBufferSize command.
+TEST(ReserveBrEdrAclCredits, ProxyCreditsReserveCreditsWithReadBufferSize) {
+  std::array<uint8_t,
+             emboss::ReadBufferSizeCommandCompleteEventWriter::SizeInBytes()>
+      hci_arr;
+  hci_arr.fill(0);
+  H4PacketWithHci h4_packet{emboss::H4PacketType::UNKNOWN, hci_arr};
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto view,
+      CreateAndPopulateToHostEventView<
+          emboss::ReadBufferSizeCommandCompleteEventWriter>(
+          h4_packet, emboss::EventCode::COMMAND_COMPLETE));
+  view.command_complete().command_opcode_enum().Write(
+      emboss::OpCode::READ_BUFFER_SIZE);
+  view.total_num_acl_data_packets().Write(10);
+
+  uint8_t sends_called = 0;
+  pw::Function<void(H4PacketWithHci && packet)> send_to_host_fn(
+      [&sends_called](H4PacketWithHci&& received_packet) {
+        sends_called++;
+        PW_TEST_ASSERT_OK_AND_ASSIGN(
+            auto event_view,
+            MakeEmbossWriter<emboss::ReadBufferSizeCommandCompleteEventWriter>(
+                received_packet.GetHciSpan()));
+        // Should reserve 2 credits from original total of 10 (so 8 left for
+        // host).
+        EXPECT_EQ(event_view.total_num_acl_data_packets().Read(), 8);
+      });
+
+  pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/0,
+                              /*br_edr_acl_credits_to_reserve=*/2);
+
+  proxy.HandleH4HciFromController(std::move(h4_packet));
+
+  EXPECT_EQ(proxy.GetNumFreeBrEdrAclPackets(), 2);
+
+  EXPECT_TRUE(proxy.HasSendBrEdrAclCapability());
+
+  // Verify to controller callback was called.
+  EXPECT_EQ(sends_called, 1);
+}
+
 // Proxy Host should reserve requested ACL LE credits from controller's ACL LE
 // credits when using LEReadBufferSizeV1 command.
 TEST(ReserveLeAclCredits, ProxyCreditsReserveCreditsWithLEReadBufferSizeV1) {
@@ -669,7 +758,7 @@ TEST(ReserveLeAclCredits, ProxyCreditsReserveCreditsWithLEReadBufferSizeV1) {
 
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 2);
 
-  EXPECT_TRUE(proxy.HasSendAclCapability());
+  EXPECT_TRUE(proxy.HasSendLeAclCapability());
 
   // Verify to controller callback was called.
   EXPECT_EQ(sends_called, 1);
@@ -716,7 +805,7 @@ TEST(ReserveLeAclCredits, ProxyCreditsReserveCreditsWithLEReadBufferSizeV2) {
 
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 2);
 
-  EXPECT_TRUE(proxy.HasSendAclCapability());
+  EXPECT_TRUE(proxy.HasSendLeAclCapability());
 
   // Verify to controller callback was called.
   EXPECT_EQ(sends_called, 1);
@@ -807,7 +896,7 @@ TEST(ReserveLeAclCredits, ProxyCreditsReserveZeroCredits) {
 
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
 
-  EXPECT_FALSE(proxy.HasSendAclCapability());
+  EXPECT_FALSE(proxy.HasSendLeAclCapability());
 
   // Verify to controller callback was called.
   EXPECT_EQ(sends_called, 1);
@@ -854,7 +943,7 @@ TEST(ReserveLeAclPackets, ProxyCreditsZeroWhenHostCreditsZero) {
 
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
 
-  EXPECT_TRUE(proxy.HasSendAclCapability());
+  EXPECT_TRUE(proxy.HasSendLeAclCapability());
 
   // Verify to controller callback was called.
   EXPECT_EQ(sends_called, 1);
@@ -872,7 +961,7 @@ TEST(ReserveLeAclPackets, ProxyCreditsZeroWhenNotInitialized) {
 
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
 
-  EXPECT_TRUE(proxy.HasSendAclCapability());
+  EXPECT_TRUE(proxy.HasSendLeAclCapability());
 }
 
 // ########## GattNotifyTest
@@ -942,7 +1031,7 @@ TEST(GattNotifyTest, Send1ByteAttribute) {
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
   // Allow proxy to reserve 1 credit.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   PW_TEST_EXPECT_OK(proxy.SendGattNotify(capture.handle,
                                          capture.attribute_handle,
@@ -1027,7 +1116,7 @@ TEST(GattNotifyTest, Send2ByteAttribute) {
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
   // Allow proxy to reserve 1 credit.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   PW_TEST_EXPECT_OK(proxy.SendGattNotify(capture.handle,
                                          capture.attribute_handle,
@@ -1122,7 +1211,7 @@ TEST(NumberOfCompletedPacketsTest, TwoOfThreeSentPacketsComplete) {
                               std::move(send_to_controller_fn),
                               kNumConnections);
   PW_TEST_EXPECT_OK(
-      SendReadBufferResponseFromController(proxy, kNumConnections));
+      SendLeReadBufferResponseFromController(proxy, kNumConnections));
   EXPECT_EQ(capture.sends_called, 1);
 
   std::array<uint8_t, 1> attribute_value = {0};
@@ -1155,12 +1244,6 @@ TEST(NumberOfCompletedPacketsTest, TwoOfThreeSentPacketsComplete) {
                                   pw::span(attribute_value))
                   .ok());
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
-
-  // At this point, proxy has used all 3 credits, 1 on each Connection, so send
-  // should fail.
-  EXPECT_EQ(proxy.SendGattNotify(
-                capture.connection_handles[0], 1, pw::span(attribute_value)),
-            PW_STATUS_UNAVAILABLE);
 
   // Send Number_of_Completed_Packets event that reports 1 packet on Connection
   // 0, 0 packets on Connection 1, and 1 packet on Connection 2. Checks in
@@ -1219,7 +1302,7 @@ TEST(NumberOfCompletedPacketsTest, ManyMorePacketsCompletedThanPacketsPending) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 2);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 2));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 2));
   EXPECT_EQ(capture.sends_called, 1);
 
   std::array<uint8_t, 1> attribute_value = {0};
@@ -1241,11 +1324,6 @@ TEST(NumberOfCompletedPacketsTest, ManyMorePacketsCompletedThanPacketsPending) {
                                   pw::span(attribute_value))
                   .ok());
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
-
-  // At this point proxy, has used both credits, so send should fail.
-  EXPECT_EQ(proxy.SendGattNotify(
-                capture.connection_handles[1], 1, pw::span(attribute_value)),
-            PW_STATUS_UNAVAILABLE);
 
   // Send Number_of_Completed_Packets event that reports 10 packets on
   // Connection 0 and 15 packets on Connection 1. Checks in send_to_host_fn
@@ -1301,7 +1379,7 @@ TEST(NumberOfCompletedPacketsTest, ProxyReclaimsOnlyItsUsedCredits) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 4);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 4));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 4));
   EXPECT_EQ(capture.sends_called, 1);
 
   std::array<uint8_t, 1> attribute_value = {0};
@@ -1376,7 +1454,7 @@ TEST(NumberOfCompletedPacketsTest, EventUnmodifiedIfNoCreditsInUse) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 10);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 10));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 10));
   EXPECT_EQ(capture.sends_called, 1);
 
   // Send Number_of_Completed_Packets event that reports 10 packets on
@@ -1436,7 +1514,7 @@ TEST(NumberOfCompletedPacketsTest, HandlesUnusualEvents) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 10);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 10));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 10));
   EXPECT_EQ(capture.sends_called, 1);
 
   // Send Number_of_Completed_Packets event with no entries.
@@ -1457,6 +1535,63 @@ TEST(NumberOfCompletedPacketsTest, HandlesUnusualEvents) {
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 10);
   // Proxy host will not pass on a NOCP with no credits.
   EXPECT_EQ(capture.sends_called, 1);
+}
+
+TEST(NumberOfCompletedPacketsTest, MultipleChannelsDifferentTransports) {
+  static constexpr size_t kPayloadSize = 3;
+  struct {
+    int sends_called = 0;
+    std::array<uint8_t, kPayloadSize> payload = {
+        0xAB,
+        0xCD,
+        0xEF,
+    };
+  } capture;
+
+  pw::Function<void(H4PacketWithHci&&)>&& send_to_host_fn(
+      [](H4PacketWithHci&&) {});
+  pw::Function<void(H4PacketWithH4&&)>&& send_to_controller_fn(
+      [&capture](H4PacketWithH4&&) { ++capture.sends_called; });
+
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/1,
+                              /*br_edr_acl_credits_to_reserve=*/1);
+  // Allow proxy to reserve BR/EDR 1 credit.
+  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  // Allow proxy to reserve LE 1 credit.
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
+
+  // Test that sending on one type of transport doesn't get blocked if the other
+  // type of transport is out of credits.
+
+  L2capCoc le_channel =
+      BuildCoc(proxy, CocParameters{.handle = 0x123, .tx_credits = 2});
+  EXPECT_EQ(le_channel.Write(capture.payload), PW_STATUS_OK);
+  EXPECT_EQ(capture.sends_called, 1);
+
+  RfcommChannel bredr_channel =
+      BuildRfcomm(proxy, RfcommParameters{.handle = 0x456});
+  EXPECT_EQ(bredr_channel.Write(capture.payload), PW_STATUS_OK);
+  // Send should succeed even though no LE credits available
+  EXPECT_EQ(capture.sends_called, 2);
+
+  // Queue an LE write
+  EXPECT_EQ(le_channel.Write(capture.payload), PW_STATUS_OK);
+  EXPECT_EQ(capture.sends_called, 2);
+
+  // Complete previous LE write
+  PW_TEST_EXPECT_OK(SendNumberOfCompletedPackets(
+      proxy, FlatMap<uint16_t, uint16_t, 1>({{{0x123, 1}}})));
+  EXPECT_EQ(capture.sends_called, 3);
+
+  // Complete BR/EDR write
+  PW_TEST_EXPECT_OK(SendNumberOfCompletedPackets(
+      proxy, FlatMap<uint16_t, uint16_t, 1>({{{0x456, 1}}})));
+
+  // Write again
+  EXPECT_EQ(bredr_channel.Write(capture.payload), PW_STATUS_OK);
+  EXPECT_EQ(capture.sends_called, 4);
 }
 
 // ########## DisconnectionCompleteTest
@@ -1498,7 +1633,7 @@ TEST(DisconnectionCompleteTest, DisconnectionReclaimsCredits) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 10);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 10));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 10));
   EXPECT_EQ(capture.sends_called, 1);
 
   std::array<uint8_t, 1> attribute_value = {0};
@@ -1560,7 +1695,7 @@ TEST(DisconnectionCompleteTest, FailedDisconnectionHasNoEffect) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   std::array<uint8_t, 1> attribute_value = {0};
 
@@ -1571,8 +1706,10 @@ TEST(DisconnectionCompleteTest, FailedDisconnectionHasNoEffect) {
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
 
   // Send failed Disconnection_Complete event, should not reclaim credit.
-  PW_TEST_EXPECT_OK(SendDisconnectionCompleteEvent(
-      proxy, connection_handle, /*successful=*/false));
+  PW_TEST_EXPECT_OK(
+      SendDisconnectionCompleteEvent(proxy,
+                                     connection_handle, /*successful=*/
+                                     false));
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
 }
 
@@ -1586,7 +1723,7 @@ TEST(DisconnectionCompleteTest, DisconnectionOfUnusedConnectionHasNoEffect) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   std::array<uint8_t, 1> attribute_value = {0};
 
@@ -1639,7 +1776,7 @@ TEST(DisconnectionCompleteTest, CanReuseConnectionHandleAfterDisconnection) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
   EXPECT_EQ(capture.sends_called, 1);
 
   std::array<uint8_t, 1> attribute_value = {0};
@@ -1719,7 +1856,7 @@ TEST(ResetTest, ResetClearsActiveConnections) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 2);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 2));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 2));
   EXPECT_EQ(host_capture.sends_called, 1);
 
   std::array<uint8_t, 1> attribute_value = {0};
@@ -1735,14 +1872,10 @@ TEST(ResetTest, ResetClearsActiveConnections) {
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
   // Reset should not have cleared `le_acl_credits_to_reserve`, so proxy should
   // still indicate the capability.
-  EXPECT_TRUE(proxy.HasSendAclCapability());
-  // Reset clears credit reservation, so send should fail.
-  EXPECT_EQ(proxy.SendGattNotify(1, 1, pw::span(attribute_value)),
-            PW_STATUS_UNAVAILABLE);
-  EXPECT_EQ(controller_capture.sends_called, 1);
+  EXPECT_TRUE(proxy.HasSendLeAclCapability());
 
   // Re-initialize AclDataChannel with 2 credits.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 2));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 2));
   EXPECT_EQ(host_capture.sends_called, 2);
 
   // Send ACL on random handle to expend one credit.
@@ -1770,7 +1903,7 @@ TEST(ResetTest, ProxyHandlesMultipleResets) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   proxy.Reset();
   proxy.Reset();
@@ -1779,10 +1912,9 @@ TEST(ResetTest, ProxyHandlesMultipleResets) {
   // Validate state after double reset.
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
   EXPECT_TRUE(proxy.HasSendAclCapability());
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
   EXPECT_EQ(proxy.SendGattNotify(1, 1, pw::span(attribute_value)),
-            PW_STATUS_UNAVAILABLE);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
-  EXPECT_TRUE(proxy.SendGattNotify(1, 1, pw::span(attribute_value)).ok());
+            PW_STATUS_OK);
   EXPECT_EQ(sends_called, 1);
 
   proxy.Reset();
@@ -1790,10 +1922,9 @@ TEST(ResetTest, ProxyHandlesMultipleResets) {
   // Validate state after third reset.
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
   EXPECT_TRUE(proxy.HasSendAclCapability());
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
   EXPECT_EQ(proxy.SendGattNotify(1, 1, pw::span(attribute_value)),
-            PW_STATUS_UNAVAILABLE);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
-  EXPECT_TRUE(proxy.SendGattNotify(1, 1, pw::span(attribute_value)).ok());
+            PW_STATUS_OK);
   EXPECT_EQ(sends_called, 2);
 }
 
@@ -1819,7 +1950,8 @@ TEST(MultiSendTest, CanOccupyAllThenReuseEachBuffer) {
                               2 * kMaxSends);
   // Allow proxy to reserve enough credits to send twice the number of
   // simultaneous sends supported by proxy.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 2 * kMaxSends));
+  PW_TEST_EXPECT_OK(
+      SendLeReadBufferResponseFromController(proxy, 2 * kMaxSends));
 
   std::array<uint8_t, 1> attribute_value = {0xF};
   // Occupy all send buffers.
@@ -1870,7 +2002,8 @@ TEST(MultiSendTest, CanRepeatedlyReuseOneBuffer) {
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               2 * kMaxSends);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 2 * kMaxSends));
+  PW_TEST_EXPECT_OK(
+      SendLeReadBufferResponseFromController(proxy, 2 * kMaxSends));
 
   std::array<uint8_t, 1> attribute_value = {0xF};
   // Occupy all send buffers.
@@ -1910,7 +2043,7 @@ TEST(MultiSendTest, CanSendOverManyDifferentConnections) {
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               ProxyHost::GetMaxNumLeAclConnections());
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(
       proxy, ProxyHost::GetMaxNumLeAclConnections()));
 
   for (uint16_t send = 1; send <= ProxyHost::GetMaxNumLeAclConnections();
@@ -1939,7 +2072,7 @@ TEST(MultiSendTest, AttemptToSendOverMaxConnectionsFails) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), kSends);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, kSends));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, kSends));
 
   for (uint16_t send = 1; send <= kMaxProxyActiveConnections; send++) {
     // Use current send count as the connection handle.
@@ -1973,7 +2106,7 @@ TEST(MultiSendTest, ResetClearsBuffOccupiedFlags) {
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), kMaxSends);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, kMaxSends));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, kMaxSends));
 
   std::array<uint8_t, 1> attribute_value = {0xF};
   // Occupy all send buffers.
@@ -1982,7 +2115,7 @@ TEST(MultiSendTest, ResetClearsBuffOccupiedFlags) {
   }
 
   proxy.Reset();
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, kMaxSends));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, kMaxSends));
 
   // Although sent packets have not been released, proxy.Reset() should have
   // marked all buffers as unoccupied.
@@ -2075,7 +2208,7 @@ TEST(L2capCocWriteTest, BasicWrite) {
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
   // Allow proxy to reserve 1 credit.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   L2capCoc channel = BuildCoc(proxy,
                               CocParameters{.handle = capture.handle,
@@ -2092,7 +2225,7 @@ TEST(L2capCocWriteTest, ErrorOnWriteToStoppedChannel) {
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
   // Allow proxy to reserve 1 credit.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   L2capCoc channel = BuildCoc(
       proxy,
@@ -2118,7 +2251,7 @@ TEST(L2capCocWriteTest, TooLargeWritesFail) {
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
   // Allow proxy to reserve 1 credit.
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
 
   // Payload size exceeds MTU.
   L2capCoc small_mtu_channel = BuildCoc(proxy, CocParameters{.tx_mtu = 1});
@@ -2164,7 +2297,7 @@ TEST(L2capCocWriteTest, MultipleWritesSameChannel) {
   uint16_t num_writes = 5;
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn), std::move(send_to_controller_fn), num_writes);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(
       proxy,
       /*num_credits_to_reserve=*/num_writes));
 
@@ -2204,7 +2337,7 @@ TEST(L2capCocWriteTest, MultipleWritesMultipleChannels) {
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               kNumChannels);
-  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(
       proxy,
       /*num_credits_to_reserve=*/kNumChannels));
 
@@ -2297,8 +2430,10 @@ TEST(L2capCocReadTest, ChannelHandlesReadWithNullReceiveFn) {
       []([[maybe_unused]] H4PacketWithHci&& packet) { FAIL(); });
   pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
       []([[maybe_unused]] H4PacketWithH4&& packet) {});
-  ProxyHost proxy = ProxyHost(
-      std::move(send_to_host_fn), std::move(send_to_controller_fn), 0);
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/0,
+                              /*br_edr_acl_credits_to_reserve=*/0);
 
   uint16_t handle = 123;
   uint16_t local_cid = 234;
@@ -2333,8 +2468,10 @@ TEST(L2capCocReadTest, ErrorOnRxToStoppedChannel) {
       []([[maybe_unused]] H4PacketWithHci&& packet) {});
   pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
       []([[maybe_unused]] H4PacketWithH4&& packet) {});
-  ProxyHost proxy = ProxyHost(
-      std::move(send_to_host_fn), std::move(send_to_controller_fn), 0);
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/0,
+                              /*br_edr_acl_credits_to_reserve*/ 0);
 
   int events_received = 0;
   uint16_t num_invalid_rx = 3;
@@ -2374,6 +2511,43 @@ TEST(L2capCocReadTest, ErrorOnRxToStoppedChannel) {
     proxy.HandleH4HciFromController(std::move(h4_packet));
   }
   EXPECT_EQ(events_received, num_invalid_rx);
+}
+
+TEST(L2capCocReadTest, TooShortAclPassedToHost) {
+  int sends_called = 0;
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      [&sends_called]([[maybe_unused]] H4PacketWithHci&& packet) {
+        ++sends_called;
+      });
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+  ProxyHost proxy = ProxyHost(
+      std::move(send_to_host_fn), std::move(send_to_controller_fn), 0);
+
+  uint16_t handle = 123;
+  uint16_t local_cid = 234;
+  L2capCoc channel = BuildCoc(
+      proxy,
+      CocParameters{
+          .handle = handle,
+          .local_cid = local_cid,
+          .receive_fn = []([[maybe_unused]] pw::span<uint8_t> payload) {
+            FAIL();
+          }});
+
+  std::array<uint8_t, kFirstKFrameOverAclMinSize> hci_arr;
+  hci_arr.fill(0);
+  H4PacketWithHci h4_packet{emboss::H4PacketType::ACL_DATA, hci_arr};
+
+  Result<emboss::AclDataFrameWriter> acl =
+      MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr);
+  acl->header().handle().Write(handle);
+  // Write size larger than buffer size.
+  acl->data_total_length().Write(emboss::FirstKFrame::MinSizeInBytes() + 5);
+
+  proxy.HandleH4HciFromController(std::move(h4_packet));
+
+  EXPECT_EQ(sends_called, 1);
 }
 
 TEST(L2capCocReadTest, ChannelClosedWithErrorIfMtuExceeded) {
@@ -3342,6 +3516,985 @@ TEST(L2capCocReadTest, FragmentedPduDoesNotInterfereWithOtherChannels) {
 
   EXPECT_EQ(packets_received, 3);
 }
+// ########## L2capCocQueueTest
+
+TEST(L2capCocQueueTest, ReadBufferResponseDrainsQueue) {
+  size_t sends_called = 0;
+
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [&sends_called]([[maybe_unused]] H4PacketWithH4&& packet) {
+        ++sends_called;
+      });
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              L2capCoc::QueueCapacity());
+
+  L2capCoc channel =
+      BuildCoc(proxy, CocParameters{.tx_credits = L2capCoc::QueueCapacity()});
+
+  EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
+  for (size_t i = 0; i < L2capCoc::QueueCapacity(); ++i) {
+    EXPECT_EQ(channel.Write({}), PW_STATUS_OK);
+  }
+  EXPECT_EQ(channel.Write({}), PW_STATUS_UNAVAILABLE);
+  EXPECT_EQ(sends_called, 0u);
+
+  PW_TEST_EXPECT_OK(
+      SendLeReadBufferResponseFromController(proxy, L2capCoc::QueueCapacity()));
+
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity());
+}
+
+TEST(L2capCocQueueTest, NocpEventDrainsQueue) {
+  size_t sends_called = 0;
+
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [&sends_called]([[maybe_unused]] H4PacketWithH4&& packet) {
+        ++sends_called;
+      });
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              L2capCoc::QueueCapacity());
+  PW_TEST_EXPECT_OK(
+      SendLeReadBufferResponseFromController(proxy, L2capCoc::QueueCapacity()));
+
+  uint16_t handle = 123;
+  L2capCoc channel =
+      BuildCoc(proxy,
+               CocParameters{.handle = handle,
+                             .tx_credits = 2 * L2capCoc::QueueCapacity()});
+
+  for (size_t i = 0; i < L2capCoc::QueueCapacity(); ++i) {
+    EXPECT_EQ(channel.Write({}), PW_STATUS_OK);
+  }
+
+  EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
+  for (size_t i = 0; i < L2capCoc::QueueCapacity(); ++i) {
+    EXPECT_EQ(channel.Write({}), PW_STATUS_OK);
+  }
+  EXPECT_EQ(channel.Write({}), PW_STATUS_UNAVAILABLE);
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity());
+
+  PW_TEST_EXPECT_OK(SendNumberOfCompletedPackets(
+      proxy,
+      FlatMap<uint16_t, uint16_t, 1>({{{handle, L2capCoc::QueueCapacity()}}})));
+
+  EXPECT_EQ(sends_called, 2 * L2capCoc::QueueCapacity());
+}
+
+TEST(L2capCocQueueTest, RemovingLrdWriteChannelDoesNotInvalidateRoundRobin) {
+  size_t sends_called = 0;
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [&sends_called]([[maybe_unused]] H4PacketWithH4&& packet) {
+        ++sends_called;
+      });
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              L2capCoc::QueueCapacity());
+  PW_TEST_EXPECT_OK(
+      SendLeReadBufferResponseFromController(proxy, L2capCoc::QueueCapacity()));
+  EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), L2capCoc::QueueCapacity());
+
+  uint16_t handle = 123;
+  std::array<uint16_t, 3> remote_cids = {1, 2, 3};
+  L2capCoc chan_left = BuildCoc(
+      proxy,
+      CocParameters{
+          .handle = handle, .remote_cid = remote_cids[0], .tx_credits = 1});
+  std::optional<L2capCoc> chan_middle =
+      BuildCoc(proxy,
+               CocParameters{.handle = handle,
+                             .remote_cid = remote_cids[1],
+                             .tx_credits = L2capCoc::QueueCapacity() + 1});
+  L2capCoc chan_right = BuildCoc(
+      proxy,
+      CocParameters{
+          .handle = handle, .remote_cid = remote_cids[2], .tx_credits = 1});
+
+  // We have 3 channels. Make it so LRD write channel iterator is on the
+  // middle channel, then release that channel and ensure the other two are
+  // still reached in the round robin.
+
+  // Queue a packet in middle channel.
+  for (size_t i = 0; i < L2capCoc::QueueCapacity() + 1; ++i) {
+    EXPECT_EQ(chan_middle->Write({}), PW_STATUS_OK);
+  }
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity());
+
+  // Make middle channel the LRD write channel.
+  PW_TEST_EXPECT_OK(SendNumberOfCompletedPackets(
+      proxy, FlatMap<uint16_t, uint16_t, 1>({{{handle, 1}}})));
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity() + 1);
+
+  // Queue a packet each in left and right channels.
+  EXPECT_EQ(chan_left.Write({}), PW_STATUS_OK);
+  EXPECT_EQ(chan_right.Write({}), PW_STATUS_OK);
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity() + 1);
+
+  // Drop middle channel. LRD write channel iterator should still be valid.
+  chan_middle.reset();
+
+  // Confirm packets in remaining two channels are sent in round robin.
+  PW_TEST_EXPECT_OK(SendNumberOfCompletedPackets(
+      proxy, FlatMap<uint16_t, uint16_t, 1>({{{handle, 2}}})));
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity() + 3);
+}
+
+// ########## L2capSignalingTest
+
+TEST(L2capSignalingTest, FlowControlCreditIndDrainsQueue) {
+  size_t sends_called = 0;
+
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [&sends_called]([[maybe_unused]] H4PacketWithH4&& packet) {
+        ++sends_called;
+      });
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              L2capCoc::QueueCapacity());
+  PW_TEST_EXPECT_OK(
+      SendLeReadBufferResponseFromController(proxy, L2capCoc::QueueCapacity()));
+  EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), L2capCoc::QueueCapacity());
+
+  uint16_t handle = 123;
+  uint16_t remote_cid = 456;
+  L2capCoc channel = BuildCoc(
+      proxy,
+      CocParameters{
+          .handle = handle, .remote_cid = remote_cid, .tx_credits = 0});
+
+  for (size_t i = 0; i < L2capCoc::QueueCapacity(); ++i) {
+    EXPECT_EQ(channel.Write({}), PW_STATUS_OK);
+  }
+  EXPECT_EQ(channel.Write({}), PW_STATUS_UNAVAILABLE);
+  EXPECT_EQ(sends_called, 0u);
+
+  constexpr size_t kL2capLength =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() +
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes();
+  constexpr size_t kHciLength =
+      emboss::AclDataFrame::MinSizeInBytes() + kL2capLength;
+  std::array<uint8_t, kHciLength> hci_arr;
+  hci_arr.fill(0);
+  H4PacketWithHci flow_control_credit_ind{emboss::H4PacketType::ACL_DATA,
+                                          pw::span(hci_arr.data(), kHciLength)};
+
+  Result<emboss::AclDataFrameWriter> acl =
+      MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr);
+  acl->header().handle().Write(handle);
+  acl->data_total_length().Write(kL2capLength);
+
+  emboss::CFrameWriter l2cap = emboss::MakeCFrameView(
+      acl->payload().BackingStorage().data(), kL2capLength);
+  l2cap.pdu_length().Write(
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  // 0x0005 = LE-U fixed signaling channel ID.
+  l2cap.channel_id().Write(0x0005);
+
+  emboss::L2capFlowControlCreditIndWriter ind =
+      emboss::MakeL2capFlowControlCreditIndView(
+          l2cap.payload().BackingStorage().data(),
+          emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  ind.command_header().code().Write(
+      emboss::L2capSignalingPacketCode::FLOW_CONTROL_CREDIT_IND);
+  ind.command_header().data_length().Write(
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes() -
+      emboss::L2capSignalingCommandHeader::IntrinsicSizeInBytes());
+  ind.cid().Write(remote_cid);
+  ind.credits().Write(L2capCoc::QueueCapacity());
+
+  proxy.HandleH4HciFromController(std::move(flow_control_credit_ind));
+
+  EXPECT_EQ(sends_called, L2capCoc::QueueCapacity());
+}
+
+TEST(L2capSignalingTest, ChannelClosedWithErrorIfCreditsExceeded) {
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              L2capCoc::QueueCapacity());
+
+  uint16_t handle = 123;
+  uint16_t remote_cid = 456;
+  int events_received = 0;
+  L2capCoc channel = BuildCoc(
+      proxy,
+      CocParameters{
+          .handle = handle,
+          .remote_cid = remote_cid,
+          // Initialize with max credit count.
+          .tx_credits =
+              emboss::L2capLeCreditBasedConnectionReq::max_credit_value(),
+          .event_fn = [&events_received](L2capCoc::Event event) {
+            EXPECT_EQ(event, L2capCoc::Event::kRxInvalid);
+            ++events_received;
+          }});
+
+  constexpr size_t kL2capLength =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() +
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes();
+  constexpr size_t kHciLength =
+      emboss::AclDataFrame::MinSizeInBytes() + kL2capLength;
+  std::array<uint8_t, kHciLength> hci_arr;
+  hci_arr.fill(0);
+  H4PacketWithHci flow_control_credit_ind{emboss::H4PacketType::ACL_DATA,
+                                          pw::span(hci_arr.data(), kHciLength)};
+
+  Result<emboss::AclDataFrameWriter> acl =
+      MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr);
+  acl->header().handle().Write(handle);
+  acl->data_total_length().Write(kL2capLength);
+
+  emboss::CFrameWriter l2cap =
+      emboss::MakeCFrameView(acl->payload().BackingStorage().data(),
+                             emboss::BasicL2capHeader::IntrinsicSizeInBytes());
+  l2cap.pdu_length().Write(
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  // 0x0005 = LE-U fixed signaling channel ID.
+  l2cap.channel_id().Write(0x0005);
+
+  emboss::L2capFlowControlCreditIndWriter ind =
+      emboss::MakeL2capFlowControlCreditIndView(
+          l2cap.payload().BackingStorage().data(),
+          emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  ind.command_header().code().Write(
+      emboss::L2capSignalingPacketCode::FLOW_CONTROL_CREDIT_IND);
+  ind.command_header().data_length().Write(
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes() -
+      emboss::L2capSignalingCommandHeader::IntrinsicSizeInBytes());
+  ind.cid().Write(remote_cid);
+  // Exceed max credit count by 1.
+  ind.credits().Write(1);
+
+  proxy.HandleH4HciFromController(std::move(flow_control_credit_ind));
+
+  EXPECT_EQ(events_received, 1);
+}
+
+TEST(L2capSignalingTest, CreditIndAddressedToNonManagedChannelForwardedToHost) {
+  int forwards_to_host = 0;
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      [&forwards_to_host](H4PacketWithHci&&) { ++forwards_to_host; });
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [](H4PacketWithH4&&) {});
+
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              L2capCoc::QueueCapacity());
+
+  uint16_t handle = 123;
+  uint16_t remote_cid = 456;
+  L2capCoc channel = BuildCoc(
+      proxy, CocParameters{.handle = handle, .remote_cid = remote_cid});
+
+  constexpr size_t kL2capLength =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() +
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes();
+  constexpr size_t kHciLength =
+      emboss::AclDataFrame::MinSizeInBytes() + kL2capLength;
+  std::array<uint8_t, kHciLength> hci_arr;
+  hci_arr.fill(0);
+  H4PacketWithHci flow_control_credit_ind{emboss::H4PacketType::ACL_DATA,
+                                          pw::span(hci_arr.data(), kHciLength)};
+
+  Result<emboss::AclDataFrameWriter> acl =
+      MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr);
+  acl->header().handle().Write(handle);
+  acl->data_total_length().Write(kL2capLength);
+
+  emboss::CFrameWriter l2cap =
+      emboss::MakeCFrameView(acl->payload().BackingStorage().data(),
+                             emboss::BasicL2capHeader::IntrinsicSizeInBytes());
+  l2cap.pdu_length().Write(
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  // 0x0005 = LE-U fixed signaling channel ID.
+  l2cap.channel_id().Write(0x0005);
+
+  emboss::L2capFlowControlCreditIndWriter ind =
+      emboss::MakeL2capFlowControlCreditIndView(
+          l2cap.payload().BackingStorage().data(),
+          emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  ind.command_header().code().Write(
+      emboss::L2capSignalingPacketCode::FLOW_CONTROL_CREDIT_IND);
+  ind.command_header().data_length().Write(
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes() -
+      emboss::L2capSignalingCommandHeader::IntrinsicSizeInBytes());
+  // Address packet to different CID on same connection.
+  ind.cid().Write(remote_cid + 1);
+
+  proxy.HandleH4HciFromController(std::move(flow_control_credit_ind));
+
+  EXPECT_EQ(forwards_to_host, 1);
+}
+
+// ########## AcluSignalingChannelTest
+
+TEST(AcluSignalingChannelTest, HandlesMultipleCommands) {
+  std::optional<H4PacketWithHci> host_packet;
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      [&host_packet](H4PacketWithHci&& packet) {
+        host_packet = std::move(packet);
+      });
+  pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+
+  ProxyHost proxy = ProxyHost(
+      std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
+
+  constexpr uint16_t kHandle = 123;
+
+  // Test that the proxy can parse a CFrame containing multiple commands and
+  // pass it through. We pack 3 CONNECTION_REQ commands into one CFrame.
+  constexpr size_t kNumCommands = 3;
+  constexpr size_t kCmdLen = emboss::L2capConnectionReq::IntrinsicSizeInBytes();
+  constexpr size_t kL2capLength =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() + kCmdLen * kNumCommands;
+  constexpr size_t kHciLength =
+      emboss::AclDataFrame::MinSizeInBytes() + kL2capLength;
+  std::array<uint8_t, kHciLength> hci_arr{};
+  H4PacketWithHci l2cap_cframe_packet{emboss::H4PacketType::ACL_DATA,
+                                      pw::span(hci_arr.data(), kHciLength)};
+
+  // ACL header
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto acl, MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr));
+  acl.header().handle().Write(kHandle);
+  acl.data_total_length().Write(kL2capLength);
+  EXPECT_EQ(kL2capLength, acl.payload().BackingStorage().SizeInBytes());
+
+  // L2CAP header
+  auto l2cap =
+      emboss::MakeCFrameView(acl.payload().BackingStorage().data(),
+                             acl.payload().BackingStorage().SizeInBytes());
+  l2cap.pdu_length().Write(kNumCommands * kCmdLen);
+  l2cap.channel_id().Write(
+      cpp23::to_underlying(emboss::L2capFixedCid::ACL_U_SIGNALING));
+  EXPECT_TRUE(l2cap.Ok());
+
+  auto command_buffer =
+      pw::span(l2cap.payload().BackingStorage().data(),
+               l2cap.payload().BackingStorage().SizeInBytes());
+  EXPECT_EQ(l2cap.payload().BackingStorage().SizeInBytes(),
+            kCmdLen * kNumCommands);
+
+  do {
+    // CONNECTION_REQ
+    auto cmd_writer = emboss::MakeL2capConnectionReqView(command_buffer.data(),
+                                                         command_buffer.size());
+    cmd_writer.command_header().code().Write(
+        emboss::L2capSignalingPacketCode::CONNECTION_REQ);
+    // Note data_length doesn't include command header.
+    cmd_writer.command_header().data_length().Write(
+        kCmdLen - emboss::L2capSignalingCommandHeader::IntrinsicSizeInBytes());
+    cmd_writer.psm().Write(1);
+    cmd_writer.source_cid().Write(1);
+    EXPECT_TRUE(cmd_writer.Ok());
+    EXPECT_EQ(cmd_writer.SizeInBytes(), kCmdLen);
+    command_buffer = command_buffer.subspan(cmd_writer.SizeInBytes());
+  } while (!command_buffer.empty());
+
+  proxy.HandleH4HciFromController(std::move(l2cap_cframe_packet));
+  // We should get back what we sent, since the proxy doesn't consume
+  // CONNECTION_REQ commands. It would be nice to also verify the individual
+  // commands were parsed out but hooks don't exist for that at the time of
+  // writing.
+  EXPECT_TRUE(host_packet.has_value());
+  EXPECT_EQ(host_packet->GetHciSpan().size(), kHciLength);
+}
+
+TEST(AcluSignalingChannelTest, InvalidPacketForwarded) {
+  std::optional<H4PacketWithHci> host_packet;
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      [&host_packet](H4PacketWithHci&& packet) {
+        host_packet = std::move(packet);
+      });
+  pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+
+  ProxyHost proxy = ProxyHost(
+      std::move(send_to_host_fn), std::move(send_to_controller_fn), 1);
+
+  constexpr uint16_t kHandle = 123;
+
+  // Test that the proxy forwards on invalid L2cap B-frames destined for
+  // signaling channel.
+
+  constexpr size_t kL2capLength =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes();
+  constexpr size_t kHciLength =
+      emboss::AclDataFrame::MinSizeInBytes() + kL2capLength;
+  std::array<uint8_t, kHciLength> hci_arr{};
+  H4PacketWithHci l2cap_cframe_packet{emboss::H4PacketType::ACL_DATA,
+                                      pw::span(hci_arr.data(), kHciLength)};
+
+  // ACL header
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto acl, MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr));
+  acl.header().handle().Write(kHandle);
+  acl.data_total_length().Write(kL2capLength);
+  EXPECT_EQ(kL2capLength, acl.payload().BackingStorage().SizeInBytes());
+
+  // L2CAP header
+  auto l2cap =
+      emboss::MakeCFrameView(acl.payload().BackingStorage().data(),
+                             acl.payload().BackingStorage().SizeInBytes());
+  // Invalid length, since we aren't encoding a payload.
+  l2cap.pdu_length().Write(1);
+  l2cap.channel_id().Write(
+      cpp23::to_underlying(emboss::L2capFixedCid::ACL_U_SIGNALING));
+  EXPECT_FALSE(l2cap.Ok());
+
+  proxy.HandleH4HciFromController(std::move(l2cap_cframe_packet));
+  // We should get back what we sent.
+  EXPECT_TRUE(host_packet.has_value());
+  EXPECT_EQ(host_packet->GetHciSpan().size(), kHciLength);
+}
+
+// ########## RfcommWriteTest
+
+constexpr uint8_t kBFrameOverAclMinSize =
+    emboss::AclDataFrameHeader::IntrinsicSizeInBytes() +
+    emboss::BFrame::MinSizeInBytes();
+
+TEST(RfcommWriteTest, BasicWrite) {
+  struct {
+    int sends_called = 0;
+    // First four bits 0x0 encode PB & BC flags
+    uint16_t handle = 0x0ACB;
+    // Length of L2CAP PDU
+    uint16_t acl_data_total_length = 0x000C;
+    // L2CAP header PDU length field
+    uint16_t pdu_length = 0x0008;
+    // Random CID
+    uint16_t channel_id = 0x1234;
+    // RFCOMM header
+    std::array<uint8_t, 3> rfcomm_header = {0x19, 0xFF, 0x07};
+    uint8_t rfcomm_credits = 0;
+    // RFCOMM information payload
+    std::array<uint8_t, 3> payload = {0xAB, 0xCD, 0xEF};
+    uint8_t rfcomm_fcs = 0x49;
+
+    // Built from the preceding values in little endian order (except payload in
+    // big endian).
+    std::array<uint8_t, 16> expected_hci_packet = {0xCB,
+                                                   0x0A,
+                                                   0x0C,
+                                                   0x00,
+                                                   0x08,
+                                                   0x00,
+                                                   0x34,
+                                                   0x12,
+                                                   // RFCOMM header
+                                                   0x19,
+                                                   0xFF,
+                                                   0x07,
+                                                   0x00,
+                                                   0xAB,
+                                                   0xCD,
+                                                   0xEF,
+                                                   // FCS
+                                                   0x49};
+  } capture;
+
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [&capture](H4PacketWithH4&& packet) {
+        ++capture.sends_called;
+        EXPECT_EQ(packet.GetH4Type(), emboss::H4PacketType::ACL_DATA);
+        EXPECT_EQ(packet.GetHciSpan().size(),
+                  capture.expected_hci_packet.size());
+        EXPECT_TRUE(std::equal(packet.GetHciSpan().begin(),
+                               packet.GetHciSpan().end(),
+                               capture.expected_hci_packet.begin(),
+                               capture.expected_hci_packet.end()));
+        PW_TEST_ASSERT_OK_AND_ASSIGN(
+            auto acl,
+            MakeEmbossView<emboss::AclDataFrameView>(packet.GetHciSpan()));
+        EXPECT_EQ(acl.header().handle().Read(), capture.handle);
+        EXPECT_EQ(acl.header().packet_boundary_flag().Read(),
+                  emboss::AclDataPacketBoundaryFlag::FIRST_NON_FLUSHABLE);
+        EXPECT_EQ(acl.header().broadcast_flag().Read(),
+                  emboss::AclDataPacketBroadcastFlag::POINT_TO_POINT);
+        EXPECT_EQ(acl.data_total_length().Read(),
+                  capture.acl_data_total_length);
+        emboss::BFrameView bframe = emboss::BFrameView(
+            acl.payload().BackingStorage().data(), acl.SizeInBytes());
+        EXPECT_EQ(bframe.pdu_length().Read(), capture.pdu_length);
+        EXPECT_EQ(bframe.channel_id().Read(), capture.channel_id);
+        EXPECT_TRUE(std::equal(bframe.payload().BackingStorage().begin(),
+                               bframe.payload().BackingStorage().begin() +
+                                   capture.rfcomm_header.size(),
+                               capture.rfcomm_header.begin(),
+                               capture.rfcomm_header.end()));
+        auto rfcomm = emboss::MakeRfcommFrameView(
+            bframe.payload().BackingStorage().data(),
+            bframe.payload().SizeInBytes());
+        EXPECT_TRUE(rfcomm.Ok());
+        EXPECT_EQ(rfcomm.credits().Read(), capture.rfcomm_credits);
+
+        for (size_t i = 0; i < 3; ++i) {
+          EXPECT_EQ(rfcomm.information()[i].Read(), capture.payload[i]);
+        }
+
+        EXPECT_EQ(rfcomm.fcs().Read(), capture.rfcomm_fcs);
+      });
+
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/0,
+                              /*br_edr_acl_credits_to_reserve=*/1);
+  // Allow proxy to reserve 1 credit.
+  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+
+  constexpr uint8_t kMaxCredits = 10;
+  constexpr uint16_t kMaxFrameSize = 900;
+  constexpr uint8_t kRfcommChannel = 0x03;
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto channel,
+      proxy.AcquireRfcommChannel(
+          capture.handle,
+          /*rx_config=*/
+          RfcommChannel::Config{.cid = capture.channel_id,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          /*tx_config*/
+          RfcommChannel::Config{.cid = capture.channel_id,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          kRfcommChannel,
+          nullptr));
+  EXPECT_EQ(channel.Write(capture.payload), PW_STATUS_OK);
+  EXPECT_EQ(capture.sends_called, 1);
+}
+
+TEST(RfcommWriteTest, ExtendedWrite) {
+  constexpr size_t kPayloadSize = 0x80;
+  struct {
+    int sends_called = 0;
+    // First four bits 0x0 encode PB & BC flags
+    uint16_t handle = 0x0ACB;
+    // Length of L2CAP PDU
+    uint16_t acl_data_total_length = 0x008A;
+    // L2CAP header PDU length field
+    uint16_t pdu_length = 0x0086;
+    // Random CID
+    uint16_t channel_id = 0x1234;
+    // RFCOMM header
+    std::array<uint8_t, 4> rfcomm_header = {0x19, 0xFF, 0x00, 0x01};
+    uint8_t rfcomm_credits = 0;
+    // RFCOMM information payload
+    std::array<uint8_t, kPayloadSize> payload = {
+        0xAB,
+        0xCD,
+        0xEF,
+    };
+    uint8_t rfcomm_fcs = 0x49;
+
+    // Built from the preceding values in little endian order (except payload in
+    // big endian).
+    std::array<uint8_t, kPayloadSize + 14> expected_hci_packet = {
+        0xCB,
+        0x0A,
+        0x8A,
+        0x00,
+        0x86,
+        0x00,
+        0x34,
+        0x12,
+        // RFCOMM header
+        0x19,
+        0xFF,
+        0x00,
+        0x01,
+        0x00,
+        0xAB,
+        0xCD,
+        0xEF,
+    };
+  } capture;
+
+  // FCS
+  capture.expected_hci_packet[capture.expected_hci_packet.size() - 1] =
+      capture.rfcomm_fcs;
+
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      [&capture](H4PacketWithH4&& packet) {
+        ++capture.sends_called;
+        EXPECT_EQ(packet.GetH4Type(), emboss::H4PacketType::ACL_DATA);
+        EXPECT_EQ(packet.GetHciSpan().size(),
+                  capture.expected_hci_packet.size());
+        EXPECT_TRUE(std::equal(packet.GetHciSpan().begin(),
+                               packet.GetHciSpan().end(),
+                               capture.expected_hci_packet.begin(),
+                               capture.expected_hci_packet.end()));
+        PW_TEST_ASSERT_OK_AND_ASSIGN(
+            auto acl,
+            MakeEmbossView<emboss::AclDataFrameView>(packet.GetHciSpan()));
+        EXPECT_EQ(acl.header().handle().Read(), capture.handle);
+        EXPECT_EQ(acl.header().packet_boundary_flag().Read(),
+                  emboss::AclDataPacketBoundaryFlag::FIRST_NON_FLUSHABLE);
+        EXPECT_EQ(acl.header().broadcast_flag().Read(),
+                  emboss::AclDataPacketBroadcastFlag::POINT_TO_POINT);
+        EXPECT_EQ(acl.data_total_length().Read(),
+                  capture.acl_data_total_length);
+        emboss::BFrameView bframe = emboss::BFrameView(
+            acl.payload().BackingStorage().data(), acl.SizeInBytes());
+        EXPECT_EQ(bframe.pdu_length().Read(), capture.pdu_length);
+        EXPECT_EQ(bframe.channel_id().Read(), capture.channel_id);
+        EXPECT_TRUE(std::equal(bframe.payload().BackingStorage().begin(),
+                               bframe.payload().BackingStorage().begin() +
+                                   capture.rfcomm_header.size(),
+                               capture.rfcomm_header.begin(),
+                               capture.rfcomm_header.end()));
+        auto rfcomm = emboss::MakeRfcommFrameView(
+            bframe.payload().BackingStorage().data(),
+            bframe.payload().SizeInBytes());
+        EXPECT_TRUE(rfcomm.Ok());
+        EXPECT_EQ(rfcomm.credits().Read(), capture.rfcomm_credits);
+
+        for (size_t i = 0; i < 3; ++i) {
+          EXPECT_EQ(rfcomm.information()[i].Read(), capture.payload[i]);
+        }
+
+        EXPECT_EQ(rfcomm.fcs().Read(), capture.rfcomm_fcs);
+      });
+
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/0,
+                              /*br_edr_acl_credits_to_reserve=*/1);
+  // Allow proxy to reserve 1 credit.
+  PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
+
+  constexpr uint8_t kMaxCredits = 10;
+  constexpr uint16_t kMaxFrameSize = 900;
+  constexpr uint8_t kRfcommChannel = 0x03;
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto channel,
+      proxy.AcquireRfcommChannel(
+          capture.handle,
+          /*rx_config=*/
+          RfcommChannel::Config{.cid = capture.channel_id,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          /*tx_config*/
+          RfcommChannel::Config{.cid = capture.channel_id,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          kRfcommChannel,
+          nullptr));
+  EXPECT_EQ(channel.Write(capture.payload), PW_STATUS_OK);
+  EXPECT_EQ(capture.sends_called, 1);
+}
+
+// ########## RfcommReadTest
+
+TEST(RfcommReadTest, BasicRead) {
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+  ProxyHost proxy = ProxyHost(
+      std::move(send_to_host_fn), std::move(send_to_controller_fn), 0);
+
+  struct {
+    int rx_called = 0;
+    std::array<uint8_t, 3> expected_payload = {0xAB, 0xCD, 0xEF};
+  } capture;
+
+  constexpr uint8_t kExpectedFcs = 0xFA;
+  constexpr uint16_t kHandle = 123;
+  constexpr uint16_t kCid = 234;
+  constexpr uint8_t kMaxCredits = 10;
+  constexpr uint16_t kMaxFrameSize = 900;
+  constexpr uint8_t kRfcommChannel = 0x03;
+  const size_t frame_size = emboss::RfcommFrame::MinSizeInBytes() +
+                            /*payload*/ capture.expected_payload.size();
+  const size_t acl_data_length =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() + frame_size;
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto channel,
+      proxy.AcquireRfcommChannel(
+          kHandle,
+          /*rx_config=*/
+          RfcommChannel::Config{.cid = kCid,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          /*tx_config*/
+          RfcommChannel::Config{.cid = kCid,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          kRfcommChannel,
+          [&capture](pw::span<uint8_t> payload) {
+            ++capture.rx_called;
+            EXPECT_TRUE(std::equal(payload.begin(),
+                                   payload.end(),
+                                   capture.expected_payload.begin(),
+                                   capture.expected_payload.end()));
+          }));
+
+  std::array<uint8_t, kBFrameOverAclMinSize + frame_size> hci_arr{};
+  H4PacketWithHci h4_packet{emboss::H4PacketType::ACL_DATA, hci_arr};
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto acl, MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr));
+  acl.header().handle().Write(kHandle);
+  acl.data_total_length().Write(acl_data_length);
+
+  auto bframe = emboss::MakeBFrameView(acl.payload().BackingStorage().data(),
+                                       acl.data_total_length().Read());
+  bframe.pdu_length().Write(frame_size);
+  bframe.channel_id().Write(kCid);
+
+  auto rfcomm = emboss::MakeRfcommFrameView(
+      bframe.payload().BackingStorage().data(), bframe.payload().SizeInBytes());
+  rfcomm.extended_address().Write(true);
+  rfcomm.command_response_direction().Write(
+      emboss::RfcommCommandResponseAndDirection::COMMAND_FROM_INITIATOR);
+  rfcomm.channel().Write(kRfcommChannel);
+
+  rfcomm.control().Write(
+      emboss::RfcommFrameType::UNNUMBERED_INFORMATION_WITH_HEADER_CHECK);
+
+  rfcomm.length_extended_flag().Write(emboss::RfcommLengthExtended::NORMAL);
+  rfcomm.length().Write(capture.expected_payload.size());
+
+  std::memcpy(rfcomm.information().BackingStorage().data(),
+              capture.expected_payload.data(),
+              capture.expected_payload.size());
+  rfcomm.fcs().Write(kExpectedFcs);
+
+  // Send ACL data packet destined for the channel we registered.
+  proxy.HandleH4HciFromController(std::move(h4_packet));
+
+  EXPECT_EQ(capture.rx_called, 1);
+}
+
+TEST(RfcommReadTest, ExtendedRead) {
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      []([[maybe_unused]] H4PacketWithHci&& packet) {});
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+  ProxyHost proxy = ProxyHost(
+      std::move(send_to_host_fn), std::move(send_to_controller_fn), 0);
+
+  constexpr size_t kPayloadSize = 0x80;
+  struct {
+    int rx_called = 0;
+    std::array<uint8_t, kPayloadSize> expected_payload = {0xAB, 0xCD, 0xEF};
+  } capture;
+
+  constexpr uint8_t kExpectedFcs = 0xFA;
+  constexpr uint16_t kHandle = 123;
+  constexpr uint16_t kCid = 234;
+  constexpr uint8_t kMaxCredits = 10;
+  constexpr uint16_t kMaxFrameSize = 900;
+  constexpr uint8_t kRfcommChannel = 0x03;
+
+  const size_t frame_size = emboss::RfcommFrame::MinSizeInBytes() +
+                            /*length_extended*/ 1 +
+                            /*payload*/ capture.expected_payload.size();
+  const size_t acl_data_length =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() + frame_size;
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto channel,
+      proxy.AcquireRfcommChannel(
+          kHandle,
+          /*rx_config=*/
+          RfcommChannel::Config{.cid = kCid,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          /*tx_config*/
+          RfcommChannel::Config{.cid = kCid,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          kRfcommChannel,
+          [&capture](pw::span<uint8_t> payload) {
+            ++capture.rx_called;
+            EXPECT_TRUE(std::equal(payload.begin(),
+                                   payload.end(),
+                                   capture.expected_payload.begin(),
+                                   capture.expected_payload.end()));
+          }));
+
+  std::array<uint8_t, kBFrameOverAclMinSize + frame_size> hci_arr{};
+  H4PacketWithHci h4_packet{emboss::H4PacketType::ACL_DATA, hci_arr};
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto acl, MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr));
+  acl.header().handle().Write(kHandle);
+  acl.data_total_length().Write(acl_data_length);
+
+  auto bframe = emboss::MakeBFrameView(acl.payload().BackingStorage().data(),
+                                       acl.data_total_length().Read());
+  bframe.pdu_length().Write(frame_size);
+  bframe.channel_id().Write(kCid);
+
+  auto rfcomm = emboss::MakeRfcommFrameView(
+      bframe.payload().BackingStorage().data(), bframe.payload().SizeInBytes());
+  rfcomm.extended_address().Write(true);
+  rfcomm.command_response_direction().Write(
+      emboss::RfcommCommandResponseAndDirection::COMMAND_FROM_INITIATOR);
+  rfcomm.channel().Write(kRfcommChannel);
+
+  rfcomm.control().Write(
+      emboss::RfcommFrameType::UNNUMBERED_INFORMATION_WITH_HEADER_CHECK);
+
+  rfcomm.length_extended_flag().Write(emboss::RfcommLengthExtended::EXTENDED);
+  rfcomm.length_extended().Write(capture.expected_payload.size());
+
+  std::memcpy(rfcomm.information().BackingStorage().data(),
+              capture.expected_payload.data(),
+              capture.expected_payload.size());
+  rfcomm.fcs().Write(kExpectedFcs);
+
+  // Send ACL data packet destined for the channel we registered.
+  proxy.HandleH4HciFromController(std::move(h4_packet));
+
+  EXPECT_EQ(capture.rx_called, 1);
+}
+
+TEST(RfcommReadTest, InvalidReads) {
+  struct {
+    int rx_called = 0;
+    int host_called = 0;
+  } capture;
+
+  pw::Function<void(H4PacketWithHci && packet)>&& send_to_host_fn(
+      [&capture]([[maybe_unused]] H4PacketWithHci&& packet) {
+        ++capture.host_called;
+      });
+  pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
+      []([[maybe_unused]] H4PacketWithH4&& packet) {});
+  ProxyHost proxy = ProxyHost(
+      std::move(send_to_host_fn), std::move(send_to_controller_fn), 0);
+
+  constexpr uint8_t kExpectedFcs = 0xFA;
+  constexpr uint8_t kInvalidFcs = 0xFF;
+  constexpr uint16_t kHandle = 123;
+  constexpr uint16_t kCid = 234;
+  constexpr uint8_t kMaxCredits = 10;
+  constexpr uint16_t kMaxFrameSize = 900;
+  constexpr uint8_t kRfcommChannel = 0x03;
+  const size_t frame_size = emboss::RfcommFrame::MinSizeInBytes() +
+                            /*payload*/ 0;
+  const size_t acl_data_length =
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes() + frame_size;
+
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      auto channel,
+      proxy.AcquireRfcommChannel(
+          kHandle,
+          /*rx_config=*/
+          RfcommChannel::Config{.cid = kCid,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          /*tx_config*/
+          RfcommChannel::Config{.cid = kCid,
+                                .max_information_length = kMaxFrameSize,
+                                .credits = kMaxCredits},
+          kRfcommChannel,
+          [&capture](pw::span<uint8_t>) { ++capture.rx_called; }));
+
+  std::array<uint8_t, kBFrameOverAclMinSize + frame_size> hci_arr{};
+
+  // Construct valid packet but put invalid checksum on the end. Test that we
+  // don't get it sent on to us.
+  {
+    H4PacketWithHci h4_packet{emboss::H4PacketType::ACL_DATA, hci_arr};
+    PW_TEST_ASSERT_OK_AND_ASSIGN(
+        auto acl, MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr));
+    acl.header().handle().Write(kHandle);
+    acl.data_total_length().Write(acl_data_length);
+
+    auto bframe = emboss::MakeBFrameView(acl.payload().BackingStorage().data(),
+                                         acl.data_total_length().Read());
+    bframe.pdu_length().Write(frame_size);
+    bframe.channel_id().Write(kCid);
+
+    auto rfcomm =
+        emboss::MakeRfcommFrameView(bframe.payload().BackingStorage().data(),
+                                    bframe.payload().SizeInBytes());
+    rfcomm.extended_address().Write(true);
+    rfcomm.command_response_direction().Write(
+        emboss::RfcommCommandResponseAndDirection::COMMAND_FROM_INITIATOR);
+    rfcomm.channel().Write(kRfcommChannel);
+
+    rfcomm.control().Write(
+        emboss::RfcommFrameType::UNNUMBERED_INFORMATION_WITH_HEADER_CHECK);
+
+    rfcomm.length_extended_flag().Write(emboss::RfcommLengthExtended::NORMAL);
+    rfcomm.length().Write(0);
+    rfcomm.fcs().Write(kInvalidFcs);
+
+    proxy.HandleH4HciFromController(std::move(h4_packet));
+  }
+
+  EXPECT_EQ(capture.rx_called, 0);
+  EXPECT_EQ(capture.host_called, 1);
+
+  // Construct packet with everything valid but wrong length for actual data
+  // size. Ensure it doesn't end up being sent to our channel, but does get
+  // forwarded to host.
+  {
+    H4PacketWithHci h4_packet{emboss::H4PacketType::ACL_DATA, hci_arr};
+
+    PW_TEST_ASSERT_OK_AND_ASSIGN(
+        auto acl, MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_arr));
+    acl.header().handle().Write(kHandle);
+    acl.data_total_length().Write(acl_data_length);
+
+    auto bframe = emboss::MakeBFrameView(acl.payload().BackingStorage().data(),
+                                         acl.data_total_length().Read());
+    bframe.pdu_length().Write(frame_size);
+    bframe.channel_id().Write(kCid);
+
+    auto rfcomm =
+        emboss::MakeRfcommFrameView(bframe.payload().BackingStorage().data(),
+                                    bframe.payload().SizeInBytes());
+    rfcomm.extended_address().Write(true);
+    rfcomm.command_response_direction().Write(
+        emboss::RfcommCommandResponseAndDirection::COMMAND_FROM_INITIATOR);
+    rfcomm.channel().Write(kRfcommChannel);
+
+    rfcomm.control().Write(
+        emboss::RfcommFrameType::UNNUMBERED_INFORMATION_WITH_HEADER_CHECK);
+
+    rfcomm.length_extended_flag().Write(emboss::RfcommLengthExtended::NORMAL);
+    // Invalid length.
+    rfcomm.length().Write(1);
+    // Can't Write FCS as emboss will assert because of invalid length. Place
+    // manually.
+    hci_arr[hci_arr.size() - 1] = kExpectedFcs;
+
+    proxy.HandleH4HciFromController(std::move(h4_packet));
+  }
+
+  EXPECT_EQ(capture.rx_called, 0);
+  EXPECT_EQ(capture.host_called, 2);
+}
+
+// TODO: https://pwbug.dev/360929142 - Add many more tests exercising queueing +
+// credit-based control flow.
 
 }  // namespace
 }  // namespace pw::bluetooth::proxy
