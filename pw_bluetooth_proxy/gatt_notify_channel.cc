@@ -62,7 +62,7 @@ pw::Status GattNotifyChannel::Write(pw::span<const uint8_t> attribute_value) {
               attribute_value.data(),
               attribute_value.size());
 
-  return SendL2capPacket(std::move(h4_packet));
+  return QueuePacket(std::move(h4_packet));
 }
 
 pw::Result<GattNotifyChannel> GattNotifyChannel::Create(
@@ -84,8 +84,10 @@ pw::Result<GattNotifyChannel> GattNotifyChannel::Create(
 GattNotifyChannel::GattNotifyChannel(L2capChannelManager& l2cap_channel_manager,
                                      uint16_t connection_handle,
                                      uint16_t attribute_handle)
-    : L2capWriteChannel(
-          l2cap_channel_manager, connection_handle, kAttributeProtocolCID),
+    : L2capWriteChannel(l2cap_channel_manager,
+                        connection_handle,
+                        AclTransport::kLe,
+                        kAttributeProtocolCID),
       attribute_handle_(attribute_handle) {}
 
 }  // namespace pw::bluetooth::proxy
