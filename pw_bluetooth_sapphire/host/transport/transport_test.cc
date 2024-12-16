@@ -54,14 +54,13 @@ TEST_F(TransportTest,
                         const EventPacket& event) { cb_count++; };
 
   auto packet =
-      hci::EmbossCommandPacket::New<pw::bluetooth::emboss::ResetCommandWriter>(
+      hci::CommandPacket::New<pw::bluetooth::emboss::ResetCommandWriter>(
           hci_spec::kReset);
   id1 = cmd_channel()->SendCommand(std::move(packet), cb);
   ASSERT_NE(0u, id1);
 
-  packet =
-      hci::EmbossCommandPacket::New<pw::bluetooth::emboss::ResetCommandWriter>(
-          hci_spec::kReset);
+  packet = hci::CommandPacket::New<pw::bluetooth::emboss::ResetCommandWriter>(
+      hci_spec::kReset);
   id2 = cmd_channel()->SendCommand(std::move(packet), cb);
   ASSERT_NE(0u, id2);
 

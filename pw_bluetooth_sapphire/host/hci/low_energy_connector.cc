@@ -63,7 +63,7 @@ LowEnergyConnector::LowEnergyConnector(
   CommandChannel::EventHandlerId id =
       hci_->command_channel()->AddLEMetaEventHandler(
           hci_spec::kLEConnectionCompleteSubeventCode,
-          [this](const EmbossEventPacket& event) {
+          [this](const EventPacket& event) {
             OnConnectionCompleteEvent<LEConnectionCompleteSubeventView>(event);
             return CommandChannel::EventCallbackResult::kContinue;
           });
@@ -71,7 +71,7 @@ LowEnergyConnector::LowEnergyConnector(
 
   id = hci_->command_channel()->AddLEMetaEventHandler(
       hci_spec::kLEEnhancedConnectionCompleteSubeventCode,
-      [this](const EmbossEventPacket& event) {
+      [this](const EventPacket& event) {
         OnConnectionCompleteEvent<LEEnhancedConnectionCompleteSubeventV1View>(
             event);
         return CommandChannel::EventCallbackResult::kContinue;
@@ -99,14 +99,14 @@ bool LowEnergyConnector::CreateConnection(
     const hci_spec::LEPreferredConnectionParameters& initial_parameters,
     StatusCallback status_callback,
     pw::chrono::SystemClock::duration timeout) {
-  BT_DEBUG_ASSERT(status_callback);
-  BT_DEBUG_ASSERT(timeout.count() > 0);
+  PW_DCHECK(status_callback);
+  PW_DCHECK(timeout.count() > 0);
 
   if (request_pending()) {
     return false;
   }
 
-  BT_DEBUG_ASSERT(!request_timeout_task_.is_pending());
+  PW_DCHECK(!request_timeout_task_.is_pending());
   pending_request_ = PendingRequest(peer_address, std::move(status_callback));
 
   if (use_local_identity_address_) {
@@ -124,6 +124,7 @@ bool LowEnergyConnector::CreateConnection(
   }
 
   local_addr_delegate_->EnsureLocalAddress(
+      /*address_type=*/std::nullopt,
       [this,
        use_accept_list,
        peer_address,
@@ -131,9 +132,13 @@ bool LowEnergyConnector::CreateConnection(
        scan_window,
        initial_parameters,
        timeout,
-       callback =
-           std::move(status_callback)](const DeviceAddress& address) mutable {
-        CreateConnectionInternal(address,
+       callback = std::move(status_callback)](
+          fit::result<HostError, const DeviceAddress> result) mutable {
+        if (result.is_error()) {
+          callback(fit::error(result.error_value()), nullptr);
+          return;
+        }
+        CreateConnectionInternal(result.value(),
                                  use_accept_list,
                                  peer_address,
                                  scan_interval,
@@ -176,7 +181,7 @@ void LowEnergyConnector::CreateConnectionInternal(
     return;
   }
 
-  BT_DEBUG_ASSERT(!pending_request_->initiating);
+  PW_DCHECK(!pending_request_->initiating);
 
   pending_request_->initiating = true;
   pending_request_->local_address = local_address;
@@ -184,7 +189,7 @@ void LowEnergyConnector::CreateConnectionInternal(
   // HCI Command Status Event will be sent as our completion callback.
   auto self = weak_self_.GetWeakPtr();
   auto complete_cb = [self, timeout](auto id, const EventPacket& event) {
-    BT_DEBUG_ASSERT(event.event_code() == hci_spec::kCommandStatusEventCode);
+    PW_DCHECK(event.event_code() == hci_spec::kCommandStatusEventCode);
 
     if (!self.is_alive()) {
       return;
@@ -203,7 +208,7 @@ void LowEnergyConnector::CreateConnectionInternal(
     self->request_timeout_task_.PostAfter(timeout);
   };
 
-  std::optional<EmbossCommandPacket> request;
+  std::optional<CommandPacket> request;
   if (use_extended_operations_) {
     request.emplace(BuildExtendedCreateConnectionPacket(local_address,
                                                         peer_address,
@@ -225,7 +230,7 @@ void LowEnergyConnector::CreateConnectionInternal(
                                        hci_spec::kCommandStatusEventCode);
 }
 
-EmbossCommandPacket LowEnergyConnector::BuildExtendedCreateConnectionPacket(
+CommandPacket LowEnergyConnector::BuildExtendedCreateConnectionPacket(
     const DeviceAddress& local_address,
     const DeviceAddress& peer_address,
     const hci_spec::LEPreferredConnectionParameters& initial_params,
@@ -240,9 +245,8 @@ EmbossCommandPacket LowEnergyConnector::BuildExtendedCreateConnectionPacket(
   size_t max_size = pw::bluetooth::emboss::LEExtendedCreateConnectionCommandV1::
       MaxSizeInBytes();
 
-  auto packet =
-      EmbossCommandPacket::New<LEExtendedCreateConnectionCommandV1Writer>(
-          hci_spec::kLEExtendedCreateConnection, max_size);
+  auto packet = CommandPacket::New<LEExtendedCreateConnectionCommandV1Writer>(
+      hci_spec::kLEExtendedCreateConnection, max_size);
   auto params = packet.view_t();
 
   if (use_accept_list) {
@@ -294,14 +298,14 @@ EmbossCommandPacket LowEnergyConnector::BuildExtendedCreateConnectionPacket(
   return packet;
 }
 
-EmbossCommandPacket LowEnergyConnector::BuildCreateConnectionPacket(
+CommandPacket LowEnergyConnector::BuildCreateConnectionPacket(
     const DeviceAddress& local_address,
     const DeviceAddress& peer_address,
     const hci_spec::LEPreferredConnectionParameters& initial_params,
     bool use_accept_list,
     uint16_t scan_interval,
     uint16_t scan_window) {
-  auto packet = EmbossCommandPacket::New<LECreateConnectionCommandWriter>(
+  auto packet = CommandPacket::New<LECreateConnectionCommandWriter>(
       hci_spec::kLECreateConnection);
   auto params = packet.view_t();
 
@@ -344,7 +348,7 @@ EmbossCommandPacket LowEnergyConnector::BuildCreateConnectionPacket(
 }
 
 void LowEnergyConnector::CancelInternal(bool timed_out) {
-  BT_DEBUG_ASSERT(request_pending());
+  PW_DCHECK(request_pending());
 
   if (pending_request_->canceled) {
     bt_log(WARN, "hci-le", "connection attempt already canceled!");
@@ -368,10 +372,10 @@ void LowEnergyConnector::CancelInternal(bool timed_out) {
     bt_log(
         DEBUG, "hci-le", "telling controller to cancel LE connection attempt");
     auto complete_cb = [](auto id, const EventPacket& event) {
-      hci_is_error(
+      HCI_IS_ERROR(
           event, WARN, "hci-le", "failed to cancel connection request");
     };
-    auto cancel = EmbossCommandPacket::New<LECreateConnectionCancelCommandView>(
+    auto cancel = CommandPacket::New<LECreateConnectionCancelCommandView>(
         hci_spec::kLECreateConnectionCancel);
     hci_->command_channel()->SendCommand(std::move(cancel), complete_cb);
 
@@ -385,8 +389,7 @@ void LowEnergyConnector::CancelInternal(bool timed_out) {
 }
 
 template <typename T>
-void LowEnergyConnector::OnConnectionCompleteEvent(
-    const EmbossEventPacket& event) {
+void LowEnergyConnector::OnConnectionCompleteEvent(const EventPacket& event) {
   auto params = event.view<T>();
 
   DeviceAddress::Type address_type =
@@ -463,7 +466,7 @@ void LowEnergyConnector::OnConnectionCompleteEvent(
 
 void LowEnergyConnector::OnCreateConnectionComplete(
     Result<> result, std::unique_ptr<LowEnergyConnection> link) {
-  BT_DEBUG_ASSERT(pending_request_);
+  PW_DCHECK(pending_request_);
   bt_log(DEBUG, "hci-le", "connection complete - status: %s", bt_str(result));
 
   request_timeout_task_.Cancel();
@@ -475,7 +478,7 @@ void LowEnergyConnector::OnCreateConnectionComplete(
 }
 
 void LowEnergyConnector::OnCreateConnectionTimeout() {
-  BT_DEBUG_ASSERT(pending_request_);
+  PW_DCHECK(pending_request_);
   bt_log(INFO, "hci-le", "create connection timed out: canceling request");
 
   // TODO(armansito): This should cancel the connection attempt only if the

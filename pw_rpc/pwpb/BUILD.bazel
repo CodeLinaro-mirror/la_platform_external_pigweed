@@ -29,7 +29,7 @@ cc_library(
         "public/pw_rpc/pwpb/internal/method_union.h",
         "public/pw_rpc/pwpb/server_reader_writer.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":common",
         "//pw_rpc/raw:server_api",
@@ -41,7 +41,7 @@ cc_library(
     hdrs = [
         "public/pw_rpc/pwpb/client_reader_writer.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":common",
     ],
@@ -54,7 +54,7 @@ cc_library(
         "public/pw_rpc/pwpb/serde.h",
         "public/pw_rpc/pwpb/server_reader_writer.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         "//pw_rpc",
     ],
@@ -66,7 +66,7 @@ cc_library(
         "public/pw_rpc/pwpb/fake_channel_output.h",
         "public/pw_rpc/pwpb/test_method_context.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":common",
         ":server_api",
@@ -82,7 +82,7 @@ cc_library(
     hdrs = [
         "public/pw_rpc/pwpb/client_testing.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":test_method_context",
         "//pw_rpc",
@@ -95,7 +95,7 @@ cc_library(
     hdrs = [
         "public/pw_rpc/pwpb/client_server_testing.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":test_method_context",
         "//pw_assert",
@@ -108,7 +108,7 @@ cc_library(
     hdrs = [
         "public/pw_rpc/pwpb/client_server_testing_threaded.h",
     ],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":test_method_context",
         "//pw_rpc:client_server_testing_threaded",
@@ -124,8 +124,9 @@ cc_library(
 cc_library(
     name = "echo_service",
     hdrs = ["public/pw_rpc/echo_service_pwpb.h"],
+    strip_include_prefix = "public",
     deps = [
-        "//pw_rpc:echo_cc.pwpb_rpc",
+        "//pw_rpc:echo_pwpb_rpc",
     ],
 )
 
@@ -138,7 +139,7 @@ filegroup(
     #deps = [
     #    "//pw_rpc:integration_testing",
     #    "//pw_sync:binary_semaphore",
-    #    "//pw_rpc:benchmark_cc.pwpb_rpc",
+    #    "//pw_rpc:benchmark_pwpb_rpc",
     #]
 )
 
@@ -151,7 +152,7 @@ pw_cc_test(
         ":client_api",
         ":internal_test_utils",
         "//pw_rpc",
-        "//pw_rpc:pw_rpc_test_cc.pwpb",
+        "//pw_rpc:pw_rpc_test_pwpb",
     ],
 )
 
@@ -163,7 +164,7 @@ pw_cc_test(
     deps = [
         ":client_api",
         ":client_testing",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -175,7 +176,7 @@ pw_cc_test(
     deps = [
         ":client_api",
         ":client_server_testing",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
         "//pw_sync:mutex",
     ],
 )
@@ -189,7 +190,7 @@ pw_cc_test(
     deps = [
         ":client_api",
         ":client_server_testing_threaded",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
         "//pw_sync:binary_semaphore",
         "//pw_sync:mutex",
         "//pw_thread:non_portable_test_thread_options",
@@ -207,7 +208,7 @@ pw_cc_test(
         ":test_method_context",
         "//pw_preprocessor",
         "//pw_rpc:internal_test_utils",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -219,7 +220,7 @@ pw_cc_test(
         ":server_api",
         ":test_method_context",
         "//pw_rpc:internal_test_utils",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -232,7 +233,7 @@ pw_cc_test(
         "//pw_containers",
         "//pw_rpc",
         "//pw_rpc:internal_test_utils",
-        "//pw_rpc:pw_rpc_test_cc.pwpb",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -242,7 +243,7 @@ pw_cc_test(
     deps = [
         "//pw_rpc",
         "//pw_rpc:internal_test_utils",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -251,7 +252,7 @@ pw_cc_test(
     srcs = ["method_lookup_test.cc"],
     deps = [
         ":test_method_context",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
         "//pw_rpc/raw:test_method_context",
     ],
 )
@@ -263,7 +264,7 @@ pw_cc_test(
         ":internal_test_utils",
         ":server_api",
         "//pw_rpc:internal_test_utils",
-        "//pw_rpc:pw_rpc_test_cc.pwpb",
+        "//pw_rpc:pw_rpc_test_pwpb",
     ],
 )
 
@@ -283,7 +284,7 @@ pw_cc_test(
         ":server_api",
         ":test_method_context",
         "//pw_rpc",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -292,7 +293,7 @@ pw_cc_test(
     srcs = ["serde_test.cc"],
     deps = [
         ":common",
-        "//pw_rpc:pw_rpc_test_cc.pwpb",
+        "//pw_rpc:pw_rpc_test_pwpb",
     ],
 )
 
@@ -302,7 +303,7 @@ pw_cc_test(
     deps = [
         ":test_method_context",
         "//pw_rpc",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -310,7 +311,7 @@ pw_cc_test(
     name = "stub_generation_test",
     srcs = ["stub_generation_test.cc"],
     deps = [
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
     ],
 )
 
@@ -319,7 +320,7 @@ pw_cc_test(
     srcs = ["synchronous_call_test.cc"],
     deps = [
         ":test_method_context",
-        "//pw_rpc:pw_rpc_test_cc.pwpb_rpc",
+        "//pw_rpc:pw_rpc_test_pwpb_rpc",
         "//pw_rpc:synchronous_client_api",
         "//pw_rpc_transport:test_loopback_service_registry",
         "//pw_work_queue",

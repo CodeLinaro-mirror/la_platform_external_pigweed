@@ -12,14 +12,16 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#include "pw_bluetooth_proxy/acl_data_channel.h"
+#include "pw_bluetooth_proxy/internal/acl_data_channel.h"
 
 #include <cstdint>
 
 #include "lib/stdcompat/utility.h"
+#include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_containers/algorithm.h"  // IWYU pragma: keep
 #include "pw_log/log.h"
+#include "pw_status/status.h"
 
 namespace pw::bluetooth::proxy {
 
@@ -80,10 +82,10 @@ AclDataChannel::ProcessSpecificLEReadBufferSizeCommandCompleteEvent<
 
 void AclDataChannel::HandleNumberOfCompletedPacketsEvent(
     H4PacketWithHci&& h4_packet) {
-  emboss::NumberOfCompletedPacketsEventWriter nocp_event =
-      MakeEmboss<emboss::NumberOfCompletedPacketsEventWriter>(
+  Result<emboss::NumberOfCompletedPacketsEventWriter> nocp_event =
+      MakeEmbossWriter<emboss::NumberOfCompletedPacketsEventWriter>(
           h4_packet.GetHciSpan());
-  if (!nocp_event.IsComplete()) {
+  if (!nocp_event.ok()) {
     PW_LOG_ERROR(
         "Buffer is too small for NUMBER_OF_COMPLETED_PACKETS event. So "
         "will not process.");
@@ -92,10 +94,10 @@ void AclDataChannel::HandleNumberOfCompletedPacketsEvent(
   }
   credit_allocation_mutex_.lock();
   bool should_send_to_host = false;
-  for (uint8_t i = 0; i < nocp_event.num_handles().Read(); ++i) {
-    uint16_t handle = nocp_event.nocp_data()[i].connection_handle().Read();
+  for (uint8_t i = 0; i < nocp_event->num_handles().Read(); ++i) {
+    uint16_t handle = nocp_event->nocp_data()[i].connection_handle().Read();
     uint16_t num_completed_packets =
-        nocp_event.nocp_data()[i].num_completed_packets().Read();
+        nocp_event->nocp_data()[i].num_completed_packets().Read();
 
     if (num_completed_packets == 0) {
       continue;
@@ -114,11 +116,8 @@ void AclDataChannel::HandleNumberOfCompletedPacketsEvent(
         std::min(num_completed_packets, connection_ptr->num_pending_packets);
     proxy_pending_le_acl_packets_ -= num_reclaimed;
     connection_ptr->num_pending_packets -= num_reclaimed;
-    if (connection_ptr->num_pending_packets == 0) {
-      active_connections_.erase(connection_ptr);
-    }
     uint16_t credits_remaining = num_completed_packets - num_reclaimed;
-    nocp_event.nocp_data()[i].num_completed_packets().Write(credits_remaining);
+    nocp_event->nocp_data()[i].num_completed_packets().Write(credits_remaining);
     if (credits_remaining > 0) {
       // Connection has credits remaining, so should past event on to host.
       should_send_to_host = true;
@@ -132,10 +131,10 @@ void AclDataChannel::HandleNumberOfCompletedPacketsEvent(
 
 void AclDataChannel::HandleDisconnectionCompleteEvent(
     H4PacketWithHci&& h4_packet) {
-  emboss::DisconnectionCompleteEventWriter dc_event =
-      MakeEmboss<emboss::DisconnectionCompleteEventWriter>(
+  Result<emboss::DisconnectionCompleteEventWriter> dc_event =
+      MakeEmbossView<emboss::DisconnectionCompleteEventWriter>(
           h4_packet.GetHciSpan());
-  if (!dc_event.IsComplete()) {
+  if (!dc_event.ok()) {
     PW_LOG_ERROR(
         "Buffer is too small for DISCONNECTION_COMPLETE event. So will not "
         "process.");
@@ -144,19 +143,27 @@ void AclDataChannel::HandleDisconnectionCompleteEvent(
   }
   credit_allocation_mutex_.lock();
 
-  uint16_t conn_handle = dc_event.connection_handle().Read();
+  uint16_t conn_handle = dc_event->connection_handle().Read();
   AclConnection* connection_ptr = FindConnection(conn_handle);
-  if (connection_ptr && connection_ptr->num_pending_packets > 0) {
-    emboss::StatusCode status = dc_event.status().Read();
-    if (status == emboss::StatusCode::SUCCESS) {
+  if (!connection_ptr) {
+    credit_allocation_mutex_.unlock();
+    hci_transport_.SendToHost(std::move(h4_packet));
+    return;
+  }
+
+  emboss::StatusCode status = dc_event->status().Read();
+  if (status == emboss::StatusCode::SUCCESS) {
+    if (connection_ptr->num_pending_packets > 0) {
       PW_LOG_WARN(
           "Proxy viewed disconnect (reason: %#.2hhx) for connection %#.4hx "
           "with packets in flight. Releasing associated credits",
-          cpp23::to_underlying(dc_event.reason().Read()),
+          cpp23::to_underlying(dc_event->reason().Read()),
           conn_handle);
       proxy_pending_le_acl_packets_ -= connection_ptr->num_pending_packets;
-      active_connections_.erase(connection_ptr);
-    } else {
+    }
+    active_connections_.erase(connection_ptr);
+  } else {
+    if (connection_ptr->num_pending_packets > 0) {
       PW_LOG_WARN(
           "Proxy viewed failed disconnect (status: %#.2hhx) for connection "
           "%#.4hx with packets in flight. Not releasing associated credits.",
@@ -180,26 +187,31 @@ uint16_t AclDataChannel::GetNumFreeLeAclPackets() const {
   return free_packets;
 }
 
-bool AclDataChannel::SendAcl(H4PacketWithH4&& h4_packet) {
+pw::Status AclDataChannel::SendAcl(H4PacketWithH4&& h4_packet) {
   credit_allocation_mutex_.lock();
   if (proxy_pending_le_acl_packets_ == proxy_max_le_acl_packets_) {
     PW_LOG_WARN("No ACL send credits available. So will not send.");
     credit_allocation_mutex_.unlock();
-    return false;
+    return pw::Status::Unavailable();
   }
   ++proxy_pending_le_acl_packets_;
 
-  emboss::AclDataFrameHeaderView acl_view =
-      MakeEmboss<emboss::AclDataFrameHeaderView>(h4_packet.GetHciSpan());
-  if (!acl_view.Ok()) {
-    PW_LOG_ERROR("Received invalid ACL packet. So will not send.");
+  Result<emboss::AclDataFrameHeaderView> acl_view =
+      MakeEmbossView<emboss::AclDataFrameHeaderView>(h4_packet.GetHciSpan());
+  if (!acl_view.ok()) {
+    PW_LOG_ERROR("An invalid ACL packet was provided. So will not send.");
     credit_allocation_mutex_.unlock();
-    return false;
+    return pw::Status::InvalidArgument();
   }
-  uint16_t handle = acl_view.handle().Read();
+  uint16_t handle = acl_view->handle().Read();
 
   AclConnection* connection_ptr = FindConnection(handle);
   if (!connection_ptr) {
+    if (active_connections_.full()) {
+      PW_LOG_ERROR("No space left in connections list.");
+      credit_allocation_mutex_.unlock();
+      return pw::Status::Unavailable();
+    }
     active_connections_.push_back({handle, /*num_pending_packets=*/1});
   } else {
     ++connection_ptr->num_pending_packets;
@@ -207,7 +219,62 @@ bool AclDataChannel::SendAcl(H4PacketWithH4&& h4_packet) {
 
   hci_transport_.SendToController(std::move(h4_packet));
   credit_allocation_mutex_.unlock();
-  return true;
+  return pw::OkStatus();
+}
+
+Status AclDataChannel::CreateLeAclConnection(uint16_t connection_handle) {
+  credit_allocation_mutex_.lock();
+  AclConnection* connection_it = FindConnection(connection_handle);
+  if (connection_it) {
+    credit_allocation_mutex_.unlock();
+    return Status::AlreadyExists();
+  }
+  if (active_connections_.full()) {
+    credit_allocation_mutex_.unlock();
+    return Status::ResourceExhausted();
+  }
+  active_connections_.push_back({connection_handle, 0, false});
+  credit_allocation_mutex_.unlock();
+  return OkStatus();
+}
+
+pw::Status AclDataChannel::FragmentedPduStarted(uint16_t connection_handle) {
+  credit_allocation_mutex_.lock();
+  AclConnection* connection_ptr = FindConnection(connection_handle);
+  credit_allocation_mutex_.unlock();
+  if (!connection_ptr) {
+    return Status::NotFound();
+  }
+  if (connection_ptr->is_receiving_fragmented_pdu) {
+    return Status::FailedPrecondition();
+  }
+  connection_ptr->is_receiving_fragmented_pdu = true;
+  return OkStatus();
+}
+
+pw::Result<bool> AclDataChannel::IsReceivingFragmentedPdu(
+    uint16_t connection_handle) {
+  credit_allocation_mutex_.lock();
+  AclConnection* connection_ptr = FindConnection(connection_handle);
+  credit_allocation_mutex_.unlock();
+  if (!connection_ptr) {
+    return Status::NotFound();
+  }
+  return connection_ptr->is_receiving_fragmented_pdu;
+}
+
+pw::Status AclDataChannel::FragmentedPduFinished(uint16_t connection_handle) {
+  credit_allocation_mutex_.lock();
+  AclConnection* connection_ptr = FindConnection(connection_handle);
+  credit_allocation_mutex_.unlock();
+  if (!connection_ptr) {
+    return Status::NotFound();
+  }
+  if (!connection_ptr->is_receiving_fragmented_pdu) {
+    return Status::FailedPrecondition();
+  }
+  connection_ptr->is_receiving_fragmented_pdu = false;
+  return OkStatus();
 }
 
 AclDataChannel::AclConnection* AclDataChannel::FindConnection(uint16_t handle) {

@@ -77,10 +77,10 @@ class LowEnergyConnectorTest : public TestingBase,
     TestingBase::TearDown();
   }
 
-  EmbossEventPacket CreateConnectionCompleteSubevent(
+  EventPacket CreateConnectionCompleteSubevent(
       hci_spec::ConnectionHandle conn_handle,
       const DeviceAddress& peer_address) const {
-    auto packet = hci::EmbossEventPacket::New<
+    auto packet = hci::EventPacket::New<
         pw::bluetooth::emboss::LEEnhancedConnectionCompleteSubeventV1Writer>(
         hci_spec::kLEMetaEventCode);
     auto params = packet.view_t();
@@ -164,6 +164,8 @@ INSTANTIATE_TEST_SUITE_P(LowEnergyConnectorTest,
 TEST_P(LowEnergyConnectorTest, CreateConnection) {
   auto fake_peer = std::make_unique<FakePeer>(kTestAddress, dispatcher());
   test_device()->AddPeer(std::move(fake_peer));
+  // Public address would be used if privacy was disabled
+  fake_address_delegate()->EnablePrivacy(true);
 
   EXPECT_FALSE(connector()->request_pending());
   EXPECT_FALSE(connector()->pending_peer_address());
@@ -350,7 +352,7 @@ TEST_P(LowEnergyConnectorTest, IncomingConnect) {
   EXPECT_TRUE(in_connections().empty());
   EXPECT_FALSE(connector()->request_pending());
 
-  EmbossEventPacket packet = CreateConnectionCompleteSubevent(1, kTestAddress);
+  EventPacket packet = CreateConnectionCompleteSubevent(1, kTestAddress);
   test_device()->SendCommandChannelPacket(packet.data());
 
   RunUntilIdle();
@@ -398,7 +400,7 @@ TEST_P(LowEnergyConnectorTest, IncomingConnectDuringConnectionRequest) {
           return;
         }
 
-        EmbossEventPacket packet =
+        EventPacket packet =
             CreateConnectionCompleteSubevent(2, kIncomingAddress);
         test_device()->SendCommandChannelPacket(packet.data());
       });
@@ -585,6 +587,7 @@ TEST_P(LowEnergyConnectorTest, ConnectUsingPublicAddress) {
 
 TEST_P(LowEnergyConnectorTest, ConnectUsingRandomAddress) {
   fake_address_delegate()->set_local_address(kRandomAddress);
+  fake_address_delegate()->EnablePrivacy(true);
 
   auto fake_peer = std::make_unique<FakePeer>(kTestAddress, dispatcher());
   test_device()->AddPeer(std::move(fake_peer));
