@@ -31,6 +31,7 @@ bazel_dep(name = "protobuf", version = "28.2", repo_name = "com_google_protobuf"
 bazel_dep(name = "rules_cc", version = "0.0.10")
 bazel_dep(name = "rules_fuzzing", version = "0.5.2")
 bazel_dep(name = "rules_go", version = "0.49.0", repo_name = "io_bazel_rules_go")
+bazel_dep(name = "rules_java", version = "7.9.0")
 bazel_dep(name = "rules_jvm_external", version = "6.2")
 bazel_dep(name = "rules_libusb", version = "0.1.0-rc1")
 bazel_dep(name = "rules_license", version = "1.0.0")
@@ -45,6 +46,7 @@ bazel_dep(name = "emboss", version = "2024.1017.203246", repo_name = "com_google
 # LINT.ThenChange(/pw_package/py/pw_package/packages/emboss.py:emboss)
 
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+bazel_dep(name = "rules_doxygen", version = "2.0.0", dev_dependency = True)
 
 # Repository overrides
 # ====================
@@ -350,3 +352,54 @@ cipd_repository(
     path = "pigweed/pw_transfer_test_binaries/${os=linux}-${arch=amd64}",
     tag = "version:pw_transfer_test_binaries_528098d588f307881af83f769207b8e6e1b57520-linux-amd64-cipd.cipd",
 )
+
+# Doxygen setup
+# =============
+
+# Get executables.
+cipd_repository(
+    name = "doxygen_linux_amd64",
+    path = "pigweed/third_party/doxygen/linux-amd64",
+    # TODO: b/384045900 - Update to a fresher executable.
+    tag = "version:1.9.6-1",
+)
+
+cipd_repository(
+    name = "doxygen_mac_amd64",
+    path = "pigweed/third_party/doxygen/mac-amd64",
+    # TODO: b/384045900 - Update to a fresher executable.
+    tag = "version:1.9.6-1",
+)
+
+cipd_repository(
+    name = "doxygen_mac_arm64",
+    path = "pigweed/third_party/doxygen/mac-arm64",
+    tag = "git_revision:401de7aa290e21f557e28515a5887fc40a092f62",
+)
+
+cipd_repository(
+    name = "doxygen_windows_amd64",
+    path = "pigweed/third_party/doxygen/windows-amd64",
+    # TODO: b/384045900 - Update to a fresher executable.
+    tag = "version:1.9.6-1",
+)
+
+# Configure rules_doxygen to use our executables.
+doxygen_extension = use_extension("@rules_doxygen//:extensions.bzl", "doxygen_extension", dev_dependency = True)
+doxygen_extension.configuration(
+    executable = "@doxygen_linux_amd64//:bin/doxygen",
+    platform = "linux",
+)
+doxygen_extension.configuration(
+    executable = "@doxygen_mac_amd64//:doxygen",
+    platform = "mac",
+)
+doxygen_extension.configuration(
+    executable = "@doxygen_mac_arm64//:doxygen",
+    platform = "mac-arm",
+)
+doxygen_extension.configuration(
+    executable = "@doxygen_windows_amd64//:windows.exe",
+    platform = "windows",
+)
+use_repo(doxygen_extension, "doxygen")

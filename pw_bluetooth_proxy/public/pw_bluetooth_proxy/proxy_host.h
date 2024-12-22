@@ -18,7 +18,7 @@
 #include "pw_bluetooth_proxy/internal/h4_storage.h"
 #include "pw_bluetooth_proxy/internal/hci_transport.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
-#include "pw_bluetooth_proxy/l2cap_channel_event.h"
+#include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/l2cap_coc.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
 #include "pw_bluetooth_proxy/rfcomm_channel.h"
@@ -35,10 +35,14 @@ class ProxyHost {
   /// to send HCI packet towards the host.
   /// @param[in] send_to_controller_fn - Callback that will be called when
   /// proxy wants to send HCI packet towards the controller.
+  /// @param[in] le_acl_credits_to_reserve - How many buffers to reserve for the
+  /// proxy out of any LE ACL buffers received from controller.
+  /// @param[in] br_edr_acl_credits_to_reserve - How many buffers to reserve for
+  /// the proxy out of any BR/EDR ACL buffers received from controller.
   ProxyHost(pw::Function<void(H4PacketWithHci&& packet)>&& send_to_host_fn,
             pw::Function<void(H4PacketWithH4&& packet)>&& send_to_controller_fn,
             uint16_t le_acl_credits_to_reserve,
-            uint16_t br_edr_acl_credits_to_reserve = 0);
+            uint16_t br_edr_acl_credits_to_reserve);
 
   ProxyHost() = delete;
   ProxyHost(const ProxyHost&) = delete;
@@ -126,13 +130,9 @@ class ProxyHost {
   ///
   /// @param[in] receive_fn         Read callback to be invoked on Rx SDUs.
   ///
-  /// @param[in] queue_space_available_fn
-  ///                               Callback to be invoked after resources
-  ///                               become available after an UNAVAILABLE Write.
-  ///
-  /// @param[in] event_fn          Handle asynchronous events such as errors
-  ///                              encountered by the channel. See
-  ///                              `l2cap_channel_event.h`.
+  /// @param[in] event_fn          Handle asynchronous events such as errors and
+  ///                              flow control events encountered by the
+  ///                              channel. See `l2cap_channel_event.h`.
   ///
   /// @returns @rst
   ///
@@ -146,9 +146,7 @@ class ProxyHost {
       L2capCoc::CocConfig rx_config,
       L2capCoc::CocConfig tx_config,
       Function<void(pw::span<uint8_t> payload)>&& receive_fn,
-      Function<void(L2capChannelEvent event)>&& event_fn,
-      // TODO: https://pwbug.dev/383150263 - Delete & use event_fn instead.
-      Function<void()>&& queue_space_available_fn = nullptr);
+      Function<void(L2capChannelEvent event)>&& event_fn);
 
   /// TODO: https://pwbug.dev/380076024 - Delete after downstream client uses
   /// this method on `L2capCoc`.
@@ -174,13 +172,9 @@ class ProxyHost {
   /// @param[in] payload_from_controller_fn Read callback to be invoked on Rx
   ///                                       SDUs.
   ///
-  /// @param[in] queue_space_available_fn   Callback to be invoked after
-  ///                                       resources become available after an
-  ///                                       UNAVAILABLE Write.
-  ///
   /// @param[in] event_fn                   Handle asynchronous events such as
   ///                                       errors encountered by the channel.
-  ///                                       See `l2cap_channel_event.h`.
+  ///                                       See `l2cap_channel_common.h`.
   ///
   /// @returns @rst
   ///
@@ -195,8 +189,6 @@ class ProxyHost {
       uint16_t remote_cid,
       AclTransportType transport,
       Function<void(pw::span<uint8_t> payload)>&& payload_from_controller_fn,
-      // TODO: https://pwbug.dev/383150263 - Delete & use event_fn instead.
-      Function<void()>&& queue_space_available_fn = nullptr,
       // TODO: https://pwbug.dev/383150263 - Delete nullptr after downstream
       // clients are providing event_fn.
       Function<void(L2capChannelEvent event)>&& event_fn = nullptr);
@@ -238,13 +230,9 @@ class ProxyHost {
   ///
   /// @param[in] receive_fn        Read callback to be invoked on Rx frames.
   ///
-  /// @param[in] queue_space_available_fn
-  ///                              Callback to be invoked after resources become
-  ///                              available after an UNAVAILABLE Write.
-  ///
   /// @param[in] event_fn          Handle asynchronous events such as errors
   ///                              encountered by the channel. See
-  ///                              `l2cap_channel_event.h`.
+  ///                              `l2cap_channel_common.h`.
   ///
   /// @returns @rst
   ///
@@ -252,6 +240,17 @@ class ProxyHost {
   ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
   ///  UNAVAILABLE: If channel could not be created.
   /// @endrst
+  pw::Result<RfcommChannel> AcquireRfcommChannel(
+      uint16_t connection_handle,
+      RfcommChannel::Config rx_config,
+      RfcommChannel::Config tx_config,
+      uint8_t channel_number,
+      Function<void(pw::span<uint8_t> payload)>&& receive_fn,
+      // TODO: https://pwbug.dev/383150263 - Delete nullptr after downstream
+      // clients are providing event_fn.
+      Function<void(L2capChannelEvent event)>&& event_fn = nullptr);
+
+  // TODO: https://pwbug.dev/383150263 - Delete after users are migrated.
   pw::Result<RfcommChannel> AcquireRfcommChannel(
       uint16_t connection_handle,
       RfcommChannel::Config rx_config,
@@ -268,9 +267,6 @@ class ProxyHost {
   /// Note that this indicates intention, so it can be true even if the proxy
   /// has not yet or has been unable to reserve credits from the host.
   bool HasSendLeAclCapability() const;
-
-  /// @deprecated Use HasSendLeAclCapability
-  bool HasSendAclCapability() const { return HasSendLeAclCapability(); }
 
   /// Indicates whether the proxy has the capability of sending BR/EDR ACL
   /// packets. Note that this indicates intention, so it can be true even if the
