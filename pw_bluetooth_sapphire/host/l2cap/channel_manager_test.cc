@@ -14,6 +14,8 @@
 
 #include "pw_bluetooth_sapphire/internal/host/l2cap/channel_manager.h"
 
+#include <pw_assert/check.h>
+
 #include <memory>
 #include <type_traits>
 
@@ -24,11 +26,13 @@
 #include "pw_bluetooth_sapphire/internal/host/l2cap/channel_manager_mock_controller_test_fixture.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/test_packets.h"
+#include "pw_bluetooth_sapphire/internal/host/testing/gtest_helpers.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/inspect.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/test_helpers.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/test_packets.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/acl_data_packet.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/mock_acl_data_channel.h"
+
 namespace bt::l2cap {
 namespace {
 
