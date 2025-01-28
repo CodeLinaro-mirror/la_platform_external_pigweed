@@ -54,6 +54,7 @@ from pw_presubmit.presubmit import (
 )
 from pw_presubmit.presubmit_context import (
     LuciContext,
+    LuciTrigger,
     PresubmitContext,
     PresubmitFailure,
 )
@@ -73,7 +74,7 @@ _LOG = logging.getLogger(__name__)
 BAZEL_EXECUTABLE = 'bazel'
 
 
-def _get_remote_instance_name_flag(ctx_luci: LuciContext) -> str:
+def _get_remote_instance_name(ctx_luci: LuciContext) -> str:
     instance_name = ''
     if ctx_luci.project == 'pigweed':
         instance_name = 'pigweed-rbe-open'
@@ -82,18 +83,8 @@ def _get_remote_instance_name_flag(ctx_luci: LuciContext) -> str:
     if ctx_luci.is_try:
         instance_name += '-pre'
 
-    if instance_name == 'pigweed-rbe-open':
-        # Ted messed up and gave the pigweed-rbe-open RBE instance a
-        # different name (default-instance instead of default_instance).
-        # Sadly this is annoying to fix because instances cannot be renamed,
-        # and you can't have more than one instance in a GCP region.
-        #
-        # TODO: https://pwbug.dev/312215590 - Fix this.
-        # pylint: disable-next=line-too-long
-        return '--remote_instance_name=projects/pigweed-rbe-open/instances/default-instance'
-
     # pylint: disable-next=line-too-long
-    return f'--remote_instance_name=projects/{instance_name}/instances/default_instance'
+    return f'--remote_instance_name=projects/{instance_name}/instances/default-instance'
 
 
 def bazel(
@@ -129,7 +120,7 @@ def bazel(
     if use_remote_cache and ctx.luci:
         remote_cache.append('--config=remote_cache')
         remote_cache.append('--remote_upload_local_results=true')
-        remote_cache.append(_get_remote_instance_name_flag(ctx.luci))
+        remote_cache.append(_get_remote_instance_name(ctx.luci))
         remote_cache.append(
             f'--remote_download_outputs={remote_download_outputs}'
         )
@@ -1046,13 +1037,29 @@ def _copy_to_gcs(ctx: PresubmitContext, filepath: Path, gcs_dst: str):
         call(*cmd, tee=outs)
 
 
+class NoPrimaryTriggerError(Exception):
+    pass
+
+
+def _get_primary_change(ctx: PresubmitContext) -> LuciTrigger:
+    assert ctx.luci is not None
+
+    if len(ctx.luci.triggers) == 1:
+        return ctx.luci.triggers[0]
+
+    for trigger in ctx.luci.triggers:
+        if trigger.primary:
+            return trigger
+
+    raise NoPrimaryTriggerError(repr(ctx.luci.triggers))
+
+
 def _write_coverage_metadata(
     ctx: PresubmitContext, options: CoverageOptions
 ) -> Sequence[Path]:
     """Write out Kalypsi coverage metadata file(s) and return their paths."""
     assert ctx.luci is not None
-    assert len(ctx.luci.triggers) == 1
-    change = ctx.luci.triggers[0]
+    change = _get_primary_change(ctx)
 
     metadata = {
         'trace_type': options.common.trace_type,

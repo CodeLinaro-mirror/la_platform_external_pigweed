@@ -16,13 +16,13 @@
 
 #include <gmock/gmock.h>
 #include <lib/fit/function.h>
+#include <pw_assert/check.h>
 
 #include <cstddef>
 #include <limits>
 #include <memory>
 #include <vector>
 
-#include "pw_bluetooth_sapphire/internal/host/common/assert.h"
 #include "pw_bluetooth_sapphire/internal/host/common/byte_buffer.h"
 #include "pw_bluetooth_sapphire/internal/host/common/device_address.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
@@ -2512,7 +2512,7 @@ TEST_F(LowEnergyConnectionManagerTest,
   EXPECT_TRUE(conn);
   EXPECT_TRUE(peer->version().has_value());
   EXPECT_TRUE(peer->le()->features().has_value());
-  EXPECT_EQ(kLEFeatures.le_features, peer->le()->features()->le_features);
+  EXPECT_EQ(kLEFeatures, peer->le()->features());
   EXPECT_FALSE(peer->temporary());
 }
 
