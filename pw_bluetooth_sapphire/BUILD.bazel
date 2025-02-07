@@ -21,6 +21,9 @@ package(default_visibility = ["//pw_bluetooth_sapphire:__subpackages__"])
 cc_library(
     name = "config",
     srcs = [],
+    hdrs = [
+        "public/pw_bluetooth_sapphire/config.h",
+    ],
     defines = select({
         "@platforms//os:fuchsia": [
             "PW_BLUETOOTH_SAPPHIRE_INSPECT_ENABLED",
@@ -28,15 +31,7 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
-)
-
-cc_library(
-    name = "public",
-    hdrs = [
-        "public/pw_bluetooth_sapphire/config.h",
-    ],
     strip_include_prefix = "public",
-    tags = ["manual"],
 )
 
 cc_library(
@@ -88,11 +83,25 @@ pw_cc_test(
     ],
 )
 
+filegroup(
+    name = "doxygen",
+    srcs = [
+        "public/pw_bluetooth_sapphire/central.h",
+        "public/pw_bluetooth_sapphire/peripheral.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 sphinx_docs_library(
     name = "docs",
     srcs = [
         "docs.rst",
         "fuchsia.rst",
+        "reference.rst",
+        "size_report.rst",
+        "//pw_bluetooth_sapphire/host/att:docs",
+        "//pw_bluetooth_sapphire/host/gap:docs",
+        "//pw_bluetooth_sapphire/host/l2cap:docs",
     ],
     prefix = "pw_bluetooth_sapphire/",
     target_compatible_with = incompatible_with_mcu(),

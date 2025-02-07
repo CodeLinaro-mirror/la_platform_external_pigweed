@@ -91,7 +91,7 @@ cc_library(
 cc_library(
     name = "best_fit_block_allocator",
     hdrs = ["public/pw_allocator/best_fit_block_allocator.h"],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":best_fit",
         ":config",
@@ -279,7 +279,7 @@ cc_library(
 cc_library(
     name = "first_fit_block_allocator",
     hdrs = ["public/pw_allocator/first_fit_block_allocator.h"],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [":first_fit"],
 )
 
@@ -370,7 +370,22 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":allocator",
-        "//pw_sync:borrow",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:mutex",
+    ],
+)
+
+cc_library(
+    name = "tlsf_allocator",
+    hdrs = ["public/pw_allocator/tlsf_allocator.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":block_allocator",
+        ":config",
+        "//pw_allocator/block:detailed_block",
+        "//pw_allocator/bucket:fast_sorted",
+        "//pw_allocator/bucket:sorted",
+        "//third_party/fuchsia:stdcompat",
     ],
 )
 
@@ -419,7 +434,7 @@ cc_library(
 cc_library(
     name = "worst_fit_block_allocator",
     hdrs = ["public/pw_allocator/worst_fit_block_allocator.h"],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         ":config",
         ":worst_fit",
@@ -445,7 +460,7 @@ cc_library(
         "//pw_bytes",
         "//pw_result",
         "//pw_status",
-        "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:mutex",
         "//pw_unit_test",
     ],
 )
@@ -468,6 +483,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":block_allocator",
+        ":fuzzing",
         "//pw_allocator/block:testing",
         "//pw_unit_test",
     ],
@@ -563,6 +579,7 @@ pw_cc_test(
     ],
     deps = [
         ":buddy_allocator",
+        ":fuzzing",
         ":testing",
         "//pw_unit_test",
     ],
@@ -733,6 +750,16 @@ pw_cc_test(
 )
 
 pw_cc_test(
+    name = "tlsf_allocator_test",
+    srcs = ["tlsf_allocator_test.cc"],
+    deps = [
+        ":block_allocator_testing",
+        ":tlsf_allocator",
+        "//pw_unit_test",
+    ],
+)
+
+pw_cc_test(
     name = "tracking_allocator_test",
     srcs = [
         "tracking_allocator_test.cc",
@@ -820,6 +847,7 @@ filegroup(
         "public/pw_allocator/synchronized_allocator.h",
         "public/pw_allocator/test_harness.h",
         "public/pw_allocator/testing.h",
+        "public/pw_allocator/tlsf_allocator.h",
         "public/pw_allocator/tracking_allocator.h",
         "public/pw_allocator/typed_pool.h",
         "public/pw_allocator/unique_ptr.h",

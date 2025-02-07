@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
@@ -117,6 +118,23 @@ cc_library(
         "//pw_span",
         "//pw_stream",
         "//pw_varint",
+    ],
+)
+
+cc_library(
+    name = "csv",
+    srcs = ["csv.cc"],
+    hdrs = ["pw_tokenizer_private/csv.h"],
+    implementation_deps = ["//pw_log"],
+    visibility = ["//visibility:private"],
+)
+
+pw_cc_test(
+    name = "csv_test",
+    srcs = ["csv_test.cc"],
+    deps = [
+        ":csv",
+        "//pw_unit_test",
     ],
 )
 

@@ -3,6 +3,9 @@
 =========
 pw_thread
 =========
+.. pigweed-module::
+   :name: pw_thread
+
 The ``pw_thread`` module contains utilities for thread creation and thread
 execution.
 
@@ -157,6 +160,9 @@ API reference
    :members:
 
 .. doxygenclass:: pw::thread::Options
+   :members:
+
+.. doxygenclass:: pw::thread::internal::Priority
    :members:
 
 Differences from ``std::thread``
@@ -372,19 +378,15 @@ You can instead use this helper wrapper to:
 The arguments are directly forwarded to the Thread constructor and ergo exactly
 match the Thread constuctor arguments for creating a thread of execution.
 
-
-Thread functions and ThreadCore
-===============================
-Thread functions may be provided using either a ``pw::Function<void()>``
-(which may be a lambda or function pointer) or an implementation of the
-``pw::thread::ThreadCore`` interface.
-
-To use the ``pw::Function<void()>`` interface, provide a no-argument,
-void-returning lambda or other callable:
+Thread functions
+================
+Thread functions are provided by a ``pw::Function<void()>`` (which may be a
+lambda or function pointer). Provide a no-argument, void-returning lambda or
+an equivalent callable:
 
 .. code-block:: cpp
 
-   Thread thread(options, []() {
+   Thread thread(options, [] {
      // do some work in a thread.
    });
 
@@ -405,25 +407,39 @@ and note that synchronization may be needed).
      foo.DoBar();
    });
 
-Alternatively, you can extend the ``ThreadCore`` class in order to use a more
-explicit construction. For example:
+The legacy ``ThreadCore`` class may also be used to start a thread. This class
+was introduced before ``pw::Function`` was available and should not be used in
+new code.
 
 .. code-block:: cpp
 
    class Foo : public ThreadCore {
     private:
-     void Run() override {}
+     void Run() override { /* thread logic */ }
    };
    Foo foo;
 
-   // Now create the thread, using foo directly.
+   // Create the thread, using foo directly.
    Thread(options, foo).detach();
+
+``ThreadCore`` may be replaced by capturing a reference to the class.
+
+.. code-block:: cpp
+
+   class Foo {
+    public:
+     void Run() { /* thread logic */ }
+   };
+   Foo foo;
+
+   // Create a thread that executes the Foo::Run().
+   Thread(options, [&foo] { foo.Run(); }).detach();
 
 .. warning::
 
    Because the thread may start after the :cpp:type:`pw::Thread` creation, an
-   object which implements the ThreadCore MUST meet or exceed the lifetime of
-   its thread of execution!
+   object which implements the ``ThreadCore`` MUST meet or exceed the lifetime
+   of its thread of execution!
 
 -------------------------
 Unit testing with threads
@@ -563,4 +579,4 @@ currently running thread and produce symbolized thread dumps.
    :hidden:
    :maxdepth: 1
 
-   Backends <backends>
+   backends

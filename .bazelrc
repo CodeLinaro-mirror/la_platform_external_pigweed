@@ -16,6 +16,9 @@
 # Standard flags required for all Pigweed projects.
 import %workspace%/pw_build/pigweed.bazelrc
 
+# TODO: https://pwbug.dev/258836641 - Only until bzlmod migration is done.
+common --enable_workspace
+
 # UX flags
 # ========
 # Improve debugability by printing all arguments for failing commands.
@@ -160,6 +163,11 @@ common --enable_platform_specific_config
 # Import `--config=fuchsia` scoped pigweed backends.
 import %workspace%/pw_bluetooth_sapphire/fuchsia/backends.bazelrc
 
+# TODO: https://pwbug.dev/382533028 - The Fuchsia SDK doesn't work with these
+# flags yet. Unfortunately, this needs to be switched for all build types since
+# it's required for things to load properly in pw_bluetooth_sapphire.
+common --noincompatible_disallow_empty_glob
+
 # Configs for RP2xxx platforms.
 build:rp2040 --platforms=@pigweed//targets/rp2040
 test:rp2040 --run_under=//targets/rp2040/py:unit_test_client
@@ -174,10 +182,18 @@ build:stm32f429i_baremetal --platforms=//targets/stm32f429i_disc1:platform
 build:stm32f429i_freertos --platforms=//targets/stm32f429i_disc1_stm32cube:platform
 
 # Config for the lm3s6965evb platform, used to build pw_rust/examples.
-build:lm3s6965evb --platforms=//pw_build/platforms:lm3s6965evb
+build:lm3s6965evb --platforms=//targets/lm3s6965evb
 
 # Config for the microbit platform, used to build pw_rust/examples.
-build:microbit --platforms=//pw_build/platforms:lm3s6965evb
+build:microbit --platforms=//targets/microbit
+
+# GoogleTest config
+# =================
+# This config can be used to build and run host tests using GoogleTest instead
+# of the default //pw_unit_test:light framework.
+common:googletest --//pw_unit_test:backend=//pw_unit_test:googletest
+common:googletest --//pw_unit_test:main=@com_google_googletest//:gtest_main
+common:googletest --platforms=//pw_unit_test:googletest_platform
 
 # Remote execution config definitions
 # ===================================
@@ -194,6 +210,10 @@ common:remote_cache --legacy_important_outputs
 common:remote_cache --remote_cache=grpcs://remotebuildexecution.googleapis.com
 common:remote_cache --remote_instance_name=projects/pigweed-rbe-open/instances/default-instance
 common:remote_cache --remote_upload_local_results=false
+# TODO: https://github.com/bazelbuild/bazel/issues/24867 - This flag breaks
+# runfiles handling with remote caching, and causes a bunch of
+# java.io.FileNotFoundException when creating runfiles trees.
+common:remote_cache --experimental_inprocess_symlink_creation=false
 
 # cache-silo-key: this is essentially a "salt" added to the remote cache key.
 # Change it to a new value when we want to create a new cache from scratch

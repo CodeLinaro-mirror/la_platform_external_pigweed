@@ -13,9 +13,10 @@
 // the License.
 #include "pw_bluetooth_sapphire/internal/host/sm/test_security_manager.h"
 
+#include <pw_assert/check.h>
+
 #include <memory>
 
-#include "pw_bluetooth_sapphire/internal/host/common/assert.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/connection.h"
 #include "pw_bluetooth_sapphire/internal/host/sm/smp.h"
@@ -60,7 +61,8 @@ std::unique_ptr<SecurityManager> TestSecurityManagerFactory::CreateSm(
     Delegate::WeakPtr delegate,
     BondableMode bondable_mode,
     gap::LESecurityMode security_mode,
-    pw::async::Dispatcher& /*dispatcher*/) {
+    pw::async::Dispatcher& /*dispatcher*/,
+    gap::Peer::WeakPtr) {
   hci_spec::ConnectionHandle conn = link->handle();
   auto test_sm = std::unique_ptr<TestSecurityManager>(
       new TestSecurityManager(std::move(link),

@@ -17,18 +17,25 @@ module(
     version = "0.0.1",
 )
 
-register_execution_platforms("@local_config_platform//:host", "//pw_build/platforms:all")
+register_execution_platforms("@local_config_platform//:host")
 
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
 bazel_dep(name = "boringssl", version = "0.20240913.0")
 bazel_dep(name = "freertos", version = "10.5.1.bcr.2")
 bazel_dep(name = "gazelle", version = "0.36.0", repo_name = "bazel_gazelle")
 bazel_dep(name = "nanopb", version = "0.4.9.1", repo_name = "com_github_nanopb_nanopb")
-bazel_dep(name = "pico-sdk", version = "2.0.0")
+bazel_dep(name = "pico-sdk", version = "2.1.1-develop.bcr.20250113-4b6e6475")
 bazel_dep(name = "picotool", version = "2.0.0")
 bazel_dep(name = "platforms", version = "0.0.10")
+
+# LINT.IfChange(protobuf)
 bazel_dep(name = "protobuf", version = "28.2", repo_name = "com_google_protobuf")
-bazel_dep(name = "rules_cc", version = "0.0.10")
+# LINT.ThenChange(pw_env_setup/py/pw_env_setup/cipd_setup/pigweed.json,pw_env_setup/py/pw_env_setup/virtualenv_setup/constraint.list:protobuf)
+
+# A transitive dependency requires this.
+bazel_dep(name = "re2", version = "2024-07-02.bcr.1")
+bazel_dep(name = "rules_android", version = "0.1.1")
+bazel_dep(name = "rules_cc", version = "0.0.17")
 bazel_dep(name = "rules_fuzzing", version = "0.5.2")
 bazel_dep(name = "rules_go", version = "0.49.0", repo_name = "io_bazel_rules_go")
 bazel_dep(name = "rules_java", version = "7.9.0")
@@ -37,8 +44,7 @@ bazel_dep(name = "rules_libusb", version = "0.1.0-rc1")
 bazel_dep(name = "rules_license", version = "1.0.0")
 bazel_dep(name = "rules_platform", version = "0.1.0")
 bazel_dep(name = "rules_probe_rs", version = "0.0.2")
-bazel_dep(name = "rules_proto", version = "6.0.2")
-bazel_dep(name = "rules_python", version = "0.36.0")
+bazel_dep(name = "rules_python", version = "0.38.0")
 bazel_dep(name = "rules_rust", version = "0.54.1")
 
 # LINT.IfChange(emboss)
@@ -59,6 +65,15 @@ archive_override(
     urls = ["https://github.com/chadnorvell/bazel-compile-commands-extractor/archive/163521345aa6366fd1ed801b989b668b5c806f69.tar.gz"],
 )
 
+# TODO: https://pwbug.dev/372510795 - A `bazel_dep` on this version propagates
+# to downstream projects, which causes breakages since downstream is still
+# pre-Bazel 8.0.0. When all downstream projects are flipped to Bazel 8.0.0,
+# remove this and update the rules_android bazel_dep requirement.
+single_version_override(
+    module_name = "rules_android",
+    version = "0.6.0",
+)
+
 single_version_override(
     module_name = "rules_rust",
     patch_strip = 1,
@@ -72,16 +87,6 @@ single_version_override(
         # https://github.com/konkers/rules_rust/tree/wip/rustdoc
         "//pw_rust/bazel_patches:0002-PROTOTYPE-Add-ability-to-document-multiple-crates-at.patch",
     ],
-)
-
-# Supports directory sources in sphinx_docs_library. Providing //pw_rust:docs
-# as an input to //docs:docs depends on this bug fix:
-# https://github.com/bazelbuild/rules_python/issues/2374
-# We can remove this override when we upgrade to rules_python >= 0.38.
-git_override(
-    module_name = "rules_python",
-    commit = "a0b1a40b9335ec1a8cae737e805f721cd6d2cd1f",
-    remote = "https://github.com/bazelbuild/rules_python.git",
 )
 
 # Transitive deps not in BCR
@@ -108,16 +113,6 @@ libusb = use_extension("@rules_libusb//:extensions.bzl", "libusb")
 libusb.source_release(min_version = "1.0.27")
 use_repo(libusb, "libusb")
 
-# Configure C++ toolchains
-# ========================
-#
-# TODO: https://pwbug.dev/346388161 - Migrate to the rules_cc toolchain API.
-bazel_dep(name = "pw_toolchain")
-local_path_override(
-    module_name = "pw_toolchain",
-    path = "pw_toolchain_bazel",
-)
-
 xcode_sdk_repository = use_repo_rule("//pw_toolchain:xcode.bzl", "xcode_sdk_repository")
 
 xcode_sdk_repository(
@@ -136,6 +131,17 @@ cipd_repository(
     name = "llvm_toolchain",
     build_file = "//pw_toolchain/build_external:llvm_clang.BUILD",
     path = "fuchsia/third_party/clang/${os}-${arch}",
+    tag = "git_revision:9d3f9f47e6e630b8308562297757e0911be03a18",
+)
+
+# TODO: https://pwbug.dev/388593877 - macOS toolchain is behind because of a
+# breakage in C++ standard library headers. Remove this when the upstream LLVM
+# bug (https://github.com/llvm/llvm-project/issues/117630) is fixed and
+# rolled into Pigweed.
+cipd_repository(
+    name = "llvm_toolchain_macos",
+    build_file = "//pw_toolchain/build_external:llvm_clang.BUILD",
+    path = "fuchsia/third_party/clang/${os}-${arch}",
     tag = "git_revision:8280651ad57cb9fb24a404cec2401040c28dec98",
 )
 
@@ -145,7 +151,7 @@ cipd_repository(
     name = "llvm_toolchain_device",
     build_file = "//pw_toolchain/build_external:llvm_clang.BUILD",
     path = "fuchsia/third_party/clang/${os}-${arch}",
-    tag = "git_revision:0dcada94bb1ae79f0edd91013038098c62a96b3b",
+    tag = "git_revision:9d3f9f47e6e630b8308562297757e0911be03a18",
 )
 
 # Fetch linux sysroot for host builds.
@@ -170,8 +176,6 @@ register_toolchains(
     "//pw_toolchain:cc_toolchain_cortex-m33",
     "//pw_toolchain/arm_gcc:arm_gcc_cc_toolchain_cortex-m3",
     "//pw_toolchain/arm_gcc:arm_gcc_cc_toolchain_cortex-m4",
-    "//pw_toolchain/arm_gcc:arm_gcc_cc_toolchain_cortex-m4+nofp",
-    "//pw_toolchain/arm_gcc:arm_gcc_cc_toolchain_cortex-m33+nofp",
     "//pw_toolchain/host_clang:host_cc_toolchain_linux",
     "//pw_toolchain/host_clang:host_cc_toolchain_macos",
     dev_dependency = True,
@@ -192,14 +196,13 @@ register_toolchains(
     dev_dependency = True,
 )
 
-git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
-
 # Vendored third party rust crates.
-git_repository(
-    name = "rust_crates",
+pw_rust_crates = use_extension("@pigweed//pw_build:pw_rust_crates_extension.bzl", "pw_rust_crates_extension")
+pw_rust_crates.default_git_repository(
     commit = "ed1ec1bd240b9446b30af5331b960871a0503a6c",
     remote = "https://pigweed.googlesource.com/third_party/rust_crates",
 )
+use_repo(pw_rust_crates, "rust_crates")
 
 # Get probe-rs
 # ============
@@ -288,16 +291,6 @@ use_repo(
 # TODO: https://pwbug.dev/378531541 - These are one-off external libraries that
 # are NOT in the BCR that downstream users may need to override/unify to their
 # expected version.
-
-new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
-
-# TODO: https://pwbug.dev/378531541 - Get micro_ecc from the BCR.
-new_git_repository(
-    name = "micro_ecc",
-    build_file = "//:third_party/micro_ecc/BUILD.micro_ecc",
-    commit = "b335ee812bfcca4cd3fb0e2a436aab39553a555a",
-    remote = "https://github.com/kmackay/micro-ecc.git",
-)
 
 # TODO: https://pwbug.dev/354749299 - Use the BCR version of mbedtls.
 http_archive(
