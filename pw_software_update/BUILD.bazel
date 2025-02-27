@@ -14,6 +14,7 @@
 
 load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
@@ -221,7 +222,6 @@ pw_cc_test(
         # "generate_test_bundle",
         ":update_bundle",
         "//pw_kvs:fake_flash_test_key_value_store",
-        "//pw_unit_test",
     ],
 )
 
@@ -229,20 +229,14 @@ pw_cc_test(
     name = "bundled_update_service_test",
     srcs = ["bundled_update_service_test.cc"],
     tags = ["manual"],  # bundled_update_service doesn't work yet.
-    deps = [
-        ":bundled_update_service",
-        "//pw_unit_test",
-    ],
+    deps = [":bundled_update_service"],
 )
 
 pw_cc_test(
     name = "bundled_update_service_pwpb_test",
     srcs = ["bundled_update_service_pwpb_test.cc"],
     tags = ["manual"],  # bundled_update_service_pwpb doesn't work yet.
-    deps = [
-        ":bundled_update_service_pwpb",
-        "//pw_unit_test",
-    ],
+    deps = [":bundled_update_service_pwpb"],
 )
 
 sphinx_docs_library(

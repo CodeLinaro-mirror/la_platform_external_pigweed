@@ -17,7 +17,7 @@ import * as path from 'path';
 
 import { glob } from 'glob';
 
-import type { Settings, WorkingDirStore } from './settings';
+import type { Settings, WorkingDirStore } from './settings/vscode';
 
 const PIGWEED_JSON = 'pigweed.json' as const;
 
@@ -132,13 +132,11 @@ export function getBzlmodFile(projectRoot: string): string {
 }
 
 /**
- * It's a Bazel project if it has a `WORKSPACE` file or bzlmod file, but not
- * a bootstrap script.
+ * It's a Bazel project if it has a `WORKSPACE` file or bzlmod file.
  */
-export function isBazelWorkspaceProject(projectRoot: string): boolean {
+export function isBazelProject(projectRoot: string): boolean {
   return (
-    !isBootstrapProject(projectRoot) &&
-    (fs.existsSync(getWorkspaceFile(projectRoot)) ||
-      fs.existsSync(getBzlmodFile(projectRoot)))
+    fs.existsSync(getWorkspaceFile(projectRoot)) ||
+    fs.existsSync(getBzlmodFile(projectRoot))
   );
 }

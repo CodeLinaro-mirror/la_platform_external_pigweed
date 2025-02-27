@@ -13,17 +13,31 @@
 // the License.
 
 import * as vscode from 'vscode';
+import { ExtensionContext } from 'vscode';
 
-import { configureBazelisk, configureBazelSettings } from './bazel';
-import { BazelRefreshCompileCommandsWatcher } from './bazelWatcher';
+import {
+  configureBazelisk,
+  configureBazelSettings,
+  interactivelySetBazeliskPath,
+  setBazelRecommendedSettings,
+  shouldSupportBazel,
+} from './bazel';
+
+import {
+  BazelRefreshCompileCommandsWatcher,
+  showProgressDuringRefresh,
+} from './bazelWatcher';
 
 import {
   ClangdActiveFilesCache,
-  initClangdPath,
+  disableInactiveFileCodeIntelligence,
+  enableInactiveFileCodeIntelligence,
+  initBazelClangdPath,
+  refreshCompileCommandsAndSetTarget,
+  setCompileCommandsTarget,
   setCompileCommandsTargetOnSettingsChange,
 } from './clangd';
 
-import { registerBazelProjectCommands } from './commands/bazel';
 import { getSettingsData, syncSettingsSharedToProject } from './configParsing';
 import { Disposer } from './disposables';
 import { didInit, linkRefreshManagerToEvents } from './events';
@@ -34,13 +48,15 @@ import { fileBug, launchTroubleshootingLink } from './links';
 
 import {
   getPigweedProjectRoot,
-  isBazelWorkspaceProject,
+  isBazelProject,
   isBootstrapProject,
 } from './project';
-
 import { RefreshManager } from './refreshManager';
-import { settings, workingDir } from './settings';
-import { ClangdFileWatcher, SettingsFileWatcher } from './settingsWatcher';
+import { settings, workingDir } from './settings/vscode';
+import {
+  ClangdFileWatcher,
+  SettingsFileWatcher,
+} from './settings/settingsWatcher';
 
 import {
   InactiveVisibilityStatusBarItem,
@@ -53,113 +69,208 @@ import {
   patchBazeliskIntoTerminalPath,
 } from './terminal';
 
+import { commandRegisterer, VscCommandCallback } from './utils';
+import { shouldSupportGn } from './gn';
+import { shouldSupportCmake } from './cmake';
+import { processCompDbs } from './clangd/parser';
+
+interface CommandEntry {
+  name: string;
+  callback: VscCommandCallback;
+  // Commands can be defined to be registered under certain project conditions:
+  // - 'bazel': When it's only a Bazel project
+  // - 'bootstrap': When it's only a bootstrap project
+  // - 'both': When a project supports both Bazel and bootstrap
+  // - 'any': The command should run under any circumstances
+  // These can be combined, e.g., a command with ['bazel', 'both'] will be
+  // registered in projects that are Bazel only and projects that use both
+  // Bazel and bootstrap, but not projects that are bootstrap only.
+  projectType: ('bazel' | 'bootstrap' | 'both' | 'any')[];
+}
+
 const disposer = new Disposer();
 
-function registerUniversalCommands(context: vscode.ExtensionContext) {
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.open-output-panel', output.show),
-  );
+type ProjectType = 'bazel' | 'bootstrap' | 'both';
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.file-bug', fileBug),
-  );
+async function registerCommands(
+  projectType: ProjectType,
+  context: ExtensionContext,
+  refreshManager: RefreshManager<any>,
+  clangdActiveFilesCache: ClangdActiveFilesCache,
+  bazelCompileCommandsWatcher?: BazelRefreshCompileCommandsWatcher | undefined,
+): Promise<void> {
+  const useBazel = await shouldSupportBazel();
+  const useCmake = await shouldSupportCmake();
+  const useGn = await shouldSupportGn();
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'pigweed.check-extensions',
-      checkExtensions,
-    ),
-  );
+  const commands: CommandEntry[] = [
+    {
+      name: 'pigweed.open-output-panel',
+      callback: output.show,
+      projectType: ['any'],
+    },
+    {
+      name: 'pigweed.file-bug',
+      callback: fileBug,
+      projectType: ['any'],
+    },
+    {
+      name: 'pigweed.check-extensions',
+      callback: checkExtensions,
+      projectType: ['any'],
+    },
+    {
+      name: 'pigweed.sync-settings',
+      callback: async () =>
+        syncSettingsSharedToProject(await getSettingsData(), true),
+      projectType: ['any'],
+    },
+    {
+      name: 'pigweed.disable-inactive-file-code-intelligence',
+      callback: () =>
+        disableInactiveFileCodeIntelligence(clangdActiveFilesCache),
+      projectType: ['any'],
+    },
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.sync-settings', async () =>
-      syncSettingsSharedToProject(await getSettingsData(), true),
-    ),
-  );
+    {
+      name: 'pigweed.enable-inactive-file-code-intelligence',
+      callback: () =>
+        enableInactiveFileCodeIntelligence(clangdActiveFilesCache),
+      projectType: ['any'],
+    },
+
+    {
+      name: 'pigweed.select-target',
+      callback: () => setCompileCommandsTarget(clangdActiveFilesCache),
+      projectType: ['any'],
+    },
+    {
+      name: 'pigweed.launch-terminal',
+      callback: launchTerminal,
+      projectType: ['bootstrap', 'both'],
+    },
+    {
+      name: 'pigweed.launch-terminal',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bazel projects',
+        ),
+      projectType: ['bazel'],
+    },
+    {
+      name: 'pigweed.bootstrap-terminal',
+      callback: launchBootstrapTerminal,
+      projectType: ['bootstrap', 'both'],
+    },
+    {
+      name: 'pigweed.bootstrap-terminal',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bazel projects',
+        ),
+      projectType: ['bazel'],
+    },
+    {
+      name: 'pigweed.set-bazel-recommended-settings',
+      callback: setBazelRecommendedSettings,
+      projectType: ['bazel', 'both'],
+    },
+    {
+      name: 'pigweed.set-bazel-recommended-settings',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bootstrap projects',
+        ),
+      projectType: ['bootstrap'],
+    },
+    {
+      name: 'pigweed.set-bazelisk-path',
+      callback: interactivelySetBazeliskPath,
+      projectType: ['bazel', 'both'],
+    },
+    {
+      name: 'pigweed.set-bazelisk-path',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bootstrap projects',
+        ),
+      projectType: ['bootstrap'],
+    },
+    {
+      name: 'pigweed.activate-bazelisk-in-terminal',
+      callback: patchBazeliskIntoTerminalPath,
+      projectType: ['bazel', 'both'],
+    },
+    {
+      name: 'pigweed.activate-bazelisk-in-terminal',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bootstrap projects',
+        ),
+      projectType: ['bootstrap'],
+    },
+    {
+      name: 'pigweed.refresh-compile-commands',
+      callback: async () => {
+        if (useGn || useCmake) {
+          const { processedCompDbs } = await processCompDbs();
+          await processedCompDbs.writeAll();
+        }
+
+        if (useBazel) {
+          bazelCompileCommandsWatcher!.refresh();
+          showProgressDuringRefresh(refreshManager);
+        }
+      },
+      projectType: ['bazel', 'both'],
+    },
+    {
+      name: 'pigweed.refresh-compile-commands',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bootstrap projects',
+        ),
+      projectType: ['bootstrap'],
+    },
+    {
+      name: 'pigweed.refresh-compile-commands-and-set-target',
+      callback: () => {
+        refreshCompileCommandsAndSetTarget(
+          bazelCompileCommandsWatcher!.refresh,
+          refreshManager,
+          clangdActiveFilesCache,
+        );
+      },
+      projectType: ['bazel', 'both'],
+    },
+    {
+      name: 'pigweed.refresh-compile-commands-and-set-target',
+      callback: () =>
+        vscode.window.showWarningMessage(
+          'This command is currently not supported with Bootstrap projects',
+        ),
+      projectType: ['bootstrap'],
+    },
+  ];
+
+  const commandsToRegister = commands.filter((c) => {
+    if (c.projectType.includes('any')) return true;
+    return c.projectType.includes(projectType);
+  });
+
+  const registerCommand = commandRegisterer(context);
+  commandsToRegister.forEach((c) => registerCommand(c.name, c.callback));
 }
 
-function registerBootstrapCommands(context: vscode.ExtensionContext) {
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.launch-terminal', launchTerminal),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'pigweed.bootstrap-terminal',
-      launchBootstrapTerminal,
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'pigweed.disable-inactive-file-code-intelligence',
-      () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'pigweed.enable-inactive-file-code-intelligence',
-      () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.refresh-compile-commands', () =>
-      vscode.window.showWarningMessage(
-        'This command is currently not supported with Bootstrap projects',
-      ),
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'pigweed.refresh-compile-commands-and-set-target',
-      () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.set-bazelisk-path', () =>
-      vscode.window.showWarningMessage(
-        'This command is currently not supported with Bootstrap projects',
-      ),
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'pigweed.set-bazel-recommended-settings',
-      () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-    ),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('pigweed.select-target', () =>
-      vscode.window.showWarningMessage(
-        'This command is currently not supported with Bootstrap projects',
-      ),
-    ),
-  );
-}
-
-async function initAsBazelProject(context: vscode.ExtensionContext) {
+async function initAsBazelProject(
+  refreshManager: RefreshManager<any>,
+  compileCommandsWatcher: BazelRefreshCompileCommandsWatcher,
+) {
   // Do stuff that we want to do on load.
-  await initClangdPath();
+  await initBazelClangdPath();
   await configureBazelSettings();
   await configureBazelisk();
+  linkRefreshManagerToEvents(refreshManager);
 
   if (settings.activateBazeliskInNewTerminals()) {
     vscode.window.onDidOpenTerminal(
@@ -168,44 +279,9 @@ async function initAsBazelProject(context: vscode.ExtensionContext) {
     );
   }
 
-  // Marshall all of our components and dependencies.
-  const refreshManager = disposer.add(RefreshManager.create({ logger }));
-  linkRefreshManagerToEvents(refreshManager);
-
-  const { clangdActiveFilesCache, compileCommandsWatcher } = disposer.addMany({
-    clangdActiveFilesCache: new ClangdActiveFilesCache(refreshManager),
-    compileCommandsWatcher: new BazelRefreshCompileCommandsWatcher(
-      refreshManager,
-      settings.disableCompileCommandsFileWatcher(),
-    ),
-    inactiveVisibilityStatusBarItem: new InactiveVisibilityStatusBarItem(),
-    settingsFileWatcher: new SettingsFileWatcher(),
-    targetStatusBarItem: new TargetStatusBarItem(),
-  });
-
-  // If the current target is changed directly via a settings file change (in
-  // other words, not by running a command), detect that and do all the other
-  // stuff that the command would otherwise have done.
-  vscode.workspace.onDidChangeConfiguration(
-    setCompileCommandsTargetOnSettingsChange(clangdActiveFilesCache),
-    disposer.disposables,
-  );
-
-  disposer.add(new ClangdFileWatcher(clangdActiveFilesCache));
-  disposer.add(new InactiveFileDecorationProvider(clangdActiveFilesCache));
-
-  registerBazelProjectCommands(
-    context,
-    refreshManager,
-    compileCommandsWatcher,
-    clangdActiveFilesCache,
-  );
-
   if (!settings.disableCompileCommandsFileWatcher()) {
     compileCommandsWatcher.refresh();
   }
-
-  didInit.fire();
 }
 
 /**
@@ -219,30 +295,42 @@ async function initAsBazelProject(context: vscode.ExtensionContext) {
  *     selection to settings.
  *   - If the user needs help, route them to the right place.
  */
-async function configureProject(context: vscode.ExtensionContext) {
+async function configureProject(
+  context: vscode.ExtensionContext,
+  refreshManager: RefreshManager<any>,
+  clangdActiveFilesCache: ClangdActiveFilesCache,
+  forceProjectType?: 'bazel' | 'bootstrap' | undefined,
+): Promise<ProjectType | undefined> {
+  const projectTypes: ProjectType[] = [];
+
   // If we're missing a piece of information, we can ask the user to manually
   // provide it. If they do, we should re-run this flow, and that intent is
   // signaled by setting this var.
   let tryAgain = false;
+  let tryAgainProjectType: 'bazel' | 'bootstrap' | undefined;
 
   const projectRoot = await getPigweedProjectRoot(settings, workingDir);
 
   if (projectRoot) {
     output.appendLine(`The Pigweed project root is ${projectRoot}`);
+    let foundProjectBuildFile = false;
 
-    if (
-      settings.projectType() === 'bootstrap' ||
-      isBootstrapProject(projectRoot)
-    ) {
-      output.appendLine('This is a bootstrap project');
-      registerBootstrapCommands(context);
-    } else if (
-      settings.projectType() === 'bazel' ||
-      isBazelWorkspaceProject(projectRoot)
-    ) {
+    if (isBazelProject(projectRoot) || forceProjectType === 'bazel') {
       output.appendLine('This is a Bazel project');
-      await initAsBazelProject(context);
-    } else {
+      projectTypes.push('bazel');
+      foundProjectBuildFile = true;
+    }
+
+    if (isBootstrapProject(projectRoot) || forceProjectType === 'bootstrap') {
+      output.appendLine(
+        `This is ${foundProjectBuildFile ? 'also ' : ' '}bootstrap project`,
+      );
+
+      projectTypes.push('bootstrap');
+      foundProjectBuildFile = true;
+    }
+
+    if (!foundProjectBuildFile) {
       vscode.window
         .showErrorMessage(
           "I couldn't automatically determine what type of Pigweed project " +
@@ -254,7 +342,7 @@ async function configureProject(context: vscode.ExtensionContext) {
         .then((selection) => {
           switch (selection) {
             case 'Bazel': {
-              settings.projectType('bazel');
+              tryAgainProjectType = 'bazel';
               vscode.window.showInformationMessage(
                 'Configured as a Pigweed Bazel project',
               );
@@ -262,7 +350,7 @@ async function configureProject(context: vscode.ExtensionContext) {
               break;
             }
             case 'Bootstrap': {
-              settings.projectType('bootstrap');
+              tryAgainProjectType = 'bootstrap';
               vscode.window.showInformationMessage(
                 'Configured as a Pigweed Bootstrap project',
               );
@@ -317,23 +405,145 @@ async function configureProject(context: vscode.ExtensionContext) {
   // This should only re-run if something has materially changed, e.g., the user
   // provided a piece of information we needed.
   if (tryAgain) {
-    await configureProject(context);
+    await configureProject(
+      context,
+      refreshManager,
+      clangdActiveFilesCache,
+      tryAgainProjectType,
+    );
+  }
+
+  return projectTypes.length === 2
+    ? 'both'
+    : projectTypes.length === 1
+      ? projectTypes[0]
+      : undefined;
+}
+
+function buildSystemStatusReason(
+  settingsValue: boolean | 'auto',
+  activeState: boolean,
+): string {
+  switch (settingsValue) {
+    case true:
+      return 'Enabled in settings.';
+    case false:
+      return 'Disabled in settings.';
+    case 'auto':
+      return `Build files ${activeState ? '' : "don't "}exist in project.`;
   }
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  // Register commands that apply to all project types
-  registerUniversalCommands(context);
   logger.info('Extension loaded');
+  logger.info('');
 
-  // Determine the project type and configuration parameters. This also
-  // registers the commands specific to each project type.
-  await configureProject(context);
+  const useBazel = await shouldSupportBazel();
+  const useCmake = await shouldSupportCmake();
+  const useGn = await shouldSupportGn();
+
+  logger.info(`Bazel support is ${useBazel ? 'ACTIVE' : 'DISABLED'}`);
+  logger.info(
+    `↳ Reason: ${buildSystemStatusReason(
+      settings.supportBazelTargets(),
+      useBazel,
+    )}`,
+  );
+  logger.info('');
+
+  logger.info(`CMake support is ${useCmake ? 'ACTIVE' : 'DISABLED'}`);
+  logger.info(
+    `↳ Reason: ${buildSystemStatusReason(
+      settings.supportCmakeTargets(),
+      useCmake,
+    )}`,
+  );
+  logger.info('');
+
+  logger.info(`GN support is ${useGn ? 'ACTIVE' : 'DISABLED'}`);
+  logger.info(
+    `↳ Reason: ${buildSystemStatusReason(settings.supportGnTargets(), useGn)}`,
+  );
+  logger.info('');
+
+  // Marshall all of our components and dependencies.
+  const refreshManager = disposer.add(RefreshManager.create({ logger }));
+
+  const { clangdActiveFilesCache } = disposer.addMany({
+    clangdActiveFilesCache: new ClangdActiveFilesCache(refreshManager),
+    inactiveVisibilityStatusBarItem: new InactiveVisibilityStatusBarItem(),
+    settingsFileWatcher: new SettingsFileWatcher(),
+    targetStatusBarItem: new TargetStatusBarItem(),
+  });
+
+  disposer.add(new ClangdFileWatcher(clangdActiveFilesCache));
+  disposer.add(new InactiveFileDecorationProvider(clangdActiveFilesCache));
+
+  // Determine the project type and configuration parameters.
+  const projectType = await configureProject(
+    context,
+    refreshManager,
+    clangdActiveFilesCache,
+  );
+
+  if (projectType === undefined) {
+    vscode.window
+      .showErrorMessage(
+        'A fatal error occurred while initializing the project. ' +
+          'This was unexpected. The Pigweed extension will not function. ' +
+          'Please file a bug with details about your project structure.',
+        'File Bug',
+        'Dismiss',
+      )
+      .then((selection) => {
+        if (selection === 'File Bug') fileBug();
+      });
+
+    return;
+  }
+
+  if (projectType === 'bazel' || projectType === 'both') {
+    const compileCommandsWatcher = new BazelRefreshCompileCommandsWatcher(
+      refreshManager,
+      settings.disableCompileCommandsFileWatcher(),
+    );
+
+    // Don't do Bazel init if the user has explicitly disabled Bazel support.
+    if (useBazel) {
+      await initAsBazelProject(refreshManager, compileCommandsWatcher);
+    }
+
+    registerCommands(
+      projectType,
+      context,
+      refreshManager,
+      clangdActiveFilesCache,
+      compileCommandsWatcher,
+    );
+  } else {
+    registerCommands(
+      projectType,
+      context,
+      refreshManager,
+      clangdActiveFilesCache,
+    );
+  }
+
+  // If the current target is changed directly via a settings file change (in
+  // other words, not by running a command), detect that and do all the other
+  // stuff that the command would otherwise have done.
+  vscode.workspace.onDidChangeConfiguration(
+    setCompileCommandsTargetOnSettingsChange(clangdActiveFilesCache),
+    disposer.disposables,
+  );
 
   if (settings.enforceExtensionRecommendations()) {
     logger.info('Project is configured to enforce extension recommendations');
     await checkExtensions();
   }
+
+  logger.info('Extension initialization complete');
+  didInit.fire();
 }
 
 export function deactivate() {

@@ -44,20 +44,10 @@
 
 #include "pw_span/internal/config.h"
 
-#if PW_SPAN_ENABLE_ASSERTS
-
-#include "pw_assert/assert.h"
-
-#define _PW_SPAN_ASSERT(arg) PW_ASSERT(arg)
-
-#else
-#define _PW_SPAN_ASSERT(arg)
-#endif  // PW_SPAN_ENABLE_ASSERTS
-
 namespace pw {
 
 // [views.constants]
-constexpr size_t dynamic_extent = std::numeric_limits<size_t>::max();
+inline constexpr size_t dynamic_extent = std::numeric_limits<size_t>::max();
 
 template <typename T, size_t Extent = dynamic_extent>
 class span;
@@ -476,5 +466,3 @@ span(const Container&) -> span<pw_span_internal::ValueType<const Container>>;
 #endif  // __cpp_deduction_guides
 
 }  // namespace pw
-
-#undef _PW_SPAN_ASSERT
