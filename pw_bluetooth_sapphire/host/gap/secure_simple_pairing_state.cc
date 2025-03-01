@@ -41,16 +41,25 @@ SecureSimplePairingState::SecureSimplePairingState(
     WeakPtr<hci::BrEdrConnection> link,
     bool outgoing_connection,
     fit::closure auth_cb,
-    StatusCallback status_cb)
+    StatusCallback status_cb,
+    hci::LocalAddressDelegate* low_energy_address_delegate,
+    bool controller_remote_public_key_validation_supported,
+    sm::BrEdrSecurityManagerFactory security_manager_factory,
+    pw::async::Dispatcher& dispatcher)
     : peer_id_(peer->identifier()),
       peer_(std::move(peer)),
       link_(std::move(link)),
       outgoing_connection_(outgoing_connection),
       peer_missing_key_(false),
+      low_energy_address_delegate_(std::move(low_energy_address_delegate)),
       pairing_delegate_(std::move(pairing_delegate)),
       state_(State::kIdle),
       send_auth_request_callback_(std::move(auth_cb)),
-      status_callback_(std::move(status_cb)) {
+      status_callback_(std::move(status_cb)),
+      controller_remote_public_key_validation_supported_(
+          controller_remote_public_key_validation_supported),
+      security_manager_factory_(std::move(security_manager_factory)),
+      dispatcher_(dispatcher) {
   PW_CHECK(link_.is_alive());
   PW_CHECK(send_auth_request_callback_);
   PW_CHECK(status_callback_);
@@ -83,7 +92,8 @@ void SecureSimplePairingState::InitiatePairing(
     BrEdrSecurityRequirements security_requirements, StatusCallback status_cb) {
   // TODO(fxbug.dev/42082728): Reject pairing if peer/local device don't support
   // Secure Connections and SC is required
-  if (state() == State::kIdle) {
+  if (state() == State::kIdle ||
+      state() == State::kInitiatorWaitLEPairingComplete) {
     PW_CHECK(!is_pairing());
 
     // If the current link key already meets the security requirements, skip
@@ -103,20 +113,15 @@ void SecureSimplePairingState::InitiatePairing(
     // security requirements impossible, skip pairing and report failure
     // immediately.
 
-    current_pairing_ =
-        Pairing::MakeInitiator(security_requirements,
-                               outgoing_connection_,
-                               peer_->MutBrEdr().RegisterPairing());
     PairingRequest request{.security_requirements = security_requirements,
                            .status_callback = std::move(status_cb)};
     request_queue_.push_back(std::move(request));
-    bt_log(DEBUG,
-           "gap-bredr",
-           "Initiating pairing on %#.4x (id %s)",
-           handle(),
-           bt_str(peer_id()));
-    state_ = State::kInitiatorWaitLinkKeyRequest;
-    send_auth_request_callback_();
+
+    if (state() == State::kInitiatorWaitLEPairingComplete) {
+      return;
+    }
+
+    InitiateNextPairingRequest();
     return;
   }
 
@@ -150,12 +155,35 @@ void SecureSimplePairingState::InitiateNextPairingRequest() {
     return;
   }
 
+  // "If a BR/EDR/LE device supports LE Secure Connections, then it shall
+  // initiate pairing on only one transport at a time to the same remote
+  // device." (v6.0, Vol 3, Part C, Sec. 14.2)
+  if (peer_->le() && peer_->le()->is_pairing()) {
+    bt_log(INFO,
+           "gap-bredr",
+           "Waiting for LE pairing to complete on %#.4x (id %s)",
+           handle(),
+           bt_str(peer_id()));
+    state_ = State::kInitiatorWaitLEPairingComplete;
+    peer_->MutLe().add_pairing_completion_callback(
+        [self = weak_self_.GetWeakPtr()]() {
+          if (!self.is_alive() ||
+              self->state_ != State::kInitiatorWaitLEPairingComplete) {
+            return;
+          }
+          self->state_ = State::kIdle;
+          self->InitiateNextPairingRequest();
+        });
+    return;
+  }
+
   PairingRequest& request = request_queue_.front();
 
   current_pairing_ =
       Pairing::MakeInitiator(request.security_requirements,
                              outgoing_connection_,
                              peer_->MutBrEdr().RegisterPairing());
+
   bt_log(DEBUG,
          "gap-bredr",
          "Initiating queued pairing on %#.4x (id %s)",
@@ -206,7 +234,7 @@ std::optional<IoCapability> SecureSimplePairingState::OnIoCapabilityRequest() {
 }
 
 void SecureSimplePairingState::OnIoCapabilityResponse(IoCapability peer_iocap) {
-  // If we preivously provided a key for peer to pair, but that didn't work,
+  // If we previously provided a key for peer to pair, but that didn't work,
   // they may try to re-pair.  Cancel the previous pairing if they try to
   // restart.
   if (state() == State::kWaitEncryption) {
@@ -214,7 +242,8 @@ void SecureSimplePairingState::OnIoCapabilityResponse(IoCapability peer_iocap) {
     current_pairing_ = nullptr;
     state_ = State::kIdle;
   }
-  if (state() == State::kIdle) {
+  if (state() == State::kIdle ||
+      state() == State::kInitiatorWaitLEPairingComplete) {
     PW_CHECK(!is_pairing());
     current_pairing_ = Pairing::MakeResponder(
         peer_iocap, outgoing_connection_, peer_->MutBrEdr().RegisterPairing());
@@ -404,7 +433,8 @@ void SecureSimplePairingState::OnSimplePairingComplete(
 
 std::optional<hci_spec::LinkKey> SecureSimplePairingState::OnLinkKeyRequest() {
   if (state() != State::kIdle &&
-      state() != State::kInitiatorWaitLinkKeyRequest) {
+      state() != State::kInitiatorWaitLinkKeyRequest &&
+      state() != State::kInitiatorWaitLEPairingComplete) {
     FailWithUnexpectedEvent(__func__);
     return std::nullopt;
   }
@@ -438,9 +468,8 @@ std::optional<hci_spec::LinkKey> SecureSimplePairingState::OnLinkKeyRequest() {
 
   // The link key request may be received outside of Simple Pairing (e.g. when
   // the peer initiates the authentication procedure).
-  if (state() == State::kIdle) {
+  if (!is_pairing()) {
     if (link_key.has_value()) {
-      PW_CHECK(!is_pairing());
       current_pairing_ =
           Pairing::MakeResponderForBonded(peer_->MutBrEdr().RegisterPairing());
       state_ = State::kWaitEncryption;
@@ -448,7 +477,6 @@ std::optional<hci_spec::LinkKey> SecureSimplePairingState::OnLinkKeyRequest() {
     }
     return std::optional<hci_spec::LinkKey>();
   }
-
   PW_CHECK(is_pairing());
 
   if (link_key.has_value() &&
@@ -478,8 +506,7 @@ void SecureSimplePairingState::OnLinkKeyNotification(
            bt_str(peer_id()));
 
   // When not pairing, only connection link key changes are allowed.
-  if (state() == State::kIdle &&
-      key_type == hci_spec::LinkKeyType::kChangedCombination) {
+  if (!is_pairing() && key_type == hci_spec::LinkKeyType::kChangedCombination) {
     if (!link_->ltk()) {
       bt_log(WARN,
              "gap-bredr",
@@ -512,7 +539,7 @@ void SecureSimplePairingState::OnLinkKeyNotification(
   // they agree.
   PW_CHECK(is_pairing());
   sm::SecurityProperties sec_props = sm::SecurityProperties(key_type);
-  current_pairing_->security_properties = sec_props;
+  current_pairing_->received_link_key_security_properties = sec_props;
 
   // Link keys resulting from legacy pairing are assigned lowest security level
   // and we reject them.
@@ -676,16 +703,38 @@ void SecureSimplePairingState::OnEncryptionChange(hci::Result<bool> result) {
     result = fit::error(Error(HostError::kFailed));
   }
 
-  // Perform state transition.
-  if (result.is_ok()) {
-    // Reset state for another pairing.
-    state_ = State::kIdle;
-  } else {
+  if (!result.is_ok()) {
     state_ = State::kFailed;
+    SignalStatus(result.take_error(), __func__);
+    return;
   }
 
-  SignalStatus(result.is_ok() ? hci::Result<>(fit::ok()) : result.take_error(),
-               __func__);
+  if (!current_pairing_->received_link_key_security_properties) {
+    bt_log(
+        DEBUG,
+        "gap-bredr",
+        "skipping BR/EDR cross-transport key derivation (previously paired)");
+  } else if (link_->role() != pw::bluetooth::emboss::ConnectionRole::CENTRAL) {
+    // Only the central can initiate cross-transport key derivation.
+    bt_log(DEBUG,
+           "gap-bredr",
+           "skipping BR/EDR cross-transport key derivation as peripheral");
+  } else if (!security_manager_) {
+    bt_log(INFO,
+           "gap-bredr",
+           "skipping BR/EDR cross-transport key derivation because SMP "
+           "channel not set");
+  } else {
+    state_ = State::kWaitCrossTransportKeyDerivation;
+    security_manager_->InitiateBrEdrCrossTransportKeyDerivation(
+        fit::bind_member<
+            &SecureSimplePairingState::OnCrossTransportKeyDerivationComplete>(
+            this));
+    return;
+  }
+
+  state_ = State::kIdle;
+  SignalStatus(hci::Result<>(fit::ok()), __func__);
 }
 
 std::unique_ptr<SecureSimplePairingState::Pairing>
@@ -760,6 +809,8 @@ const char* SecureSimplePairingState::ToString(
   switch (state) {
     case State::kIdle:
       return "Idle";
+    case State::kInitiatorWaitLEPairingComplete:
+      return "InitiatorWaitLEPairingComplete";
     case State::kInitiatorWaitLinkKeyRequest:
       return "InitiatorWaitLinkKeyRequest";
     case State::kInitiatorWaitIoCapRequest:
@@ -782,6 +833,8 @@ const char* SecureSimplePairingState::ToString(
       return "InitiatorWaitAuthComplete";
     case State::kWaitEncryption:
       return "WaitEncryption";
+    case State::kWaitCrossTransportKeyDerivation:
+      return "WaitCrossTransportKeyDerivation";
     case State::kFailed:
       return "Failed";
     default:
@@ -863,7 +916,8 @@ std::vector<fit::closure> SecureSimplePairingState::CompletePairingRequests(
   // TODO(fxbug.dev/42075714): Only notify failure to callbacks of requests that
   // inclusive-language: ignore
   // have the same (or none) MITM requirements as the current pairing.
-  bool link_key_received = current_pairing_->security_properties.has_value();
+  bool link_key_received =
+      current_pairing_->received_link_key_security_properties.has_value();
   if (link_key_received) {
     for (auto& request : request_queue_) {
       auto sec_props_satisfied = SecurityPropertiesMeetRequirements(
@@ -942,6 +996,39 @@ bool SecureSimplePairingState::IsPeerSecureConnectionsSupported() const {
              hci_spec::LMPFeature::kSecureConnectionsControllerSupport);
 }
 
+void SecureSimplePairingState::SetSecurityManagerChannel(
+    l2cap::Channel::WeakPtr security_manager_channel) {
+  if (!security_manager_channel.is_alive()) {
+    return;
+  }
+  PW_CHECK(!security_manager_);
+  security_manager_ = security_manager_factory_(
+      link_,
+      std::move(security_manager_channel),
+      security_manager_delegate_.GetWeakPtr(),
+      controller_remote_public_key_validation_supported_,
+      dispatcher_,
+      peer_);
+}
+
+std::optional<sm::IdentityInfo> SecureSimplePairingState::
+    SecurityManagerDelegate::OnIdentityInformationRequest() {
+  if (!ssp_state_->low_energy_address_delegate_->irk()) {
+    bt_log(TRACE, "gap-bredr", "no local identity information to exchange");
+    return std::nullopt;
+  }
+
+  bt_log(DEBUG,
+         "gap-bredr",
+         "will distribute local identity information (peer: %s)",
+         bt_str(ssp_state_->peer_id_));
+  sm::IdentityInfo id_info;
+  id_info.irk = *ssp_state_->low_energy_address_delegate_->irk();
+  id_info.address =
+      ssp_state_->low_energy_address_delegate_->identity_address();
+  return id_info;
+}
+
 void SecureSimplePairingState::AttachInspect(inspect::Node& parent,
                                              std::string name) {
   inspect_node_ = parent.CreateChild(name);
@@ -952,6 +1039,19 @@ void SecureSimplePairingState::AttachInspect(inspect::Node& parent,
 
   security_properties().AttachInspect(inspect_node_,
                                       kInspectSecurityPropertiesPropertyName);
+}
+
+void SecureSimplePairingState::OnCrossTransportKeyDerivationComplete(
+    sm::Result<> result) {
+  if (result.is_error()) {
+    // CTKD failures are not treated as failures of the main BR/EDR pairing.
+    bt_log(INFO,
+           "gap-bredr",
+           "BR/EDR cross-transport key derivation failed: %s",
+           bt_str(result.error_value()));
+  }
+  state_ = State::kIdle;
+  SignalStatus(hci::Result<>(fit::ok()), __func__);
 }
 
 PairingAction GetInitiatorPairingAction(IoCapability initiator_cap,

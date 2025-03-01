@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
@@ -51,7 +52,7 @@ pw_cc_test(
     target_compatible_with = [
         "//pw_build/constraints/board:mimxrt595_evk",
     ],
-    deps = [":pw_uart_mcuxpresso"],
+    deps = [":dma_uart"],
 )
 
 cc_library(
@@ -66,6 +67,7 @@ cc_library(
     deps = [
         "//pw_clock_tree",
         "//pw_dma_mcuxpresso",
+        "//pw_log",
         "//pw_preprocessor",
         "//pw_sync:interrupt_spin_lock",
         "//pw_uart:uart_non_blocking",
@@ -79,7 +81,10 @@ pw_cc_test(
     target_compatible_with = [
         "//pw_build/constraints/board:mimxrt595_evk",
     ],
-    deps = [":pw_uart_mcuxpresso"],
+    deps = [
+        ":dma_uart_nonblocking",
+        "//pw_uart:blocking_adapter",
+    ],
 )
 
 sphinx_docs_library(

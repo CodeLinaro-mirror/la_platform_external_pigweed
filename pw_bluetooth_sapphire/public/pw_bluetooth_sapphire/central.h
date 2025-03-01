@@ -39,8 +39,8 @@ class Central final : public pw::bluetooth::low_energy::Central2 {
       bluetooth::low_energy::Connection2::ConnectionOptions options) override
       PW_LOCKS_EXCLUDED(lock());
 
-  async2::OnceReceiver<ScanStartResult> Scan(ScanOptions options) override
-      PW_LOCKS_EXCLUDED(lock());
+  async2::OnceReceiver<ScanStartResult> Scan(
+      const ScanOptions& options) override PW_LOCKS_EXCLUDED(lock());
 
   static pw::sync::Mutex& lock();
 
@@ -121,9 +121,6 @@ class Central final : public pw::bluetooth::low_energy::Central2 {
   // Asynchronously stops the scan corresponding to `scan_id` and synchronously
   // clears `ScanState.scan_handle_`.
   void StopScanLocked(uint16_t scan_id) PW_EXCLUSIVE_LOCKS_REQUIRED(lock());
-
-  // Must only be used on the Bluetooth thread.
-  uint16_t next_scan_id_ = 0;
 
   std::unordered_map<uint16_t, ScanState> scans_ PW_GUARDED_BY(lock());
 
