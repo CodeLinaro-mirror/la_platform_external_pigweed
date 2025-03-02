@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
@@ -296,7 +297,6 @@ pw_cc_test(
     deps = [
         ":pw_kvs",
         "//pw_status",
-        "//pw_unit_test",
     ],
 )
 
@@ -308,7 +308,6 @@ pw_cc_test(
         ":pw_kvs",
         "//pw_checksum",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -334,7 +333,6 @@ pw_cc_test(
         ":pw_kvs",
         "//pw_log",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -351,7 +349,6 @@ pw_cc_test(
         ":fake_flash",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -369,7 +366,6 @@ pw_cc_test(
         ":pw_kvs",
         "//pw_log",
         "//pw_random",
-        "//pw_unit_test",
     ],
 )
 
@@ -466,7 +462,6 @@ pw_cc_test(
         ":flash_partition_test_100_iterations",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -483,7 +478,6 @@ pw_cc_test(
         ":flash_partition_test_2_iterations",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -500,7 +494,6 @@ pw_cc_test(
         ":flash_partition_test_100_iterations",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -517,7 +510,6 @@ pw_cc_test(
         ":flash_partition_test_100_iterations",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -534,7 +526,6 @@ pw_cc_test(
         ":flash_partition_test_100_iterations",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -551,7 +542,6 @@ pw_cc_test(
         ":flash_partition_test_100_iterations_256_write",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -568,7 +558,6 @@ pw_cc_test(
         ":flash_partition_test_2_iterations_256_write",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -591,7 +580,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_string:builder",
-        "//pw_unit_test",
     ],
 )
 
@@ -614,7 +602,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_string:builder",
-        "//pw_unit_test",
     ],
 )
 
@@ -637,7 +624,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_string:builder",
-        "//pw_unit_test",
     ],
 )
 
@@ -660,7 +646,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_string:builder",
-        "//pw_unit_test",
     ],
 )
 
@@ -683,7 +668,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_string:builder",
-        "//pw_unit_test",
     ],
 )
 
@@ -706,7 +690,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_string:builder",
-        "//pw_unit_test",
     ],
 )
 
@@ -726,7 +709,6 @@ pw_cc_test(
         "//pw_log",
         "//pw_status",
         "//pw_sync:borrow",
-        "//pw_unit_test",
     ],
 )
 
@@ -746,7 +728,6 @@ pw_cc_test(
         ":fake_flash",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -766,7 +747,6 @@ pw_cc_test(
         ":test_partition",
         "//pw_checksum",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -788,7 +768,6 @@ pw_cc_test(
         "//pw_log",
         "//pw_log:pw_log.facade",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -805,7 +784,6 @@ pw_cc_test(
         ":fake_flash",
         ":pw_kvs",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 
@@ -825,7 +803,6 @@ pw_cc_test(
         ":pw_kvs",
         ":test_partition",
         "//pw_log",
-        "//pw_unit_test",
     ],
 )
 

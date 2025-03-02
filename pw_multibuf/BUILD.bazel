@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
@@ -66,7 +67,6 @@ pw_cc_test(
         ":chunk",
         ":header_chunk_region_tracker",
         "//pw_allocator:testing",
-        "//pw_unit_test",
     ],
 )
 
@@ -114,7 +114,6 @@ pw_cc_test(
         ":internal_test_utils",
         ":pw_multibuf",
         "//pw_bytes",
-        "//pw_unit_test",
     ],
 )
 
@@ -160,7 +159,6 @@ pw_cc_test(
         ":allocator_async",
         "//pw_async2:dispatcher",
         "//pw_async2:poll",
-        "//pw_unit_test",
     ],
 )
 
@@ -186,7 +184,6 @@ pw_cc_test(
         "//pw_allocator:testing",
         "//pw_async2:dispatcher",
         "//pw_async2:poll",
-        "//pw_unit_test",
     ],
 )
 
@@ -209,7 +206,6 @@ pw_cc_test(
         ":internal_test_utils",
         ":pw_multibuf",
         ":stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -231,7 +227,6 @@ pw_cc_test(
     deps = [
         ":from_span",
         "//pw_allocator:testing",
-        "//pw_unit_test",
     ],
 )
 
@@ -242,8 +237,10 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":simple_allocator",
+        "//pw_allocator:synchronized_allocator",
         "//pw_allocator:testing",
         "//pw_assert",
+        "//pw_sync:mutex",
     ],
 )
 

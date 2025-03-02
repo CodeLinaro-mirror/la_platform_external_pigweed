@@ -15,6 +15,7 @@
 load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
 load("@com_google_protobuf//bazel:java_proto_library.bzl", "java_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
@@ -180,10 +181,7 @@ cc_library(
 pw_cc_test(
     name = "chunk_test",
     srcs = ["chunk_test.cc"],
-    deps = [
-        ":core",
-        "//pw_unit_test",
-    ],
+    deps = [":core"],
 )
 
 pw_cc_test(
@@ -191,10 +189,7 @@ pw_cc_test(
     srcs = ["handler_test.cc"],
     # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
     target_compatible_with = select(hosts_lin_mac),
-    deps = [
-        ":pw_transfer",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_transfer"],
 )
 
 pw_cc_test(
@@ -208,7 +203,6 @@ pw_cc_test(
         ":pw_transfer",
         "//pw_random",
         "//pw_string",
-        "//pw_unit_test",
     ],
 )
 
@@ -224,7 +218,6 @@ pw_cc_test(
         "//pw_rpc/raw:client_testing",
         "//pw_rpc/raw:test_method_context",
         "//pw_thread:thread",
-        "//pw_unit_test",
     ],
 )
 
@@ -241,7 +234,6 @@ pw_cc_test(
         "//pw_rpc:test_helpers",
         "//pw_rpc/raw:test_method_context",
         "//pw_thread:thread",
-        "//pw_unit_test",
     ],
 )
 
@@ -257,7 +249,6 @@ pw_cc_test(
         "//pw_rpc/raw:client_testing",
         "//pw_thread:sleep",
         "//pw_thread:thread",
-        "//pw_unit_test",
     ],
 )
 

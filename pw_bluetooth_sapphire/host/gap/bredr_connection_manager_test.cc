@@ -29,6 +29,7 @@
 #include "pw_bluetooth_sapphire/internal/host/l2cap/fake_l2cap.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
 #include "pw_bluetooth_sapphire/internal/host/sdp/sdp.h"
+#include "pw_bluetooth_sapphire/internal/host/sm/test_security_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/controller_test.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/gtest_helpers.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/inspect.h"
@@ -51,10 +52,12 @@ using TestingBase =
 
 constexpr hci_spec::ConnectionHandle kConnectionHandle = 0x0BAA;
 constexpr hci_spec::ConnectionHandle kConnectionHandle2 = 0x0BAB;
+const DeviceAddress kLocalDevLEAddr(DeviceAddress::Type::kLEPublic, {0});
 const DeviceAddress kLocalDevAddr(DeviceAddress::Type::kBREDR, {0});
 const DeviceAddress kTestDevAddr(DeviceAddress::Type::kBREDR, {1});
 const DeviceAddress kTestDevAddrLe(DeviceAddress::Type::kLEPublic, {2});
 const DeviceAddress kTestDevAddr2(DeviceAddress::Type::kBREDR, {3});
+const UInt128 kIrk{{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
 constexpr uint32_t kPasskey = 123456;
 constexpr uint16_t kDefaultPinCode = 0000;
 const hci_spec::LinkKey kRawKey({0xc0,
@@ -114,6 +117,11 @@ const hci_spec::LinkKey kLegacyKey({0x41,
 const sm::LTK kLinkKey(
     sm::SecurityProperties(hci_spec::LinkKeyType::kAuthenticatedCombination192),
     kRawKey);
+const bt::sm::LTK kLELtk(sm::SecurityProperties(/*encrypted=*/true,
+                                                /*authenticated=*/true,
+                                                /*secure_connections=*/true,
+                                                sm::kMaxEncryptionKeySize),
+                         hci_spec::LinkKey(UInt128{4}, 5, 6));
 
 constexpr BrEdrSecurityRequirements kNoSecurityRequirements{
     .authentication = false, .secure_connections = false};
@@ -553,7 +561,8 @@ constexpr l2cap::ChannelParameters kChannelParams;
     status_param = cb_status;                       \
   })
 
-class BrEdrConnectionManagerTest : public TestingBase {
+class BrEdrConnectionManagerTest : public TestingBase,
+                                   public hci::LocalAddressDelegate {
  public:
   BrEdrConnectionManagerTest() = default;
   ~BrEdrConnectionManagerTest() override = default;
@@ -579,10 +588,14 @@ class BrEdrConnectionManagerTest : public TestingBase {
         transport()->GetWeakPtr(),
         peer_cache_.get(),
         kLocalDevAddr,
+        /*low_energy_address_delegate=*/this,
         l2cap_.get(),
         /*use_interlaced_scan=*/true,
         /*local_secure_connections_supported=*/true,
         /*legacy_pairing_enabled=*/false,
+        /*controller_remote_public_key_validation_supported=*/true,
+        fit::bind_member<&sm::testing::TestSecurityManagerFactory::CreateBrEdr>(
+            &security_manager_factory_),
         dispatcher());
 
     RunUntilIdle();
@@ -907,7 +920,19 @@ class BrEdrConnectionManagerTest : public TestingBase {
                           &disconnect_complete);
   }
 
+  sm::testing::TestSecurityManagerFactory* security_manager_factory() {
+    return &security_manager_factory_;
+  }
+
  private:
+  std::optional<UInt128> irk() const override { return kIrk; }
+  DeviceAddress identity_address() const override { return kLocalDevLEAddr; }
+  void EnsureLocalAddress(std::optional<DeviceAddress::Type>,
+                          AddressCallback) override {
+    ADD_FAILURE();
+  }
+
+  sm::testing::TestSecurityManagerFactory security_manager_factory_;
   std::unique_ptr<BrEdrConnectionManager> connection_manager_;
   std::unique_ptr<PeerCache> peer_cache_;
   std::unique_ptr<l2cap::testing::FakeL2cap> l2cap_;
@@ -942,10 +967,14 @@ class BrEdrConnectionManagerLegacyPairingTest
         transport()->GetWeakPtr(),
         peer_cache_.get(),
         kLocalDevAddr,
+        /*low_energy_address_delegate=*/this,
         l2cap_.get(),
         /*use_interlaced_scan=*/true,
         /*local_secure_connections_supported=*/true,
         /*legacy_pairing_enabled=*/true,
+        /*controller_remote_public_key_validation_supported=*/true,
+        fit::bind_member<&sm::testing::TestSecurityManagerFactory::CreateBrEdr>(
+            security_manager_factory()),
         dispatcher());
 
     RunUntilIdle();
@@ -1870,6 +1899,34 @@ TEST_F(BrEdrConnectionManagerTest, LinkKeyRequestAndNegativeReply) {
   RunUntilIdle();
 
   EXPECT_EQ(kIncomingConnTransactions + 2, transaction_count());
+
+  // Queue disconnection for teardown
+  QueueDisconnection(kConnectionHandle);
+}
+
+// Test: Link Key request arrives after we have received a connect request, but
+// before we have been notified of connect completion (see http://b/393629914).
+TEST_F(BrEdrConnectionManagerTest, ConnectLinkKeySandwich) {
+  EXPECT_CMD_PACKET_OUT(test_device(),
+                        testing::AcceptConnectionRequestPacket(kTestDevAddr),
+                        &kAcceptConnectionRequestRsp);
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+  RunUntilIdle();
+
+  auto* peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+  ASSERT_FALSE(IsNotConnected(peer));  // connecting
+  ASSERT_FALSE(peer->bonded());
+
+  EXPECT_CMD_PACKET_OUT(test_device(),
+                        kLinkKeyRequestNegativeReply,
+                        &kLinkKeyRequestNegativeReplyRsp);
+  test_device()->SendCommandChannelPacket(kLinkKeyRequest);
+  RunUntilIdle();
+
+  QueueSuccessfulInterrogation(kTestDevAddr, kConnectionHandle);
+  test_device()->SendCommandChannelPacket(kConnectionComplete);
+  RunUntilIdle();
 
   // Queue disconnection for teardown
   QueueDisconnection(kConnectionHandle);
@@ -5022,7 +5079,7 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
                               PropertyList(UnorderedElementsAre(
                                   UintIs("connection_attempts", 1),
                                   UintIs("failed_connections", 0),
-                                  UintIs("successful_connections", 0))))));
+                                  UintIs("successful_connections", 1))))));
 
   auto outgoing_matcher =
       AllOf(NodeMatches(AllOf(NameMatches("outgoing"),
@@ -5062,7 +5119,7 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
                               PropertyList(UnorderedElementsAre(
                                   UintIs("connection_attempts", 1),
                                   UintIs("failed_connections", 0),
-                                  UintIs("successful_connections", 0))))));
+                                  UintIs("successful_connections", 1))))));
 
   auto requests_matcher = AllOf(NodeMatches(NameMatches("connection_requests")),
                                 ChildrenMatch(::testing::IsEmpty()));
@@ -5098,6 +5155,69 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
   hierarchy = inspect::ReadFromVmo(inspector().DuplicateVmo());
   EXPECT_THAT(hierarchy.value(),
               ChildrenMatch(ElementsAre(conn_mgr_after_disconnect_matcher)));
+}
+
+// Verify that a failed incoming BR/EDR connection is reflected in inspect data
+TEST_F(BrEdrConnectionManagerTest, InspectDataAfterFailedIncomingConnection) {
+  connmgr()->AttachInspect(inspector().GetRoot(), "bredr_connection_manager");
+
+  const auto connection_complete_failed = testing::ConnectionCompletePacket(
+      kTestDevAddr,
+      kConnectionHandle,
+      pw::bluetooth::emboss::StatusCode::CONNECTION_TIMEOUT);
+  EXPECT_CMD_PACKET_OUT(test_device(),
+                        testing::AcceptConnectionRequestPacket(kTestDevAddr),
+                        &kAcceptConnectionRequestRsp,
+                        &connection_complete_failed);
+  test_device()->SendCommandChannelPacket(kConnectionRequest);
+  RunUntilIdle();
+
+  auto* const peer = peer_cache()->FindByAddress(kTestDevAddr);
+  ASSERT_TRUE(peer);
+
+  auto empty_requests_matcher =
+      AllOf(NodeMatches(NameMatches("connection_requests")),
+            ChildrenMatch(::testing::IsEmpty()));
+
+  auto connections_matcher = AllOf(NodeMatches(NameMatches("connections")),
+                                   ChildrenMatch(::testing::IsEmpty()));
+
+  auto recent_conn_list_matcher =
+      AllOf(NodeMatches(NameMatches("last_disconnected")),
+            ChildrenMatch(::testing::IsEmpty()));
+
+  auto incoming_matcher =
+      AllOf(NodeMatches(AllOf(NameMatches("incoming"),
+                              PropertyList(UnorderedElementsAre(
+                                  UintIs("connection_attempts", 1),
+                                  UintIs("failed_connections", 1),
+                                  UintIs("successful_connections", 0))))));
+
+  auto outgoing_matcher =
+      AllOf(NodeMatches(AllOf(NameMatches("outgoing"),
+                              PropertyList(UnorderedElementsAre(
+                                  UintIs("connection_attempts", 0),
+                                  UintIs("failed_connections", 0),
+                                  UintIs("successful_connections", 0))))));
+
+  auto conn_mgr_matcher = AllOf(
+      NodeMatches(AllOf(NameMatches("bredr_connection_manager"),
+                        PropertyList(UnorderedElementsAre(
+                            UintIs("disconnect_acl_link_error_count", 0),
+                            UintIs("disconnect_interrogation_failed_count", 0),
+                            UintIs("disconnect_local_api_request_count", 0),
+                            UintIs("disconnect_pairing_failed_count", 0),
+                            UintIs("disconnect_peer_disconnection_count", 0),
+                            UintIs("interrogation_complete_count", 0),
+                            StringIs("security_mode", "Mode 4"))))),
+      ChildrenMatch(UnorderedElementsAre(empty_requests_matcher,
+                                         connections_matcher,
+                                         recent_conn_list_matcher,
+                                         incoming_matcher,
+                                         outgoing_matcher)));
+
+  auto hierarchy = inspect::ReadFromVmo(inspector().DuplicateVmo());
+  EXPECT_THAT(hierarchy.value(), ChildrenMatch(ElementsAre(conn_mgr_matcher)));
 }
 #endif  // NINSPECT
 
@@ -5233,10 +5353,9 @@ TEST_F(BrEdrConnectionManagerTest,
 
   // Trigger inbound connection and respond to interrogation. LMP features are
   // set to support peer host and controller Secure Connections.
-  EXPECT_CMD_PACKET_OUT(test_device(),
-                        kAcceptConnectionRequest,
-                        &kAcceptConnectionRequestRsp,
-                        &kConnectionComplete);
+  QueueSuccessfulAccept(kTestDevAddr,
+                        kConnectionHandle,
+                        pw::bluetooth::emboss::ConnectionRole::CENTRAL);
   EXPECT_CMD_PACKET_OUT(test_device(),
                         kRemoteNameRequest,
                         &kRemoteNameRequestRsp,
@@ -5303,9 +5422,25 @@ TEST_F(BrEdrConnectionManagerTest,
   EXPECT_CMD_PACKET_OUT(
       test_device(), kReadEncryptionKeySize, &kReadEncryptionKeySizeRsp);
 
+  // Configure TestSecurityManager with bonding data so cross-transport key
+  // derivation succeeds.
+  sm::testing::TestSecurityManager::WeakPtr security_manager =
+      security_manager_factory()->GetTestSm(kConnectionHandle);
+  ASSERT_TRUE(security_manager.is_alive());
+  sm::PairingData pairing_data;
+  pairing_data.local_ltk = kLELtk;
+  pairing_data.peer_ltk = kLELtk;
+  security_manager->set_pairing_data(pairing_data);
+  EXPECT_FALSE(peer->le());
+
   RETURN_IF_FATAL(RunUntilIdle());
 
   EXPECT_TRUE(l2cap()->IsLinkConnected(kConnectionHandle));
+  ASSERT_TRUE(peer->bredr()->bonded());
+  ASSERT_TRUE(peer->le());
+  ASSERT_TRUE(peer->le()->bond_data().has_value());
+  EXPECT_EQ(peer->le()->bond_data().value(), pairing_data);
+  EXPECT_TRUE(security_manager->last_identity_info().has_value());
 
   QueueDisconnection(kConnectionHandle);
 }

@@ -12,12 +12,10 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
-package(
-    default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
-)
+package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
@@ -27,8 +25,8 @@ cc_library(
     strip_include_prefix = "public",
     visibility = ["//visibility:private"],
     deps = [
-        "//pw_allocator:config",
         "//pw_allocator:deallocator",
+        "//pw_allocator:hardening",
         "//pw_allocator/block:poisonable",
     ],
 )
@@ -128,6 +126,7 @@ pw_cc_test(
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_allocator/bucket/base.h",
         "public/pw_allocator/bucket/fast_sorted.h",
         "public/pw_allocator/bucket/sequenced.h",
         "public/pw_allocator/bucket/sorted.h",
