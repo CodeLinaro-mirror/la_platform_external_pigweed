@@ -41,7 +41,7 @@
 #include "pw_multibuf/simple_allocator_for_test.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
-#include "pw_unit_test/framework.h"
+#include "pw_unit_test/framework.h"  // IWYU pragma: keep
 
 namespace pw::bluetooth::proxy {
 

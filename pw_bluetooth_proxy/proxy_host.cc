@@ -14,7 +14,7 @@
 
 #include "pw_bluetooth_proxy/proxy_host.h"
 
-#include "pw_assert/check.h"
+#include "pw_assert/check.h"  // IWYU pragma: keep
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_commands.emb.h"
 #include "pw_bluetooth/hci_common.emb.h"
@@ -146,8 +146,6 @@ void ProxyHost::HandleEventFromController(H4PacketWithHci&& h4_packet) {
     }
   }
   PW_MODIFY_DIAGNOSTICS_POP();
-
-  l2cap_channel_manager_.DeliverPendingEvents();
 }
 
 void ProxyHost::HandleEventFromHost(H4PacketWithH4&& h4_packet) {
@@ -363,12 +361,11 @@ pw::Result<L2capCoc> ProxyHost::AcquireL2capCoc(
 pw::Status ProxyHost::SendAdditionalRxCredits(uint16_t connection_handle,
                                               uint16_t local_cid,
                                               uint16_t additional_rx_credits) {
-  std::optional<L2capChannelManager::LockedL2capChannel> channel =
-      l2cap_channel_manager_.FindChannelByLocalCid(connection_handle,
-                                                   local_cid);
-  PW_CHECK(channel.has_value());
-  return static_cast<L2capCoc&>(channel->channel())
-      .SendAdditionalRxCredits(additional_rx_credits);
+  L2capChannel* channel = l2cap_channel_manager_.FindChannelByLocalCid(
+      connection_handle, local_cid);
+  PW_CHECK(channel);
+  return static_cast<L2capCoc*>(channel)->SendAdditionalRxCredits(
+      additional_rx_credits);
 }
 
 pw::Result<BasicL2capChannel> ProxyHost::AcquireBasicL2capChannel(

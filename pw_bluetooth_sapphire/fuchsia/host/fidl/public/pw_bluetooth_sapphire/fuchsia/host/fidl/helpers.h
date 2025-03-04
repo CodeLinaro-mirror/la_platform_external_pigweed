@@ -43,9 +43,11 @@
 
 // Helpers for implementing the Bluetooth FIDL interfaces.
 
-namespace bt::hci {
+namespace bt::gap {
+
 class DiscoveryFilter;
-}  // namespace bt::hci
+
+}  // namespace bt::gap
 
 namespace bthost::fidl_helpers {
 
@@ -188,8 +190,8 @@ bool IsScanFilterValid(const fuchsia::bluetooth::le::ScanFilter& fidl_filter);
 // unmodified.
 bool PopulateDiscoveryFilter(
     const fuchsia::bluetooth::le::ScanFilter& fidl_filter,
-    bt::hci::DiscoveryFilter* out_filter);
-bt::hci::DiscoveryFilter DiscoveryFilterFromFidl(
+    bt::gap::DiscoveryFilter* out_filter);
+bt::gap::DiscoveryFilter DiscoveryFilterFromFidl(
     const fuchsia::bluetooth::le::Filter& fidl_filter);
 
 // Converts the given |mode_hint| to a stack interval value.

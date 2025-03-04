@@ -50,8 +50,8 @@ void BasicDispatcher::RunUntilIdle() {
 
 void BasicDispatcher::RunUntil(chrono::SystemClock::time_point end_time) {
   lock_.lock();
-  while (now() < end_time && !stop_requested_) {
-    MaybeSleepUntil(end_time);
+  while (end_time < now() && !stop_requested_) {
+    MaybeSleep();
     ExecuteDueTasks();
   }
   if (stop_requested_) {
@@ -64,17 +64,14 @@ void BasicDispatcher::RunFor(chrono::SystemClock::duration duration) {
   RunUntil(now() + duration);
 }
 
-void BasicDispatcher::MaybeSleep() { return MaybeSleepUntil(std::nullopt); }
-
-void BasicDispatcher::MaybeSleepUntil(
-    std::optional<chrono::SystemClock::time_point> wake_time = std::nullopt) {
+void BasicDispatcher::MaybeSleep() {
   if (task_queue_.empty() || task_queue_.front().due_time_ > now()) {
-    // Sleep until either the due time of the next task or the specified
-    // wake_time if available. Otherwise sleep until a notification is received.
-    // Notifications are sent when tasks are posted or 'stop' is requested.
+    // Sleep until a notification is received or until the due time of the
+    // next task. Notifications are sent when tasks are posted or 'stop' is
+    // requested.
+    std::optional<chrono::SystemClock::time_point> wake_time = std::nullopt;
     if (!task_queue_.empty()) {
-      auto task_due_time = task_queue_.front().due_time_;
-      wake_time = std::min(wake_time.value_or(task_due_time), task_due_time);
+      wake_time = task_queue_.front().due_time_;
     }
     lock_.unlock();
     if (wake_time.has_value()) {

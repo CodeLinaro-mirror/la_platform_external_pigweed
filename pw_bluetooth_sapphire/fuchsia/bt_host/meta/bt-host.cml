@@ -48,10 +48,6 @@
         {
             protocol: [ "fuchsia.bluetooth.host.Receiver" ],
         },
-        {
-            protocol: [ "fuchsia.scheduler.RoleManager" ],
-            availability: "optional",
-        },
     ],
     config: {
         device_path: {

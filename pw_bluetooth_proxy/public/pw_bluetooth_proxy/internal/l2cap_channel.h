@@ -106,7 +106,13 @@ class L2capChannel : public IntrusiveForwardList<L2capChannel>::Item {
   /// @endrst
   // TODO: https://pwbug.dev/388082771 - Plan to eventually move this to
   // ClientChannel.
-  virtual StatusWithMultiBuf Write(pw::multibuf::MultiBuf&& payload);
+  inline virtual StatusWithMultiBuf Write(pw::multibuf::MultiBuf&& payload) {
+    if (UsesPayloadQueue()) {
+      return WriteToPayloadQueue(std::move(payload));
+    } else {
+      return WriteToPduQueue(std::move(payload));
+    }
+  }
 
   /// Send an L2CAP payload to the remote peer.
   ///
@@ -253,18 +259,7 @@ class L2capChannel : public IntrusiveForwardList<L2capChannel>::Item {
   //  Tx (protected)
   //----------------
 
-  // Channels that need to send a payload during handling a received packet
-  // directly (for instance to replenish credits) should use this function which
-  // does not take the L2capChannelManager channels lock.
-  inline StatusWithMultiBuf WriteDuringRx(pw::multibuf::MultiBuf&& payload) {
-    return WriteLocked(std::move(payload));
-  }
-
-  // Write payload to queue but don't drain the queue as this would require
-  // taking L2capChannelManager channel_mutex_ lock.
-  StatusWithMultiBuf WriteLocked(pw::multibuf::MultiBuf&& payload);
-
-  // Queue L2CAP `packet` for sending and `ReportNewTxPacketsOrCredits()`.
+  // Queue L2CAP `packet` for sending and `ReportPacketsMayBeReadyToSend()`.
   //
   // Returns PW_STATUS_UNAVAILABLE if queue is full (transient error).
   // Returns PW_STATUS_FAILED_PRECONDITION if channel is not `State::kRunning`.
@@ -313,13 +308,9 @@ class L2capChannel : public IntrusiveForwardList<L2capChannel>::Item {
   std::optional<uint16_t> MaxL2capPayloadSize() const;
 
   // Alert `L2capChannelManager` that queued packets may be ready to send.
-  void ReportNewTxPacketsOrCredits();
-
-  // Tell `L2capChannelManager` to try and send all available queued
-  // packets. When calling this method, ensure no locks are held that are
-  // also acquired in `Dequeue()` overrides, and that the channels lock is
-  // not held either.
-  void DrainChannelQueuesIfNewTx() PW_LOCKS_EXCLUDED(send_queue_mutex_);
+  // When calling this method, ensure no locks are held that are also acquired
+  // in `Dequeue()` overrides.
+  void ReportPacketsMayBeReadyToSend() PW_LOCKS_EXCLUDED(send_queue_mutex_);
 
   // Remove all packets from queue.
   void ClearQueue();
@@ -381,7 +372,7 @@ class L2capChannel : public IntrusiveForwardList<L2capChannel>::Item {
   //  Tx (private)
   //--------------
 
-  // Queue a client `buf` for sending and `ReportNewTxPacketsOrCredits()`.
+  // Queue a client `buf` for sending and `ReportPacketsMayBeReadyToSend()`.
   // Must be a contiguous MultiBuf.
   //
   // Returns PW_STATUS_UNAVAILABLE if queue is full (transient error).

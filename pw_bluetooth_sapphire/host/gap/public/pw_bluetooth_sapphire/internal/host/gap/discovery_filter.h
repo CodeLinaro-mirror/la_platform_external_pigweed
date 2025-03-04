@@ -19,7 +19,13 @@
 #include "pw_bluetooth_sapphire/internal/host/common/advertising_data.h"
 #include "pw_bluetooth_sapphire/internal/host/common/uuid.h"
 
-namespace bt::hci {
+namespace bt {
+
+class ByteBuffer;
+
+namespace gap {
+
+class Peer;
 
 // A DiscoveryFilter allows clients of discovery procedures to filter results
 // based on certain parameters, such as service UUIDs that might be present in
@@ -28,9 +34,6 @@ namespace bt::hci {
 class DiscoveryFilter final {
  public:
   DiscoveryFilter() = default;
-
-  // Sets this filter up for the "General Discovery" procedure.
-  void SetGeneralDiscoveryFlags();
 
   // Discovery filter based on the "Flags" bit field in LE Advertising Data. If
   // |require_all| is true, then The filter is considered satisifed if ALL of
@@ -107,7 +110,6 @@ class DiscoveryFilter final {
   // a path loss filter was provided via SetPathLoss() which the remote device
   // failed to satisfy (see comments on SetPathLoss()).
   void set_rssi(int8_t rssi) { rssi_ = rssi; }
-  std::optional<int8_t> rssi() const { return rssi_; }
 
   // Sets a device to be filtered by manufacturer specific data. A scan result
   // satisfies this filter if it advertises manufacturer specific data
@@ -131,6 +133,9 @@ class DiscoveryFilter final {
     return solicitation_uuids_;
   }
 
+  // Sets this filter up for the "General Discovery" procedure.
+  void SetGeneralDiscoveryFlags();
+
   // Returns true, if the given LE scan result satisfies this filter. Otherwise
   // returns false. |advertising_data| should include scan response data, if
   // any.
@@ -148,12 +153,13 @@ class DiscoveryFilter final {
   std::vector<UUID> service_data_uuids_;
   std::vector<UUID> solicitation_uuids_;
   std::string name_substring_;
+  std::optional<uint8_t> flags_;
+  bool all_flags_required_;
   std::optional<bool> connectable_;
   std::optional<uint16_t> manufacturer_code_;
   std::optional<int8_t> pathloss_;
   std::optional<int8_t> rssi_;
-
-  std::optional<uint8_t> flags_;
-  bool all_flags_required_;
 };
-}  // namespace bt::hci
+
+}  // namespace gap
+}  // namespace bt

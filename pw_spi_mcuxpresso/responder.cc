@@ -17,7 +17,6 @@
 
 #include "pw_assert/check.h"
 #include "pw_log/log.h"
-#include "pw_span/cast.h"
 #include "pw_status/try.h"
 
 // Vendor terminology requires this to be disabled.
@@ -25,6 +24,16 @@
 
 namespace pw::spi {
 namespace {
+
+uint8_t* SpanData(ByteSpan& span) {
+  static_assert(std::is_same_v<uint8_t, unsigned char>);
+  return reinterpret_cast<uint8_t*>(span.data());
+}
+
+uint8_t* SpanDataDiscardConst(ConstByteSpan& span) {
+  static_assert(std::is_same_v<uint8_t, unsigned char>);
+  return const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(span.data()));
+}
 
 Status ToPwStatus(status_t status) {
   switch (status) {
@@ -512,30 +521,27 @@ Status McuxpressoResponder::DoWriteReadAsync(ConstByteSpan tx_data,
 
   spi_transfer_t transfer = {};
 
-  pw::span<const uint8_t> tx = span_cast<const uint8_t>(tx_data);
-  pw::span<uint8_t> rx = span_cast<uint8_t>(rx_data);
-
-  if (!tx.empty() && !rx.empty()) {
-    // spi_transfer_t has only a single dataSize member, so tx and
-    // rx must be the same size. Separate rx/tx data sizes could
+  if (!tx_data.empty() && !rx_data.empty()) {
+    // spi_transfer_t has only a single dataSize member, so tx_data and
+    // rx_data must be the same size. Separate rx/tx data sizes could
     // theoretically be handled, but the SDK doesn't support it.
     //
     // TODO(jrreinhart) Support separate rx/tx data sizes.
     // For non-DMA, it's a pretty simple patch.
     // It should be doable for DMA also, but I haven't looked into it.
-    if (tx.size() != rx.size()) {
+    if (tx_data.size() != rx_data.size()) {
       return Status::InvalidArgument();
     }
 
-    transfer.txData = const_cast<uint8_t*>(tx.data());
-    transfer.rxData = rx.data();
-    transfer.dataSize = rx.size();
-  } else if (!tx.empty()) {
-    transfer.txData = const_cast<uint8_t*>(tx.data());
-    transfer.dataSize = tx.size();
-  } else if (!rx.empty()) {
-    transfer.rxData = rx.data();
-    transfer.dataSize = rx.size();
+    transfer.txData = SpanDataDiscardConst(tx_data);
+    transfer.rxData = SpanData(rx_data);
+    transfer.dataSize = rx_data.size();
+  } else if (!tx_data.empty()) {
+    transfer.txData = SpanDataDiscardConst(tx_data);
+    transfer.dataSize = tx_data.size();
+  } else if (!rx_data.empty()) {
+    transfer.rxData = SpanData(rx_data);
+    transfer.dataSize = rx_data.size();
   } else {
     return Status::InvalidArgument();
   }

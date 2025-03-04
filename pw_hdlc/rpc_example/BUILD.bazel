@@ -25,7 +25,6 @@ pw_cc_binary(
         "main.cc",
     ],
     deps = [
-        "//pw_assert:check",
         "//pw_hdlc",
         "//pw_hdlc:default_addresses",
         "//pw_log",

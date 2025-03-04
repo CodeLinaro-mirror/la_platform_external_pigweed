@@ -15,7 +15,6 @@
 #![feature(const_trait_impl)]
 #![feature(naked_functions)]
 
-use foreign_box::ForeignBox;
 use pw_log::info;
 
 mod arch;
@@ -49,11 +48,13 @@ impl ThreadBuffer {
     // TODO: figure out how to properly statically construct a thread or
     // make sure this function can only be called once.
     #[inline(never)]
-    unsafe fn alloc_thread(&mut self) -> ForeignBox<Thread> {
+    fn alloc_thread(&mut self) -> &mut Thread {
         assert!(self.buffer.as_ptr().align_offset(align_of::<Thread>()) == 0);
-        let thread_ptr = self.buffer.as_mut_ptr() as *mut Thread;
-        thread_ptr.write(Thread::new());
-        ForeignBox::new_from_ptr(&mut *thread_ptr)
+        unsafe {
+            let thread_ptr = self.buffer.as_mut_ptr() as *mut Thread;
+            thread_ptr.write(Thread::new());
+            &mut *thread_ptr
+        }
     }
 }
 
@@ -66,7 +67,7 @@ impl Kernel {
 
         Arch::early_init();
 
-        let mut bootstrap_thread;
+        let bootstrap_thread;
         #[allow(static_mut_refs)]
         unsafe {
             info!("allocating bootstrap thread");
@@ -100,21 +101,8 @@ fn bootstrap_thread_entry(_arg: usize) {
 
     SCHEDULER_STATE.lock().dump_all_threads();
 
-    let mut idle_thread;
-    #[allow(static_mut_refs)]
-    unsafe {
-        info!("allocating idle_thread");
-        static mut IDLE_THREAD_BUFFER: ThreadBuffer = ThreadBuffer::new();
-        idle_thread = IDLE_THREAD_BUFFER.alloc_thread();
-
-        info!("initializing idle_thread");
-        static mut IDLE_STACK: [u8; 2048] = [0; 2048];
-        idle_thread.initialize(Stack::from_slice(&IDLE_STACK), idle_thread_entry, 0usize);
-    }
-    SCHEDULER_STATE.lock().dump_all_threads();
-
     // TODO: Create a few test threads
-    let mut thread_a;
+    let thread_a;
     #[allow(static_mut_refs)]
     unsafe {
         info!("allocating thread A");
@@ -127,7 +115,7 @@ fn bootstrap_thread_entry(_arg: usize) {
     }
     SCHEDULER_STATE.lock().dump_all_threads();
 
-    let mut thread_b;
+    let thread_b;
     #[allow(static_mut_refs)]
     unsafe {
         info!("allocating thread B");
@@ -139,9 +127,8 @@ fn bootstrap_thread_entry(_arg: usize) {
         thread_b.initialize(Stack::from_slice(&STACK_B), test_thread_entry, 'b' as usize);
     }
 
-    Thread::start(idle_thread);
-    Thread::start(thread_a);
-    Thread::start(thread_b);
+    thread_a.start();
+    thread_b.start();
 
     SCHEDULER_STATE.lock().dump_all_threads();
 
@@ -152,20 +139,12 @@ fn bootstrap_thread_entry(_arg: usize) {
 }
 
 #[allow(dead_code)]
-fn idle_thread_entry(_arg: usize) {
-    // Fake idle thread to keep the runqueue from being empty if all threads are blocked.
-    assert!(Arch::interrupts_enabled());
-    loop {
-        Arch::idle();
-    }
-}
-
-#[allow(dead_code)]
 fn test_thread_entry(arg: usize) {
     info!("i'm a thread! arg {}", arg);
     assert!(Arch::interrupts_enabled());
+    #[allow(clippy::empty_loop)]
     loop {
         info!("thread {}", arg as u8 as char);
-        scheduler::TICK_WAIT_QUEUE.lock().wait();
+        Arch::idle();
     }
 }

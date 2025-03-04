@@ -24,8 +24,6 @@ if("${dir_pw_third_party_emboss}" STREQUAL "")
 endif()
 
 pw_add_library(pw_bluetooth_proxy STATIC
-
-# LINT.IfChange
   HEADERS
     public/pw_bluetooth_proxy/basic_l2cap_channel.h
     public/pw_bluetooth_proxy/gatt_notify_channel.h
@@ -49,12 +47,9 @@ pw_add_library(pw_bluetooth_proxy STATIC
     public/pw_bluetooth_proxy/l2cap_status_delegate.h
     public/pw_bluetooth_proxy/proxy_host.h
     public/pw_bluetooth_proxy/rfcomm_channel.h
-# LINT.ThenChange(BUILD.bazel, BUILD.gn)
 
   PUBLIC_INCLUDES
     public
-
-# LINT.IfChange
   PUBLIC_DEPS
     pw_allocator.best_fit
     pw_allocator.synchronized_allocator
@@ -74,7 +69,6 @@ pw_add_library(pw_bluetooth_proxy STATIC
     pw_multibuf.simple_allocator
     pw_result
     pw_span
-    pw_span.cast
     pw_status
     pw_sync.lock_annotations
     pw_sync.mutex
@@ -94,13 +88,9 @@ pw_add_library(pw_bluetooth_proxy STATIC
     proxy_host.cc
     rfcomm_channel.cc
     rfcomm_fcs.cc
-# LINT.ThenChange(Android.bp, BUILD.bazel, BUILD.gn)
-
 )
 
 pw_add_library(pw_bluetooth_proxy.test_utils STATIC
-
-# LINT.IfChange
   HEADERS
     pw_bluetooth_proxy_private/test_utils.h
   PUBLIC_DEPS
@@ -114,13 +104,18 @@ pw_add_library(pw_bluetooth_proxy.test_utils STATIC
     pw_unit_test
   SOURCES
     test_utils.cc
-# LINT.ThenChange(Android.bp, BUILD.bazel, BUILD.gn)
-
 )
 
 pw_add_test(pw_bluetooth_proxy.pw_bluetooth_proxy_test
-
-# LINT.IfChange
+  SOURCES
+    gatt_notify_test.cc
+    h4_packet_test.cc
+    l2cap_coc_test.cc
+    multibuf_writer_test.cc
+    proxy_host_test.cc
+    rfcomm_fcs_test.cc
+    rfcomm_test.cc
+    utils_test.cc
   PRIVATE_DEPS
     pw_bluetooth_proxy
     pw_bluetooth_proxy.test_utils
@@ -131,19 +126,6 @@ pw_add_test(pw_bluetooth_proxy.pw_bluetooth_proxy_test
     pw_bluetooth.emboss_hci_events
     pw_bluetooth.emboss_hci_h4
     pw_multibuf
-  SOURCES
-    gatt_notify_test.cc
-    h4_packet_test.cc
-    l2cap_coc_test.cc
-    multibuf_writer_test.cc
-    proxy_host_test.cc
-    rfcomm_fcs_test.cc
-    rfcomm_test.cc
-    utils_test.cc
-# LINT.ThenChange(Android.bp, BUILD.bazel, BUILD.gn)
-
   GROUPS
     modules
 )
-
-

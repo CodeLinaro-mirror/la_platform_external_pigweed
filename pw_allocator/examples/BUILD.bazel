@@ -42,7 +42,8 @@ cc_library(
     hdrs = ["public/examples/custom_allocator.h"],
     strip_include_prefix = "public",
     deps = [
-        "//pw_allocator",
+        "//pw_allocator:allocator",
+        "//pw_allocator:deallocator",
         "//pw_log",
         "//pw_result",
     ],
@@ -67,7 +68,7 @@ pw_cc_test(
     srcs = ["basic.cc"],
     deps = [
         ":named_u32",
-        "//pw_allocator",
+        "//pw_allocator:allocator",
         "//pw_allocator:testing",
     ],
 )
@@ -111,7 +112,7 @@ pw_cc_test(
     srcs = ["linker_sections.cc"],
     deps = [
         ":named_u32",
-        "//pw_allocator",
+        "//pw_allocator:allocator",
         "//pw_allocator:first_fit",
         "//pw_allocator:worst_fit",
         "//pw_allocator/block:detailed_block",
@@ -135,7 +136,7 @@ pw_cc_test(
     testonly = True,
     srcs = ["pmr.cc"],
     deps = [
-        "//pw_allocator",
+        "//pw_allocator:allocator",
         "//pw_allocator:pmr_allocator",
         "//pw_allocator:testing",
     ],
@@ -166,7 +167,7 @@ pw_cc_test(
         ":named_u32",
         "//pw_allocator:synchronized_allocator",
         "//pw_allocator:testing",
-        "//pw_assert:check",
+        "//pw_assert",
         "//pw_sync:interrupt_spin_lock",
         "//pw_thread:test_thread_context",
         "//pw_thread:thread",

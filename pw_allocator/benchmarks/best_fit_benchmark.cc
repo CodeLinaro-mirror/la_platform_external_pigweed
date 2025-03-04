@@ -19,6 +19,7 @@
 #include "pw_allocator/benchmarks/benchmark.h"
 #include "pw_allocator/benchmarks/config.h"
 #include "pw_allocator/best_fit.h"
+#include "pw_allocator/deallocator.h"
 
 namespace pw::allocator {
 

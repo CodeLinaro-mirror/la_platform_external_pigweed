@@ -14,7 +14,8 @@
 
 #include "pw_bluetooth_proxy/internal/rfcomm_fcs.h"
 
-#include "pw_unit_test/framework.h"
+#include "pw_bluetooth/emboss_util.h"
+#include "pw_unit_test/framework.h"  // IWYU pragma: keep
 
 namespace pw::bluetooth::proxy {
 

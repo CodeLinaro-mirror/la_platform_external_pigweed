@@ -21,7 +21,6 @@ licenses(["notice"])
 cc_library(
     name = "newlib_os_interface_stubs",
     srcs = ["newlib_os_interface_stubs.cc"],
-    implementation_deps = ["//pw_assert:check"],
     linkopts = [
         "-Wl,--wrap=__sread",
         "-Wl,--wrap=__swrite",
@@ -31,6 +30,7 @@ cc_library(
     # Only built as part of the ARM GCC toolchain.
     tags = ["manual"],
     visibility = ["//visibility:public"],
+    deps = ["//pw_assert"],
     alwayslink = 1,
 )
 

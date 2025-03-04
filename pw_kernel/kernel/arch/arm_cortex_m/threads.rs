@@ -20,7 +20,7 @@ use cortex_m::peripheral::SCB;
 // use pw_log::info;
 
 use crate::arch::arm_cortex_m::{exceptions::FullExceptionFrame, *};
-use crate::scheduler::{self, SchedulerState, Stack, SCHEDULER_STATE};
+use crate::scheduler::{self, SchedulerState, Stack, Thread, SCHEDULER_STATE};
 use crate::sync::spinlock::SpinLockGuard;
 
 // Remember the thread that the cpu is currently running off of.
@@ -28,11 +28,11 @@ use crate::sync::spinlock::SpinLockGuard;
 // pendsv may have a queuing effect in particular contexts, notably when preempting
 // from a higher priority interrupt.
 // Cleared inside the pendsv handler when the context switch actually happens.
-static mut ACTIVE_THREAD: *mut ArchThreadState = core::ptr::null_mut();
-unsafe fn get_active_thread() -> *mut ArchThreadState {
+static mut ACTIVE_THREAD: *mut Thread = core::ptr::null_mut();
+unsafe fn get_active_thread() -> *mut Thread {
     ACTIVE_THREAD
 }
-unsafe fn set_active_thread(t: *mut ArchThreadState) {
+unsafe fn set_active_thread(t: *mut Thread) {
     ACTIVE_THREAD = t;
 }
 
@@ -48,12 +48,12 @@ impl super::super::ThreadState for ArchThreadState {
         }
     }
 
-    unsafe fn context_switch<'a>(
+    fn context_switch<'a>(
         mut sched_state: SpinLockGuard<'a, SchedulerState>,
-        old_thread_state: *mut ArchThreadState,
-        new_thread_state: *mut ArchThreadState,
+        old_thread: &mut Thread,
+        new_thread: &mut Thread,
     ) -> SpinLockGuard<'a, SchedulerState> {
-        assert!(new_thread_state == sched_state.get_current_arch_thread_state());
+        assert!(core::ptr::from_mut(new_thread) == sched_state.get_current_thread());
 
         // info!(
         //     "context switch from thread {:#08x} to thread {:#08x}",
@@ -65,7 +65,7 @@ impl super::super::ThreadState for ArchThreadState {
         // a pendsv only the first time
         unsafe {
             if get_active_thread() == core::ptr::null_mut() {
-                set_active_thread(old_thread_state);
+                set_active_thread(core::ptr::from_mut(old_thread));
 
                 // Queue a PendSV
                 SCB::set_pendsv();
@@ -81,12 +81,7 @@ impl super::super::ThreadState for ArchThreadState {
             // TODO: make sure this always drops interrupts, may need to force a cpsid here.
             drop(sched_state);
 
-            // PendSV should fire and a context switch will happen.
-
-            // ==== TEMPORAL ANOMALY HERE ====
-            //
-            // The next line of code is only executed in this context after the
-            // old thread is context switched back to.
+            // PendSV should fire
 
             sched_state = SCHEDULER_STATE.lock();
         } else {
@@ -166,12 +161,12 @@ unsafe fn pendsv_swap_sp(frame: *mut FullExceptionFrame) -> *mut FullExceptionFr
 
     assert!(at != core::ptr::null_mut());
 
-    (*at).frame = frame;
+    (*at).arch_thread_state.frame = frame;
     set_active_thread(core::ptr::null_mut());
 
     // Return the arch frame for the current thread
-    let mut ss = SCHEDULER_STATE.lock();
-    let newframe = (*ss.get_current_arch_thread_state()).frame;
+    let ss = SCHEDULER_STATE.lock();
+    let newframe = ss.get_current_thread_ref().arch_thread_state.frame;
     // info!(
     //     "new frame {:08x}: pc {:08x}",
     //     newframe as usize,

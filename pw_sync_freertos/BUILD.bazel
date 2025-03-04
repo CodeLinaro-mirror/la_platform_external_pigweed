@@ -31,7 +31,6 @@ cc_library(
         "public_overrides/pw_sync_backend/binary_semaphore_inline.h",
         "public_overrides/pw_sync_backend/binary_semaphore_native.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
         "public_overrides",
@@ -40,7 +39,7 @@ cc_library(
         "//pw_build/constraints/rtos:freertos",
     ],
     deps = [
-        "//pw_assert:assert",
+        "//pw_assert",
         "//pw_chrono:system_clock",
         "//pw_interrupt:context",
         "//pw_sync:binary_semaphore.facade",
@@ -59,7 +58,6 @@ cc_library(
         "public_overrides/pw_sync_backend/counting_semaphore_inline.h",
         "public_overrides/pw_sync_backend/counting_semaphore_native.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
         "public_overrides",
@@ -76,7 +74,7 @@ cc_library(
         ],
     }),
     deps = [
-        "//pw_assert:assert",
+        "//pw_assert",
         "//pw_chrono:system_clock",
         "//pw_interrupt:context",
         "//pw_sync:counting_semaphore.facade",
@@ -100,7 +98,7 @@ cc_library(
         "//pw_build/constraints/rtos:freertos",
     ],
     deps = [
-        "//pw_assert:assert",
+        "//pw_assert",
         "//pw_interrupt:context",
         "//pw_sync:mutex.facade",
         "@freertos",
@@ -119,7 +117,6 @@ cc_library(
         "public_overrides/thread_notification/pw_sync_backend/thread_notification_inline.h",
         "public_overrides/thread_notification/pw_sync_backend/thread_notification_native.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
         "public_overrides/thread_notification",
@@ -129,7 +126,7 @@ cc_library(
     ],
     deps = [
         ":config_override",
-        "//pw_assert:assert",
+        "//pw_assert",
         "//pw_interrupt:context",
         "//pw_polyfill",
         "//pw_sync:interrupt_spin_lock",
@@ -153,7 +150,6 @@ cc_library(
         "public/pw_sync_freertos/timed_thread_notification_inline.h",
         "public_overrides/timed_thread_notification/pw_sync_backend/timed_thread_notification_inline.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
         "public_overrides/timed_thread_notification",
@@ -162,6 +158,7 @@ cc_library(
         "//pw_build/constraints/rtos:freertos",
     ],
     deps = [
+        "//pw_assert",
         "//pw_chrono:system_clock",
         "//pw_interrupt:context",
         "//pw_sync:timed_thread_notification.facade",
@@ -178,7 +175,6 @@ cc_library(
         "public/pw_sync_freertos/timed_mutex_inline.h",
         "public_overrides/pw_sync_backend/timed_mutex_inline.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
         "public_overrides",
@@ -187,6 +183,7 @@ cc_library(
         "//pw_build/constraints/rtos:freertos",
     ],
     deps = [
+        "//pw_assert",
         "//pw_chrono:system_clock",
         "//pw_interrupt:context",
         "//pw_sync:mutex",
@@ -206,7 +203,6 @@ cc_library(
         "public_overrides/pw_sync_backend/interrupt_spin_lock_inline.h",
         "public_overrides/pw_sync_backend/interrupt_spin_lock_native.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
         "public_overrides",
@@ -215,6 +211,7 @@ cc_library(
         "//pw_build/constraints/rtos:freertos",
     ],
     deps = [
+        "//pw_assert",
         "//pw_interrupt:context",
         "//pw_sync:interrupt_spin_lock.facade",
         "@freertos",

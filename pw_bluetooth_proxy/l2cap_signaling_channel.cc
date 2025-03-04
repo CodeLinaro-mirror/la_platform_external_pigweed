@@ -26,7 +26,6 @@
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_log/log.h"
 #include "pw_multibuf/allocator.h"
-#include "pw_span/cast.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
 
@@ -234,7 +233,7 @@ void L2capSignalingChannel::HandleDisconnectionReq(
 
 void L2capSignalingChannel::HandleDisconnectionRsp(
     Direction, emboss::L2capDisconnectionRspView cmd) {
-  l2cap_channel_manager_.HandleDisconnectionCompleteLocked(
+  l2cap_channel_manager_.HandleDisconnectionComplete(
       L2capStatusTracker::DisconnectParams{
           .connection_handle = connection_handle(),
           .remote_cid = cmd.source_cid().Read(),
@@ -242,13 +241,7 @@ void L2capSignalingChannel::HandleDisconnectionRsp(
 }
 
 bool L2capSignalingChannel::HandleFlowControlCreditInd(
-    emboss::L2capFlowControlCreditIndView cmd) PW_NO_LOCK_SAFETY_ANALYSIS {
-  // This function is always called with L2capChannelManager channels lock held,
-  // but we can't assert that with annotations since we don't have a complete
-  // type for L2capChannelManager in l2cap_channel.h.
-  // TODO: https://pwbug.dev/390511432 - Figure out way to add annotations to
-  // enforce this invariant.
-
+    emboss::L2capFlowControlCreditIndView cmd) {
   if (!cmd.IsComplete()) {
     PW_LOG_ERROR(
         "Buffer is too small for L2CAP_FLOW_CONTROL_CREDIT_IND. So will "
@@ -256,12 +249,8 @@ bool L2capSignalingChannel::HandleFlowControlCreditInd(
     return false;
   }
 
-  // Since this is called as a result of handling a received packet, the
-  // channels lock is already held so we should use the *Locked variant to
-  // lookup.
-  L2capChannel* found_channel =
-      l2cap_channel_manager_.FindChannelByRemoteCidLocked(connection_handle(),
-                                                          cmd.cid().Read());
+  L2capChannel* found_channel = l2cap_channel_manager_.FindChannelByRemoteCid(
+      connection_handle(), cmd.cid().Read());
   if (found_channel) {
     // If this L2CAP_FLOW_CONTROL_CREDIT_IND is addressed to a channel managed
     // by the proxy, it must be an L2CAP connection-oriented channel.
@@ -273,6 +262,15 @@ bool L2capSignalingChannel::HandleFlowControlCreditInd(
   }
   return false;
 }
+
+namespace {
+
+// TODO: https://pwbug.dev/389724307 - Move to pw utility function once created.
+pw::span<uint8_t> AsUint8Span(ByteSpan s) {
+  return {reinterpret_cast<uint8_t*>(s.data()), s.size_bytes()};
+}
+
+}  // namespace
 
 Status L2capSignalingChannel::SendFlowControlCreditInd(
     uint16_t cid,
@@ -298,7 +296,7 @@ Status L2capSignalingChannel::SendFlowControlCreditInd(
 
   Result<emboss::L2capFlowControlCreditIndWriter> command_view =
       MakeEmbossWriter<emboss::L2capFlowControlCreditIndWriter>(
-          pw::span_cast<uint8_t>(command_span.value()));
+          AsUint8Span(command_span.value()));
   PW_CHECK(command_view->IsComplete());
 
   command_view->command_header().code().Write(
@@ -312,7 +310,7 @@ Status L2capSignalingChannel::SendFlowControlCreditInd(
   command_view->credits().Write(credits);
   PW_CHECK(command_view->Ok());
 
-  StatusWithMultiBuf s = WriteDuringRx(*std::move(command));
+  StatusWithMultiBuf s = Write(*std::move(command));
 
   return s.status;
 }

@@ -459,7 +459,7 @@ class FindMethod(ReadMethod):
 
     def _finder(self) -> str:
         """Type of the finder object for the field type."""
-        raise NotImplementedError()
+        raise NotImplementedError(f'xdd {self.__class__}')
 
 
 class FindStreamMethod(FindMethod):
@@ -1559,9 +1559,6 @@ class Sint64FindMethod(FindMethod):
     def _find_fn(self) -> str:
         return 'FindSint64'
 
-    def _finder(self) -> str:
-        return 'Sint64Finder'
-
 
 class Sint64FindStreamMethod(FindStreamMethod):
     """Method which reads a proto sint64 value."""
@@ -1571,9 +1568,6 @@ class Sint64FindStreamMethod(FindStreamMethod):
 
     def _find_fn(self) -> str:
         return 'FindSint64'
-
-    def _finder(self) -> str:
-        return 'Sint64StreamFinder'
 
 
 class Sint64Property(MessageProperty):
@@ -1664,9 +1658,6 @@ class Sfixed64FindMethod(FindMethod):
     def _find_fn(self) -> str:
         return 'FindSfixed64'
 
-    def _finder(self) -> str:
-        return 'Sfixed64Finder'
-
 
 class Sfixed64FindStreamMethod(FindStreamMethod):
     """Method which reads a proto sfixed64 value."""
@@ -1676,9 +1667,6 @@ class Sfixed64FindStreamMethod(FindStreamMethod):
 
     def _find_fn(self) -> str:
         return 'FindSfixed64'
-
-    def _finder(self) -> str:
-        return 'Sfixed64StreamFinder'
 
 
 class Sfixed64Property(MessageProperty):

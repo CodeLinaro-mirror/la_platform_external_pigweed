@@ -11,6 +11,8 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
+#![no_std]
+#![cfg_attr(test, no_main)]
 #![allow(dead_code)]
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
@@ -159,8 +161,8 @@ impl<T, A: Adapter> UnsafeList<T, A> {
         self.head.is_none()
     }
 
-    unsafe fn get_link_ptr(element: NonNull<T>) -> NonNull<Link> {
-        let element_ptr: NonNull<Link> = core::mem::transmute::<NonNull<T>, NonNull<Link>>(element);
+    unsafe fn get_link_ptr(element: &T) -> NonNull<Link> {
+        let element_ptr: NonNull<Link> = core::mem::transmute::<&T, NonNull<Link>>(element);
         element_ptr.byte_add(A::LINK_OFFSET)
     }
 
@@ -172,66 +174,58 @@ impl<T, A: Adapter> UnsafeList<T, A> {
         link.byte_sub(A::LINK_OFFSET).as_ptr() as *mut T
     }
 
-    /// unchecked means:
-    /// * we don't `assert!((*element_ptr.as_ptr()).is_unlinked());`
-    /// * we don't check that `element` is non-null.
+    /// unchecked means we don't `assert!((*element_ptr.as_ptr()).is_unlinked());`
     ///
     /// # Safety
     /// It is up to the caller to ensure exclusive access to the list and its
     /// members.
-    /// It is up to the caller to ensure the element is not in a list.
-    /// It is up to the caller to ensure the element is non-null.
-    pub unsafe fn push_front_unchecked(&mut self, element: *mut T) {
-        let element = NonNull::new_unchecked(element);
-        let link_ptr = Self::get_link_ptr(element);
+    /// It is up to the caller to ensure the element is not in a list
+    pub unsafe fn push_front_unchecked(&mut self, element: &mut T) {
+        let element_ptr = Self::get_link_ptr(element);
 
         // Link up the added element.
-        (*link_ptr.as_ptr()).set_next(self.head);
-        (*link_ptr.as_ptr()).set_prev(None);
+        (*element_ptr.as_ptr()).set_next(self.head);
+        (*element_ptr.as_ptr()).set_prev(None);
 
         match self.head {
             // If `head` was `None`, the list is empty and `tail` should point
             // to the added element.
-            None => self.tail = Some(link_ptr),
+            None => self.tail = Some(element_ptr),
 
             // If `head` is not `None`, point the previous `head` to the added
             // element.
-            Some(head) => (*head.as_ptr()).set_prev(Some(link_ptr)),
+            Some(head) => (*head.as_ptr()).set_prev(Some(element_ptr)),
         }
 
         // Finally point `head` to the added element.
-        self.head = Some(link_ptr);
+        self.head = Some(element_ptr);
     }
 
-    /// unchecked means:
-    /// * we don't `assert!((*element_ptr.as_ptr()).is_unlinked());`
-    /// * we don't check that `element` is non-null.
+    /// unchecked means we don't `assert!((*element_ptr.as_ptr()).is_unlinked());`
     ///
     /// # Safety
     /// It is up to the caller to ensure exclusive access to the list and its
     /// members.
-    /// It is up to the caller to ensure the element is not in a list.
-    /// It is up to the caller to ensure the element is non-null.
-    pub unsafe fn push_back_unchecked(&mut self, element: *mut T) {
-        let element = NonNull::new_unchecked(element);
-        let link_ptr = Self::get_link_ptr(element);
+    /// It is up to the caller to ensure the element is not in a list
+    pub unsafe fn push_back_unchecked(&mut self, element: &mut T) {
+        let element_ptr = Self::get_link_ptr(element);
 
         // Link up the added element.
-        (*link_ptr.as_ptr()).set_next(None);
-        (*link_ptr.as_ptr()).set_prev(self.tail);
+        (*element_ptr.as_ptr()).set_next(None);
+        (*element_ptr.as_ptr()).set_prev(self.tail);
 
         match self.tail {
             // If `tail` was `None`, the list is empty and `head` should point
             // to the added element.
-            None => self.head = Some(link_ptr),
+            None => self.head = Some(element_ptr),
 
             // If `tail` is not `None`, point the previous `tail` to the added
             // element.
-            Some(tail) => (*tail.as_ptr()).set_next(Some(link_ptr)),
+            Some(tail) => (*tail.as_ptr()).set_next(Some(element_ptr)),
         }
 
         // Finally point `tail` to the added element.
-        self.tail = Some(link_ptr);
+        self.tail = Some(element_ptr);
     }
 
     /// unlinks element from the linked list.
@@ -240,13 +234,11 @@ impl<T, A: Adapter> UnsafeList<T, A> {
     /// It is up to the caller to ensure exclusive access to the list and its
     /// members.
     /// It is up to the caller to ensure the element is in the list
-    /// It is up to the caller to ensure the element is non-null.
-    pub unsafe fn unlink_element(&mut self, element: *mut T) {
-        let element = NonNull::new_unchecked(element);
-        let link_ptr = Self::get_link_ptr(element);
+    pub unsafe fn unlink_element(&mut self, element: &T) {
+        let element_ptr = Self::get_link_ptr(element);
 
-        let prev = (*link_ptr.as_ptr()).get_prev();
-        let next = (*link_ptr.as_ptr()).get_next();
+        let prev = (*element_ptr.as_ptr()).get_prev();
+        let next = (*element_ptr.as_ptr()).get_next();
 
         match prev {
             // Element is at the head of the list
@@ -263,9 +255,6 @@ impl<T, A: Adapter> UnsafeList<T, A> {
             // Element has elements after it in the list.
             Some(next_ptr) => (*next_ptr.as_ptr()).set_prev(prev),
         }
-
-        (*link_ptr.as_ptr()).set_next(None);
-        (*link_ptr.as_ptr()).set_prev(None);
     }
 
     /// # Safety
@@ -315,7 +304,7 @@ impl<T, A: Adapter> UnsafeList<T, A> {
             let next = (*cur_ptr.as_ptr()).get_next();
 
             if !callback(&mut *element) {
-                self.unlink_element(element);
+                self.unlink_element(&*element);
             }
 
             cur = next;
@@ -330,13 +319,16 @@ impl<T, A: Adapter> UnsafeList<T, A> {
     /// # Safety
     /// It is up to the caller to ensure exclusive access to the list and its
     /// members.
-    pub unsafe fn pop_head(&mut self) -> Option<*mut T> {
+    pub unsafe fn pop_head<'a>(&mut self) -> Option<&'a mut T> {
         let cur = self.head?;
 
         let element = Self::get_element_mut(cur);
 
-        self.unlink_element(element);
-        Some(element)
+        self.unlink_element(&*element);
+        let element_ptr = Self::get_link_ptr(&*element);
+        (*element_ptr.as_ptr()).set_next(None);
+        (*element_ptr.as_ptr()).set_prev(None);
+        Some(&mut *element)
     }
 }
 

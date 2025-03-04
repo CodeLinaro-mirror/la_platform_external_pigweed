@@ -22,8 +22,8 @@ namespace {
 
 pw::sync::Mutex g_peripheral_lock;
 
-bt::hci::DiscoveryFilter DiscoveryFilterFrom(const Central::ScanFilter& in) {
-  bt::hci::DiscoveryFilter out;
+bt::gap::DiscoveryFilter DiscoveryFilterFrom(const Central::ScanFilter& in) {
+  bt::gap::DiscoveryFilter out;
   if (in.service_uuid.has_value()) {
     bt::UUID uuid = internal::UuidFrom(in.service_uuid.value());
     out.set_service_uuids(std::vector<bt::UUID>{std::move(uuid)});
@@ -166,11 +166,20 @@ async2::OnceReceiver<Central::ScanStartResult> Central::Scan(
         pw::unexpected(StartScanError::kInvalidParameters));
   }
 
+  // Convert options to filters now because options contains non-owning views
+  // that won't be valid in callbacks.
+  std::vector<bt::gap::DiscoveryFilter> discovery_filters;
+  for (const ScanFilter& filter : options.filters) {
+    discovery_filters.emplace_back(DiscoveryFilterFrom(filter));
+  }
+
   auto [result_sender, result_receiver] =
       async2::MakeOnceSenderAndReceiver<Central::ScanStartResult>();
 
   auto callback =
-      [self = self_, sender = std::move(result_sender)](
+      [self = self_,
+       sender = std::move(result_sender),
+       filters = std::move(discovery_filters)](
           std::unique_ptr<bt::gap::LowEnergyDiscoverySession> session) mutable {
         // callback will always be run on the Bluetooth thread
 
@@ -192,6 +201,7 @@ async2::OnceReceiver<Central::ScanStartResult> Central::Scan(
           std::lock_guard guard(lock());
           auto [iter, emplaced] = self->scans_.try_emplace(session->scan_id(),
                                                            std::move(session),
+                                                           std::move(filters),
                                                            scan_handle_raw_ptr,
                                                            session->scan_id(),
                                                            &self.get());
@@ -201,25 +211,15 @@ async2::OnceReceiver<Central::ScanStartResult> Central::Scan(
         sender.emplace(std::move(scan_handle_ptr));
       };
 
-  // Convert options to filters now because options contains non-owning views
-  // that won't be valid in callbacks.
-  std::vector<bt::hci::DiscoveryFilter> discovery_filters;
-  discovery_filters.reserve(options.filters.size());
-  for (const ScanFilter& filter : options.filters) {
-    discovery_filters.emplace_back(DiscoveryFilterFrom(filter));
-  }
-
-  async::TaskFunction task_fn = [self = self_,
-                                 filters = std::move(discovery_filters),
-                                 active,
-                                 cb = std::move(callback)](
-                                    async::Context&, Status status) mutable {
-    if (status.ok()) {
-      // TODO: https://pwbug.dev/377301546 - Support configuring interval,
-      // window, and PHY.
-      self->adapter_->le()->StartDiscovery(active, filters, std::move(cb));
-    }
-  };
+  async::TaskFunction task_fn =
+      [self = self_, active, cb = std::move(callback)](async::Context&,
+                                                       Status status) mutable {
+        if (status.ok()) {
+          // TODO: https://pwbug.dev/377301546 - Support configuring interval,
+          // window, and PHY.
+          self->adapter_->le()->StartDiscovery(active, std::move(cb));
+        }
+      };
   Status post_status = heap_dispatcher_.Post(std::move(task_fn));
   PW_CHECK_OK(post_status);
 
@@ -262,13 +262,15 @@ Central::ScanHandleImpl::PendResult(async2::Context& cx) {
 
 Central::ScanState::ScanState(
     std::unique_ptr<bt::gap::LowEnergyDiscoverySession> session,
+    std::vector<bt::gap::DiscoveryFilter> filters,
     ScanHandleImpl* scan_handle,
     uint16_t scan_id,
     Central* central)
     : scan_id_(scan_id),
       scan_handle_(scan_handle),
       central_(central),
-      session_(std::move(session)) {
+      session_(std::move(session)),
+      filters_(std::move(filters)) {
   session_->SetResultCallback(
       [this](const bt::gap::Peer& peer) { OnScanResult(peer); });
   session_->set_error_callback([this]() { OnError(); });
@@ -290,15 +292,20 @@ void Central::ScanState::OnScanResult(const bt::gap::Peer& peer) {
   if (!scan_handle_) {
     return;
   }
-
-  std::optional<Central::ScanResult> scan_result =
-      ScanResultFrom(peer, central_->allocator_);
-  if (!scan_result.has_value()) {
-    return;
+  for (const bt::gap::DiscoveryFilter& filter : filters_) {
+    if (filter.MatchLowEnergyResult(peer.le()->parsed_advertising_data(),
+                                    peer.connectable(),
+                                    peer.rssi())) {
+      std::optional<Central::ScanResult> scan_result =
+          ScanResultFrom(peer, central_->allocator_);
+      if (!scan_result.has_value()) {
+        return;
+      }
+      scan_handle_->QueueScanResultLocked(std::move(scan_result.value()));
+      scan_handle_->WakeLocked();
+      return;
+    }
   }
-
-  scan_handle_->QueueScanResultLocked(std::move(scan_result.value()));
-  scan_handle_->WakeLocked();
 }
 
 void Central::ScanState::OnError() {

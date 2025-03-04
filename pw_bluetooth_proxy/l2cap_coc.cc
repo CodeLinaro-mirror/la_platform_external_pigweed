@@ -18,7 +18,7 @@
 #include <cstdint>
 #include <mutex>
 
-#include "pw_assert/check.h"
+#include "pw_assert/check.h"  // IWYU pragma: keep
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
@@ -142,7 +142,6 @@ pw::Status L2capCoc::SendAdditionalRxCredits(uint16_t additional_rx_credits) {
         rx_total_credits_,
         rx_remaining_credits_);
   }
-  DrainChannelQueuesIfNewTx();
   return status;
 }
 
@@ -462,7 +461,7 @@ void L2capCoc::AddTxCredits(uint16_t credits) {
     tx_credits_ += credits;
   }
   if (credits_previously_zero) {
-    ReportNewTxPacketsOrCredits();
+    ReportPacketsMayBeReadyToSend();
   }
 }
 

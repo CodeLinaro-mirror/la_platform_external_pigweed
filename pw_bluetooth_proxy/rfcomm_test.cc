@@ -25,7 +25,7 @@
 #include "pw_containers/flat_map.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
-#include "pw_unit_test/framework.h"
+#include "pw_unit_test/framework.h"  // IWYU pragma: keep
 
 namespace pw::bluetooth::proxy {
 namespace {

@@ -16,7 +16,7 @@
 
 #include <mutex>
 
-#include "pw_assert/check.h"
+#include "pw_assert/check.h"  // IWYU pragma: keep
 
 namespace pw::bluetooth::proxy {
 

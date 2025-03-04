@@ -69,10 +69,6 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
       bool valid{};  // A request is in-flight
       Function<void(StatusWithSize status)> callback;
     } request{};
-    struct {
-      bool valid{};
-      Function<void(Status status)> callback;
-    } flush_request{};
   };
 
   enum class DmaRxTarget {
@@ -135,9 +131,6 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
       PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
 
   bool ClearRxDmaInterrupt() PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
-
-  bool CompleteFlushRequest(Status status)
-      PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
 
   void TriggerReadDmaIntoRingBuffer()
       PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);

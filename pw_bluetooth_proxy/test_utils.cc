@@ -29,9 +29,10 @@
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
 #include "pw_bluetooth_proxy/proxy_host.h"
+#include "pw_function/function.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
-#include "pw_unit_test/framework.h"
+#include "pw_unit_test/framework.h"  // IWYU pragma: keep
 
 namespace pw::bluetooth::proxy {
 

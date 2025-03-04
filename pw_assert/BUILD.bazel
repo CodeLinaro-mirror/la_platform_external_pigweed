@@ -42,15 +42,10 @@ cc_library(
         "public/pw_assert/internal/check_impl.h",
         "public/pw_assert/short.h",
     ],
-    deprecation = "This target will be removed soon; depend on //pw_assert:assert and/or //pw_assert:check instead.",
     strip_include_prefix = "public",
-    tags = [
-        "manual",
-        "noclangtidy",
-    ],
+    tags = ["noclangtidy"],
     deps = [
         ":assert_backend",
-        ":check",
         ":check_backend",
         ":config",
         "//pw_preprocessor",
@@ -174,7 +169,7 @@ cc_library(
     strip_include_prefix = "public",
     visibility = ["//visibility:private"],
     deps = [
-        ":assert",
+        "//pw_assert:assert",
         "//pw_preprocessor",
     ],
 )
@@ -232,9 +227,9 @@ pw_cc_test(
     ],
     tags = ["noclangtidy"],
     deps = [
-        ":assert",
         ":config",
         ":facade",
+        "//pw_assert",
         "//pw_compilation_testing:negative_compilation_testing",
         "//pw_preprocessor",
         "//pw_result",
@@ -251,8 +246,7 @@ pw_cc_test(
         "assert_backend_compile_test_c.c",
     ],
     deps = [
-        ":assert",
-        ":check",
+        "//pw_assert",
         "//pw_status",
     ],
 )

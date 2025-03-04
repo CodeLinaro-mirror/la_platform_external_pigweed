@@ -30,10 +30,8 @@ using TestingBase = bt::testing::FakeDispatcherControllerTest<FakeController>;
 constexpr pw::chrono::SystemClock::duration kPwScanResponseTimeout =
     std::chrono::seconds(2);
 
-const StaticByteBuffer kPlainAdvDataBytes(
-    5, bt::DataType::kCompleteLocalName, 'T', 'e', 's', 't');
-const StaticByteBuffer kPlainScanRspBytes(
-    5, bt::DataType::kCompleteLocalName, 'D', 'a', 't', 'a');
+const StaticByteBuffer kPlainAdvDataBytes('T', 'e', 's', 't');
+const StaticByteBuffer kPlainScanRspBytes('D', 'a', 't', 'a');
 
 const DeviceAddress kPublicAddr(DeviceAddress::Type::kLEPublic, {1});
 

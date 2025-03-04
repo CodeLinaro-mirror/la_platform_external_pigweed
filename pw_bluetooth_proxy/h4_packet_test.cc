@@ -18,7 +18,7 @@
 
 #include "lib/stdcompat/utility.h"
 #include "pw_bluetooth/hci_h4.emb.h"
-#include "pw_unit_test/framework.h"
+#include "pw_unit_test/framework.h"  // IWYU pragma: keep
 
 namespace pw::bluetooth::proxy {
 

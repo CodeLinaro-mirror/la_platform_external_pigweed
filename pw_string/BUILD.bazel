@@ -86,10 +86,7 @@ cc_library(
     ],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
-    deps = [
-        "//pw_assert:assert",
-        "//pw_preprocessor",
-    ],
+    deps = ["//pw_assert"],
 )
 
 cc_library(
@@ -118,6 +115,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":builder",
+        "//pw_assert",
         "//pw_result",
         "//pw_span",
         "//pw_status",
@@ -133,7 +131,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":string",
-        "//pw_assert:assert",
+        "//pw_assert",
         "//pw_result",
         "//pw_span",
         "//pw_status",

@@ -49,14 +49,12 @@ constexpr pw::chrono::SystemClock::duration kPwScanResponseTimeout =
 static_assert(kScanResponseTimeout < kScanPeriod,
               "expected a smaller scan response timeout for testing");
 
-const StaticByteBuffer kPlainAdvDataBytes(
-    5, bt::DataType::kCompleteLocalName, 'T', 'e', 's', 't');
-const StaticByteBuffer kPlainScanRspBytes(
-    5, bt::DataType::kCompleteLocalName, 'D', 'a', 't', 'a');
+const StaticByteBuffer kPlainAdvDataBytes('T', 'e', 's', 't');
+const StaticByteBuffer kPlainScanRspBytes('D', 'a', 't', 'a');
 
-const std::string kPlainAdvData = kPlainAdvDataBytes.ToString();
-const std::string kPlainScanRsp = kPlainScanRspBytes.ToString();
-const std::string kAdvDataAndScanRsp = kPlainAdvData + kPlainScanRsp;
+constexpr char kPlainAdvData[] = "Test";
+constexpr char kPlainScanRsp[] = "Data";
+constexpr char kAdvDataAndScanRsp[] = "TestData";
 
 const DeviceAddress kPublicAddress1(DeviceAddress::Type::kLEPublic, {1});
 const DeviceAddress kPublicAddress2(DeviceAddress::Type::kLEPublic, {2});
@@ -169,7 +167,6 @@ class LowEnergyScannerTest : public TestingBase,
     // Generates ADV_IND
     fake_peer =
         std::make_unique<FakePeer>(kRandomAddress2, dispatcher(), true, true);
-    fake_peer->set_advertising_data(kPlainAdvDataBytes);
     fake_peer->set_scan_response(kPlainScanRspBytes);
     test_device()->AddPeer(std::move(fake_peer));
 
@@ -505,7 +502,7 @@ TYPED_TEST(LowEnergyScannerTest, ActiveScanResults) {
   {
     const auto& iter = results.find(kRandomAddress2);
     ASSERT_NE(iter, results.end());
-    EXPECT_EQ(kAdvDataAndScanRsp, iter->second.data().ToString());
+    EXPECT_EQ(kPlainScanRsp, iter->second.data().ToString());
     EXPECT_EQ(kRandomAddress2, iter->second.address());
     EXPECT_TRUE(iter->second.connectable());
     results.erase(iter);
@@ -624,7 +621,7 @@ TYPED_TEST(LowEnergyScannerTest, PassiveScanResults) {
   {
     const auto& iter = results.find(kRandomAddress2);
     ASSERT_NE(iter, results.end());
-    EXPECT_EQ(kPlainAdvData, iter->second.data().ToString());
+    EXPECT_EQ("", iter->second.data().ToString());
     EXPECT_EQ(kRandomAddress2, iter->second.address());
     EXPECT_TRUE(iter->second.connectable());
     results.erase(iter);

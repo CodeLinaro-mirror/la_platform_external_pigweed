@@ -1,4 +1,4 @@
-// Copyright 2025 The Pigweed Authors
+// Copyright 2024 The Pigweed Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not
 // use this file except in compliance with the License. You may obtain a copy of
@@ -12,14 +12,17 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#include "pw_bluetooth_sapphire/null_lease_provider.h"
+#include "pw_allocator/deallocator.h"
 
-#include "pw_unit_test/framework.h"  // IWYU pragma: keep
+namespace pw::allocator::internal {
 
-using Lease = pw::bluetooth_sapphire::Lease;
-
-TEST(NullLeaseProviderTest, NullLeaseProvider) {
-  pw::bluetooth_sapphire::NullLeaseProvider provider;
-  pw::Result<Lease> lease = PW_SAPPHIRE_ACQUIRE_LEASE(provider, "lease_name");
-  ASSERT_TRUE(lease.ok());
+bool BaseUniquePtr::HasCapability(Deallocator* deallocator,
+                                  Capability capability) {
+  return deallocator->HasCapability(capability);
 }
+
+void BaseUniquePtr::Deallocate(Deallocator* deallocator, void* ptr) {
+  deallocator->Deallocate(ptr);
+}
+
+}  // namespace pw::allocator::internal
