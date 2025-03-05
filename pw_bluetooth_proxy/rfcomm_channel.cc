@@ -16,7 +16,7 @@
 
 #include <mutex>
 
-#include "pw_assert/check.h"  // IWYU pragma: keep
+#include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
@@ -273,7 +273,7 @@ bool RfcommChannel::DoHandlePduFromController(pw::span<uint8_t> l2cap_pdu) {
   }
 
   if (credits_previously_zero) {
-    ReportPacketsMayBeReadyToSend();
+    ReportNewTxPacketsOrCredits();
   }
 
   return true;
