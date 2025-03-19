@@ -18,6 +18,7 @@ include($ENV{PW_ROOT}/pw_async2/backend.cmake)
 pw_add_library(pw_async2.poll INTERFACE
   HEADERS
     public/pw_async2/poll.h
+    public/pw_async2/internal/poll_internal.h
   PUBLIC_DEPS
     pw_polyfill
     pw_string.to_string
@@ -193,6 +194,29 @@ if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
       pw_async2.coro_or_else_task
       pw_async2.dispatcher
       pw_allocator.null_allocator
+      pw_allocator.testing
+  )
+
+  pw_add_library(pw_async2.pend_func_awaitable INTERFACE
+    HEADERS
+      public/pw_async2/pend_func_task.h
+    PUBLIC_DEPS
+      pw_async2.dispatcher
+      pw_async2.poll
+      pw_function
+    PUBLIC_INCLUDES
+      public
+  )
+
+  pw_add_test(pw_async2.pend_func_awaitable_test
+    SOURCES
+      pend_func_awaitable_test.cc
+    PRIVATE_DEPS
+      pw_async2.coro
+      pw_async2.coro_or_else_task
+      pw_async2.dispatcher
+      pw_async2.pend_func_awaitable
+      pw_async2.poll
       pw_allocator.testing
   )
 endif()

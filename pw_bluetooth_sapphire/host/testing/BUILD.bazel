@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
@@ -77,7 +78,7 @@ cc_library(
     ],
     strip_include_prefix = "public",
     target_compatible_with = select({
-        "//pw_unit_test:googletest_only": [],
+        "//pw_unit_test:backend_is_googletest": [],
         "@platforms//os:fuchsia": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
@@ -186,7 +187,7 @@ cc_library(
         "//pw_unit_test:googletest",
     ],
     target_compatible_with = select({
-        "//pw_unit_test:googletest_only": [],
+        "//pw_unit_test:backend_is_googletest": [],
         "@platforms//os:fuchsia": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
@@ -211,7 +212,7 @@ cc_library(
     ],
     strip_include_prefix = "public",
     target_compatible_with = select({
-        "//pw_unit_test:googletest_only": [],
+        "//pw_unit_test:backend_is_googletest": [],
         "@platforms//os:fuchsia": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),

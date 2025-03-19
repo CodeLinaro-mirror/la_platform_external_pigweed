@@ -45,6 +45,10 @@ bt::gap::DiscoveryFilter DiscoveryFilterFrom(const Central::ScanFilter& in) {
   if (in.max_path_loss.has_value()) {
     out.set_pathloss(in.max_path_loss.value());
   }
+  if (in.solicitation_uuid.has_value()) {
+    bt::UUID uuid = UuidFrom(in.solicitation_uuid.value());
+    out.set_solicitation_uuids(std::vector<bt::UUID>{std::move(uuid)});
+  }
   return out;
 }
 
@@ -122,7 +126,7 @@ async2::OnceReceiver<Central::ConnectResult> Central::Connect(
 }
 
 async2::OnceReceiver<Central::ScanStartResult> Central::Scan(
-    ScanOptions options) {
+    const ScanOptions& options) {
   // TODO: https://pwbug.dev/377301546 - Support the different types of active
   // scans.
   bool active = (options.scan_type != ScanType::kPassive);
@@ -160,17 +164,16 @@ async2::OnceReceiver<Central::ScanStartResult> Central::Scan(
           return;
         }
 
-        uint16_t scan_id = self->next_scan_id_++;
         ScanHandleImpl* scan_handle_raw_ptr =
-            new ScanHandleImpl(scan_id, &self.get());
+            new ScanHandleImpl(session->scan_id(), &self.get());
         ScanHandle::Ptr scan_handle_ptr(scan_handle_raw_ptr);
         {
           std::lock_guard guard(lock());
-          auto [iter, emplaced] = self->scans_.try_emplace(scan_id,
+          auto [iter, emplaced] = self->scans_.try_emplace(session->scan_id(),
                                                            std::move(session),
                                                            std::move(filters),
                                                            scan_handle_raw_ptr,
-                                                           scan_id,
+                                                           session->scan_id(),
                                                            &self.get());
           PW_CHECK(emplaced);
         }

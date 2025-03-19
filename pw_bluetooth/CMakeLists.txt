@@ -253,7 +253,7 @@ emboss_cc_library(pw_bluetooth.emboss_snoop
     public
 )
 
-pw_add_library("pw_bluetooth.emboss_hci_group" INTERFACE
+pw_add_library(pw_bluetooth.emboss_hci_group INTERFACE
   PUBLIC_DEPS
     pw_bluetooth.emboss_hci_android
     pw_bluetooth.emboss_hci_commands
@@ -273,15 +273,17 @@ pw_add_library(pw_bluetooth.snoop STATIC
   PUBLIC_DEPS
     pw_assert.check
     pw_bluetooth_proxy
+    pw_bluetooth.emboss_snoop
     pw_chrono.system_clock
     pw_containers.inline_var_len_entry_queue
     pw_hex_dump
     pw_log
     pw_sync.mutex
-    pw_bluetooth.emboss_snoop
+    pw_sync.virtual_basic_lockable
+    pw_result
 )
 
-pw_target_link_targets("pw_bluetooth._public_config"
+pw_target_link_targets(pw_bluetooth
   INTERFACE
     pw_bluetooth.emboss_att
     pw_bluetooth.emboss_hci_android

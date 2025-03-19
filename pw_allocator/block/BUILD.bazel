@@ -12,12 +12,10 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
-package(
-    default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
-)
+package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
@@ -26,7 +24,7 @@ cc_library(
     hdrs = ["public/pw_allocator/block/result.h"],
     strip_include_prefix = "public",
     deps = [
-        "//pw_allocator:config",
+        "//pw_allocator:hardening",
         "//pw_assert",
         "//pw_status",
     ],
@@ -39,7 +37,7 @@ cc_library(
     deps = [
         ":allocatable",
         "//pw_allocator:deallocator",
-        "//pw_assert",
+        "//pw_allocator:hardening",
         "//pw_bytes:alignment",
         "//pw_status",
         "//third_party/fuchsia:stdcompat",
@@ -54,7 +52,7 @@ cc_library(
         ":contiguous",
         ":result",
         "//pw_allocator:deallocator",
-        "//pw_assert",
+        "//pw_allocator:hardening",
         "//pw_bytes:alignment",
         "//pw_status",
     ],
@@ -64,11 +62,13 @@ cc_library(
     name = "basic",
     srcs = ["basic.cc"],
     hdrs = ["public/pw_allocator/block/basic.h"],
+    implementation_deps = ["//pw_assert"],
     strip_include_prefix = "public",
     deps = [
-        "//pw_allocator:config",
-        "//pw_assert",
+        "//pw_allocator:hardening",
         "//pw_bytes:alignment",
+        "//pw_result",
+        "//pw_status",
         "//third_party/fuchsia:stdcompat",
     ],
 )
@@ -77,12 +77,12 @@ cc_library(
     name = "contiguous",
     srcs = ["contiguous.cc"],
     hdrs = ["public/pw_allocator/block/contiguous.h"],
+    implementation_deps = ["//pw_assert"],
     strip_include_prefix = "public",
     deps = [
         ":basic",
+        "//pw_allocator:hardening",
         "//pw_bytes",
-        "//pw_result",
-        "//pw_status",
         "//third_party/fuchsia:stdcompat",
     ],
 )
@@ -100,10 +100,12 @@ cc_library(
     name = "poisonable",
     srcs = ["poisonable.cc"],
     hdrs = ["public/pw_allocator/block/poisonable.h"],
+    implementation_deps = ["//pw_assert"],
     strip_include_prefix = "public",
     deps = [
         ":contiguous",
         "//pw_allocator:config",
+        "//pw_allocator:hardening",
         "//third_party/fuchsia:stdcompat",
     ],
 )
@@ -115,7 +117,7 @@ cc_library(
     deps = [
         ":alignable",
         "//pw_allocator:deallocator",
-        "//pw_assert",
+        "//pw_allocator:hardening",
     ],
 )
 
@@ -131,12 +133,10 @@ cc_library(
         ":iterable",
         ":poisonable",
         ":with_layout",
-        "//pw_allocator:config",
         "//pw_allocator:deallocator",
+        "//pw_allocator:hardening",
         "//pw_assert",
         "//pw_bytes",
-        "//pw_preprocessor",
-        "//pw_result",
         "//pw_status",
     ],
 )
@@ -144,9 +144,14 @@ cc_library(
 cc_library(
     name = "testing",
     testonly = True,
-    hdrs = ["public/pw_allocator/block/testing.h"],
+    hdrs = [
+        "public/pw_allocator/block/testing.h",
+        "public/pw_allocator/block/unit_tests.h",
+    ],
     strip_include_prefix = "public",
     deps = [
+        ":allocatable",
+        ":result",
         "//pw_allocator:testing",
         "//pw_assert",
         "//pw_bytes:alignment",
@@ -161,7 +166,7 @@ pw_cc_test(
     deps = [
         ":basic",
         ":result",
-        "//pw_unit_test",
+        "//pw_status",
     ],
 )
 
@@ -171,8 +176,11 @@ pw_cc_test(
     deps = [
         ":detailed_block",
         ":testing",
+        "//pw_assert",
+        "//pw_bytes",
+        "//pw_bytes:alignment",
         "//pw_span",
-        "//pw_unit_test",
+        "//pw_status",
         "//third_party/fuchsia:stdcompat",
     ],
 )

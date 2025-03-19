@@ -13,13 +13,13 @@
 # the License.
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -43,7 +43,6 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":config",
-        "//pw_assert",
         "//pw_preprocessor",
         "//third_party/fuchsia:fit",
     ],
@@ -55,6 +54,7 @@ pw_cc_test(
     deps = [
         ":pw_function",
         "//pw_compilation_testing:negative_compilation_testing",
+        "//pw_polyfill",
     ],
 )
 

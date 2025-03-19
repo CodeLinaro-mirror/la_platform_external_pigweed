@@ -13,6 +13,7 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
@@ -117,9 +118,11 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":base64",
+        ":csv",
         ":pw_tokenizer",
         "//pw_bytes",
         "//pw_bytes:bit",
+        "//pw_log",
         "//pw_preprocessor",
         "//pw_result",
         "//pw_span",
@@ -140,10 +143,7 @@ cc_library(
 pw_cc_test(
     name = "csv_test",
     srcs = ["csv_test.cc"],
-    deps = [
-        ":csv",
-        "//pw_unit_test",
-    ],
+    deps = [":csv"],
 )
 
 proto_library(
@@ -197,7 +197,6 @@ pw_cc_test(
         ":pw_tokenizer",
         "//pw_polyfill",
         "//pw_preprocessor",
-        "//pw_unit_test",
     ],
 )
 
@@ -209,7 +208,6 @@ pw_cc_test(
     deps = [
         ":base64",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -227,7 +225,6 @@ pw_cc_test(
     }),
     deps = [
         ":decoder",
-        "//pw_unit_test",
         "//pw_varint",
     ],
 )
@@ -256,7 +253,6 @@ pw_cc_test(
         ":decoder",
         ":detokenizer_elf_test_blob",
         "//pw_stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -273,10 +269,7 @@ pw_cc_fuzz_test(
 pw_cc_test(
     name = "encode_args_test",
     srcs = ["encode_args_test.cc"],
-    deps = [
-        ":pw_tokenizer",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_tokenizer"],
 )
 
 pw_cc_test(
@@ -289,7 +282,6 @@ pw_cc_test(
     deps = [
         ":pw_tokenizer",
         "//pw_preprocessor",
-        "//pw_unit_test",
     ],
 )
 
@@ -298,10 +290,7 @@ pw_cc_test(
     srcs = [
         "simple_tokenize_test.cc",
     ],
-    deps = [
-        ":pw_tokenizer",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_tokenizer"],
 )
 
 pw_cc_test(
@@ -309,10 +298,7 @@ pw_cc_test(
     srcs = [
         "token_database_test.cc",
     ],
-    deps = [
-        ":decoder",
-        "//pw_unit_test",
-    ],
+    deps = [":decoder"],
 )
 
 pw_cc_test(
@@ -327,7 +313,6 @@ pw_cc_test(
     deps = [
         ":pw_tokenizer",
         "//pw_preprocessor",
-        "//pw_unit_test",
         "//pw_varint",
     ],
 )
@@ -335,10 +320,7 @@ pw_cc_test(
 pw_cc_test(
     name = "tokenize_c99_test",
     srcs = ["tokenize_c99_test_entry_point.cc"],
-    deps = [
-        ":tokenize_c99_test_c",
-        "//pw_unit_test",
-    ],
+    deps = [":tokenize_c99_test_c"],
 )
 
 pw_cc_test(
@@ -349,7 +331,6 @@ pw_cc_test(
     deps = [
         "//pw_compilation_testing:negative_compilation_testing",
         "//pw_tokenizer",
-        "//pw_unit_test",
     ],
 )
 

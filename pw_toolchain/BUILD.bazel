@@ -13,14 +13,12 @@
 # the License.
 
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
-package(
-    default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
-)
+package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
@@ -86,9 +84,29 @@ toolchain(
 )
 
 cc_library(
+    name = "constexpr_tag",
+    hdrs = ["public/pw_toolchain/constexpr_tag.h"],
+    strip_include_prefix = "public",
+)
+
+cc_library(
     name = "no_destructor",
     hdrs = ["public/pw_toolchain/no_destructor.h"],
     strip_include_prefix = "public",
+    deps = ["//pw_polyfill"],
+)
+
+cc_library(
+    name = "globals",
+    hdrs = ["public/pw_toolchain/globals.h"],
+    strip_include_prefix = "public",
+)
+
+cc_library(
+    name = "infinite_loop",
+    hdrs = ["public/pw_toolchain/infinite_loop.h"],
+    strip_include_prefix = "public",
+    deps = ["//pw_preprocessor"],
 )
 
 pw_cc_test(
@@ -97,6 +115,28 @@ pw_cc_test(
     deps = [
         ":no_destructor",
         "//pw_assert",
+        "//pw_polyfill",
+    ],
+)
+
+pw_cc_test(
+    name = "globals_test",
+    srcs = ["globals_test.cc"],
+    deps = [
+        ":globals",
+        "//pw_assert",
+        "//pw_polyfill",
+    ],
+)
+
+pw_cc_test(
+    name = "infinite_loop_test",
+    srcs = [
+        "infinite_loop_test.cc",
+        "infinite_loop_test_c.c",
+    ],
+    deps = [
+        ":infinite_loop",
         "//pw_unit_test",
     ],
 )
@@ -106,7 +146,6 @@ cc_library(
     hdrs = ["public/pw_toolchain/internal/sibling_cast.h"],
     strip_include_prefix = "public",
     visibility = ["//:__subpackages__"],  # Restrict to Pigweed
-    deps = ["//pw_compilation_testing:negative_compilation_testing"],
 )
 
 pw_cc_test(
@@ -114,7 +153,7 @@ pw_cc_test(
     srcs = ["sibling_cast_test.cc"],
     deps = [
         ":sibling_cast",
-        "//pw_unit_test",
+        "//pw_compilation_testing:negative_compilation_testing",
     ],
 )
 
@@ -129,6 +168,9 @@ cc_library(
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_toolchain/constexpr_tag.h",
+        "public/pw_toolchain/globals.h",
+        "public/pw_toolchain/infinite_loop.h",
         "public/pw_toolchain/no_destructor.h",
     ],
 )
@@ -138,6 +180,7 @@ sphinx_docs_library(
     srcs = [
         "bazel.rst",
         "docs.rst",
+        "globals_test.cc",
         "gn.rst",
     ],
     prefix = "pw_toolchain/",

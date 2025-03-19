@@ -26,12 +26,16 @@
 #include "pw_bluetooth/hci_events.emb.h"
 #include "pw_bluetooth/hci_h4.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
+#include "pw_bluetooth_proxy/basic_l2cap_channel.h"
+#include "pw_bluetooth_proxy/gatt_notify_channel.h"
 #include "pw_bluetooth_proxy/h4_packet.h"
+#include "pw_bluetooth_proxy/internal/l2cap_channel.h"
 #include "pw_bluetooth_proxy/internal/logical_transport.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/l2cap_coc.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
 #include "pw_bluetooth_proxy/proxy_host.h"
+#include "pw_bluetooth_proxy/rfcomm_channel.h"
 #include "pw_containers/flat_map.h"
 #include "pw_function/function.h"
 #include "pw_multibuf/simple_allocator_for_test.h"
@@ -82,7 +86,7 @@ struct KFrameWithStorage {
 };
 
 // Size of sdu_length field in first K-frames.
-constexpr uint8_t kSduLengthFieldSize = 2;
+inline constexpr uint8_t kSduLengthFieldSize = 2;
 
 // Populate a KFrame that encodes a particular segment of `payload` based on the
 // `mps`, or maximum PDU payload size of a segment. `segment_no` is the nth
@@ -103,7 +107,6 @@ template <typename EmbossT>
 Result<EmbossT> CreateAndPopulateToControllerView(H4PacketWithH4& h4_packet,
                                                   emboss::OpCode opcode,
                                                   size_t parameter_total_size) {
-  std::iota(h4_packet.GetHciSpan().begin(), h4_packet.GetHciSpan().end(), 100);
   h4_packet.SetH4Type(emboss::H4PacketType::COMMAND);
   PW_TRY_ASSIGN(auto view, MakeEmbossWriter<EmbossT>(h4_packet.GetHciSpan()));
   view.header().opcode().Write(opcode);
@@ -111,17 +114,21 @@ Result<EmbossT> CreateAndPopulateToControllerView(H4PacketWithH4& h4_packet,
   return view;
 }
 
-// Populate passed H4 event buffer and return Emboss view on it.
+// Populate passed H4 event buffer and return Emboss writer on it. Suitable for
+// use with EmbossT types whose `SizeInBytes()` accurately represents
+// the `parameter_total_size` that should be written (minus `EventHeader` size).
 template <typename EmbossT>
-Result<EmbossT> CreateAndPopulateToHostEventView(H4PacketWithHci& h4_packet,
-                                                 emboss::EventCode event_code) {
-  std::iota(h4_packet.GetHciSpan().begin(), h4_packet.GetHciSpan().end(), 0x10);
+Result<EmbossT> CreateAndPopulateToHostEventWriter(
+    H4PacketWithHci& h4_packet,
+    emboss::EventCode event_code,
+    size_t parameter_total_size = EmbossT::SizeInBytes() -
+                                  emboss::EventHeader::IntrinsicSizeInBytes()) {
   h4_packet.SetH4Type(emboss::H4PacketType::EVENT);
-
   PW_TRY_ASSIGN(auto view, MakeEmbossWriter<EmbossT>(h4_packet.GetHciSpan()));
   view.header().event_code().Write(event_code);
+  view.header().parameter_total_size().Write(parameter_total_size);
   view.status().Write(emboss::StatusCode::SUCCESS);
-  EXPECT_TRUE(view.Ok());
+  EXPECT_TRUE(view.IsComplete());
   return view;
 }
 
@@ -155,6 +162,9 @@ Status SendNumberOfCompletedPackets(
                     nocp_event.GetHciSpan()));
   view.header().event_code().Write(
       emboss::EventCode::NUMBER_OF_COMPLETED_PACKETS);
+  view.header().parameter_total_size().Write(
+      nocp_event.GetHciSpan().size() -
+      emboss::EventHeader::IntrinsicSizeInBytes());
   view.num_handles().Write(kNumConnections);
 
   size_t i = 0;
@@ -206,6 +216,23 @@ Status SendL2capDisconnectRsp(ProxyHost& proxy,
                               uint16_t destination_cid,
                               Direction direction = Direction::kFromHost);
 
+/// Sends an L2CAP B-Frame.
+///
+/// This can be either a complete PDU (pdu_length == payload.size()) or an
+/// initial fragment (pdu_length > payload.size()).
+void SendL2capBFrame(ProxyHost& proxy,
+                     uint16_t handle,
+                     pw::span<const uint8_t> payload,
+                     size_t pdu_length,
+                     uint16_t channel_id);
+
+/// Sends an ACL frame with CONTINUING_FRAGMENT boundary flag.
+///
+/// No L2CAP header is included.
+void SendAclContinuingFrag(ProxyHost& proxy,
+                           uint16_t handle,
+                           pw::span<const uint8_t> payload);
+
 // TODO: https://pwbug.dev/382783733 - Migrate to L2capChannelEvent callback.
 struct CocParameters {
   uint16_t handle = 123;
@@ -231,13 +258,52 @@ struct BasicL2capParameters {
   Function<void(L2capChannelEvent event)>&& event_fn = nullptr;
 };
 
+struct GattNotifyChannelParameters {
+  uint16_t handle = 0xAB;
+  uint16_t attribute_handle = 0xBC;
+  Function<void(L2capChannelEvent event)>&& event_fn = nullptr;
+};
+
+struct RfcommConfigParameters {
+  uint16_t cid = 123;
+  uint16_t max_information_length = 900;
+  uint16_t credits = 10;
+};
+
 struct RfcommParameters {
   uint16_t handle = 123;
-  RfcommChannel::Config rx_config = {
+  RfcommConfigParameters rx_config = {
       .cid = 234, .max_information_length = 900, .credits = 10};
-  RfcommChannel::Config tx_config = {
+  RfcommConfigParameters tx_config = {
       .cid = 456, .max_information_length = 900, .credits = 10};
   uint8_t rfcomm_channel = 3;
+};
+
+// See BuildOneOfEachChannel
+struct OneOfEachChannelParameters {
+  Function<void(multibuf::MultiBuf&& payload)>&& receive_fn = nullptr;
+  pw::Function<void(L2capChannelEvent event)>&& event_fn = nullptr;
+};
+
+// See BuildOneOfEachChannel
+struct OneOfEachChannel {
+  OneOfEachChannel(BasicL2capChannel&& basic,
+                   L2capCoc&& coc,
+                   RfcommChannel&& rfcomm,
+                   GattNotifyChannel&& gatt)
+      : basic_{std::move(basic)},
+        coc_{std::move(coc)},
+        rfcomm_{std::move(rfcomm)},
+        gatt_{std::move(gatt)} {}
+
+  std::vector<L2capChannel*> AllChannels() {
+    return std::vector<L2capChannel*>{&basic_, &coc_, &rfcomm_, &gatt_};
+  }
+
+  BasicL2capChannel basic_;
+  L2capCoc coc_;
+  RfcommChannel rfcomm_;
+  GattNotifyChannel gatt_;
 };
 
 // ########## Test Suites
@@ -255,6 +321,12 @@ class ProxyHostTest : public testing::Test {
   BasicL2capChannel BuildBasicL2capChannel(ProxyHost& proxy,
                                            BasicL2capParameters params);
 
+  Result<GattNotifyChannel> BuildGattNotifyChannelWithResult(
+      ProxyHost& proxy, GattNotifyChannelParameters params);
+
+  GattNotifyChannel BuildGattNotifyChannel(ProxyHost& proxy,
+                                           GattNotifyChannelParameters params);
+
   RfcommChannel BuildRfcomm(
       ProxyHost& proxy,
       RfcommParameters params = {},
@@ -271,6 +343,15 @@ class ProxyHostTest : public testing::Test {
     PW_TEST_EXPECT_OK(multibuf->CopyFrom(as_bytes(buf)));
     return std::move(*multibuf);
   }
+
+  // Builds a struct with one of each channel to support tests across all
+  // of them.
+  //
+  // Note, shared_event_fn is a reference (rather than a rvalue) so it can
+  // be shared across each channel.
+  OneOfEachChannel BuildOneOfEachChannel(
+      ProxyHost& proxy,
+      Function<void(L2capChannelEvent event)>& shared_event_fn);
 
   template <typename T, size_t N>
   pw::multibuf::MultiBuf MultiBufFromArray(const std::array<T, N>& arr) {

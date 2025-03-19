@@ -41,17 +41,17 @@ class PW_LOCKABLE("pw::rpc::internal::RpcLock") RpcLock {
 
 inline RpcLock& rpc_lock() {
   static NoDestructor<RpcLock> lock;
+  static_assert(PW_RPC_USE_GLOBAL_MUTEX != 0 ||
+                std::is_trivially_destructible_v<decltype(lock)>);
   return *lock;
 }
 
-class PW_SCOPED_LOCKABLE
-RpcLockGuard{public : RpcLockGuard()
-                 PW_EXCLUSIVE_LOCK_FUNCTION(rpc_lock()){rpc_lock().lock();
-}  // namespace pw::rpc::internal
+class PW_SCOPED_LOCKABLE RpcLockGuard {
+ public:
+  RpcLockGuard() PW_EXCLUSIVE_LOCK_FUNCTION(rpc_lock()) { rpc_lock().lock(); }
 
-~RpcLockGuard() PW_UNLOCK_FUNCTION(rpc_lock()) { rpc_lock().unlock(); }
-}
-;
+  ~RpcLockGuard() PW_UNLOCK_FUNCTION(rpc_lock()) { rpc_lock().unlock(); }
+};
 
 // Releases the RPC lock, yields, and reacquires it.
 void YieldRpcLock() PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock());

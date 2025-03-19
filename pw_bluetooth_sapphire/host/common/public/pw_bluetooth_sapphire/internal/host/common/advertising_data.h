@@ -47,19 +47,19 @@ enum AdvFlag : uint8_t {
 // See the Core Specification Supplement v9 for more information.
 using AdvFlags = uint8_t;
 
-constexpr uint8_t kDefaultNoAdvFlags = 0;
+inline constexpr uint8_t kDefaultNoAdvFlags = 0;
 
 // The TLV size of the Flags datatype.
-constexpr size_t kTLVFlagsSize = 3;
+inline constexpr size_t kTLVFlagsSize = 3;
 
 // The TLV size of the TX power data type
-constexpr size_t kTLVTxPowerLevelSize = 3;
+inline constexpr size_t kTLVTxPowerLevelSize = 3;
 
 // The TLV size of the appearance data type
-constexpr size_t kTLVAppearanceSize = 4;
+inline constexpr size_t kTLVAppearanceSize = 4;
 
 // The TLV side of the resolvable set identifier data type
-constexpr size_t kTLVResolvableSetIdentifierSize = 8;
+inline constexpr size_t kTLVResolvableSetIdentifierSize = 8;
 
 // Constants for the expected size (in octets) of an
 // advertising/EIR/scan-response data field.
@@ -69,47 +69,50 @@ constexpr size_t kTLVResolvableSetIdentifierSize = 8;
 //
 //  * If a constants contains the word "ElemSize", then the data field is
 //    expected to contain a contiguous array of elements of the specified size.
-constexpr size_t kAppearanceSize = 2;
-constexpr size_t kManufacturerIdSize = 2;
-constexpr size_t kTxPowerLevelSize = 1;
-constexpr size_t kResolvableSetIdentifierSize = 6;
+inline constexpr size_t kAppearanceSize = 2;
+inline constexpr size_t kManufacturerIdSize = 2;
+inline constexpr size_t kTxPowerLevelSize = 1;
+inline constexpr size_t kResolvableSetIdentifierSize = 6;
 
-constexpr size_t kFlagsSizeMin = 1;
-constexpr size_t kManufacturerSpecificDataSizeMin = kManufacturerIdSize;
+inline constexpr size_t kFlagsSizeMin = 1;
+inline constexpr size_t kManufacturerSpecificDataSizeMin = kManufacturerIdSize;
 
-constexpr uint8_t kMaxUint8 = std::numeric_limits<uint8_t>::max();
+inline constexpr uint8_t kMaxUint8 = std::numeric_limits<uint8_t>::max();
 // The maximum length of a friendly name, derived from v5.2, Vol 4, Part
 // E, 7.3.11 and Vol 3, Part C, 12.1
-constexpr uint8_t kMaxNameLength = 248;
+inline constexpr uint8_t kMaxNameLength = 248;
 
 // The minimum length of a Broadcast Name, as defined by Public Broadcast
 // Profile, in bytes.  Defined as 4 UTF-8 characters
-constexpr uint8_t kMinBroadcastNameBytes = 4;
+inline constexpr uint8_t kMinBroadcastNameBytes = 4;
 // The maximum length of a Broadcast Name, as defined by Public Broadcast
 // Profile, in bytes.  Defined as 32 UTF-8 characters
-constexpr uint8_t kMaxBroadcastNameBytes = 128;
+inline constexpr uint8_t kMaxBroadcastNameBytes = 128;
 
 // The length of the entire manufacturer-specific data field must fit in a
 // uint8_t, so the maximum data length is uint8_t::MAX - 1 byte for type - 2
 // bytes for manufacturer ID.
-constexpr uint8_t kMaxManufacturerDataLength = kMaxUint8 - 3;
+inline constexpr uint8_t kMaxManufacturerDataLength = kMaxUint8 - 3;
 
 // The length of the service data field must fit in a uint8_t, so uint8_t::MAX -
 // 1 byte for type.
-constexpr uint8_t kMaxEncodedServiceDataLength = kMaxUint8 - 1;
+inline constexpr uint8_t kMaxEncodedServiceDataLength = kMaxUint8 - 1;
 
 // The length of an encoded URI together with its 1-byte type field must not
 // exceed uint8_t limits
-constexpr uint8_t kMaxEncodedUriLength = kMaxUint8 - 1;
+inline constexpr uint8_t kMaxEncodedUriLength = kMaxUint8 - 1;
 
 // "A packet or data block shall not contain more than one instance for each
 // Service UUID data size." (Core Specification Supplement v9 Part A 1.1.1). For
 // each UUID size, 1 (type byte) + # of UUIDs * UUID size = length of that
 // size's encoded UUIDs. This length must fit in a uint8_t, hence there is a
 // per-UUID-size limit on the # of UUIDs.
-constexpr uint8_t kMax16BitUuids = (kMaxUint8 - 1) / UUIDElemSize::k16Bit;
-constexpr uint8_t kMax32BitUuids = (kMaxUint8 - 1) / UUIDElemSize::k32Bit;
-constexpr uint8_t kMax128BitUuids = (kMaxUint8 - 1) / UUIDElemSize::k128Bit;
+inline constexpr uint8_t kMax16BitUuids =
+    (kMaxUint8 - 1) / UUIDElemSize::k16Bit;
+inline constexpr uint8_t kMax32BitUuids =
+    (kMaxUint8 - 1) / UUIDElemSize::k32Bit;
+inline constexpr uint8_t kMax128BitUuids =
+    (kMaxUint8 - 1) / UUIDElemSize::k128Bit;
 
 // A helper to build Adversiting Data, Scan Response Data, or Extended Inquiry
 // Response Data fields.
@@ -211,6 +214,16 @@ class AdvertisingData {
   // This view is not stable; it should be used only ephemerally.
   // Returns an empty BufferView if no service data is set for |uuid|
   BufferView service_data(const UUID& uuid) const;
+
+  // Add a UUID to the set of services to solicit for from a peer.
+  // These service UUIDs will automatically be compressed to be represented in
+  // the smallest space possible. Returns true if the Service UUID was
+  // successfully added or already existed in the set of advertised services, or
+  // false if the UUID set was full and `uuid` could not be added.
+  [[nodiscard]] bool AddSolicitationUuid(const UUID& uuid);
+
+  // Get a set of the solicitation UUIDs included in this advertisement.
+  std::unordered_set<UUID> solicitation_uuids() const;
 
   // Set Manufacturer specific data for the company identified by |company_id|.
   // Returns false & does not set the data if |data|.size() exceeds
@@ -336,6 +349,7 @@ class AdvertisingData {
       {UUIDElemSize::k16Bit, BoundedUuids(kMax16BitUuids)},
       {UUIDElemSize::k32Bit, BoundedUuids(kMax32BitUuids)},
       {UUIDElemSize::k128Bit, BoundedUuids(kMax128BitUuids)}};
+
   // TODO(armansito): Consider storing the payload in its serialized form and
   // have these point into the structure (see fxbug.dev/42172180).
   std::optional<LocalName> local_name_;
@@ -348,13 +362,15 @@ class AdvertisingData {
   std::unordered_map<UUIDElemSize, BoundedUuids> service_uuids_ =
       kEmptyServiceUuidMap;
 
+  std::unordered_map<UUIDElemSize, BoundedUuids> solicitation_uuids_ =
+      kEmptyServiceUuidMap;
+
   // The length of each manufacturer data buffer is always <=
   // kMaxManufacturerDataLength.
   std::unordered_map<uint16_t, DynamicByteBuffer> manufacturer_data_;
 
   // For each element in `service_data_`, the compact size of the UUID + the
-  // buffer length is always
-  // <= kkMaxEncodedServiceDataLength
+  // buffer length is always <= kkMaxEncodedServiceDataLength
   std::unordered_map<UUID, DynamicByteBuffer> service_data_;
 
   std::unordered_set<std::string> uris_;

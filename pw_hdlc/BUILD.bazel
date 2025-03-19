@@ -12,13 +12,13 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -37,6 +37,8 @@ cc_library(
     ],
     strip_include_prefix = "public",
     deps = [
+        "//pw_assert:assert",
+        "//pw_assert:check",
         "//pw_bytes",
         "//pw_checksum",
         "//pw_log",
@@ -90,13 +92,20 @@ cc_library(
     srcs = [
         "hdlc_sys_io_system_server.cc",
     ],
+    # This target uses those parts of the pw_log_basic interface which are not
+    # part of the interface of pw_log itself, so it's only compatible with
+    # platforms that use pw_log_basic as the pw_log backend.
+    target_compatible_with = select({
+        "//pw_log_basic:is_active_backend": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":default_addresses",
         ":pw_hdlc",
         ":rpc_channel_output",
-        "//pw_assert",
+        "//pw_assert:check",
         "//pw_log",
-        "//pw_log_basic:headers",
+        "//pw_log_basic:extension",
         "//pw_rpc/system_server:facade",
         "//pw_status",
         "//pw_stream:sys_io_stream",
@@ -108,8 +117,8 @@ pw_cc_test(
     srcs = ["encoder_test.cc"],
     deps = [
         ":pw_hdlc",
+        "//pw_bytes",
         "//pw_stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -118,6 +127,7 @@ pw_cc_test(
     srcs = ["decoder_test.cc"],
     deps = [
         ":pw_hdlc",
+        "//pw_bytes",
         "//pw_fuzzer:fuzztest",
         "//pw_result",
         "//pw_stream",
@@ -132,7 +142,6 @@ pw_cc_test(
         "//pw_bytes",
         "//pw_result",
         "//pw_stream",
-        "//pw_unit_test",
         "//pw_varint",
     ],
 )
@@ -142,6 +151,7 @@ pw_cc_test(
     srcs = ["wire_packet_parser_test.cc"],
     deps = [
         ":packet_parser",
+        ":pw_hdlc",
         "//pw_bytes",
     ],
 )
@@ -152,8 +162,8 @@ pw_cc_test(
     deps = [
         ":pw_hdlc",
         ":rpc_channel_output",
+        "//pw_bytes",
         "//pw_stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -187,10 +197,12 @@ pw_cc_test(
         ":router",
         "//pw_allocator:testing",
         "//pw_async2:pend_func_task",
+        "//pw_bytes",
         "//pw_channel:forwarding_channel",
         "//pw_channel:loopback_channel",
+        "//pw_containers:inline_queue",
+        "//pw_containers:vector",
         "//pw_multibuf:simple_allocator",
-        "//pw_unit_test",
     ],
 )
 
