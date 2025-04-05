@@ -25,14 +25,16 @@ pw_add_library(pw_allocator.block.result INTERFACE
     pw_status
 )
 
+# Block mixins
+
 pw_add_library(pw_allocator.block.alignable INTERFACE
   HEADERS
     public/pw_allocator/block/alignable.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
+    pw_allocator
     pw_allocator.block.allocatable
-    pw_allocator.deallocator
     pw_allocator.hardening
     pw_bytes.alignment
     pw_status
@@ -45,9 +47,9 @@ pw_add_library(pw_allocator.block.allocatable INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
+    pw_allocator
     pw_allocator.block.contiguous
     pw_allocator.block.result
-    pw_allocator.deallocator
     pw_allocator.hardening
     pw_bytes.alignment
     pw_status
@@ -117,10 +119,12 @@ pw_add_library(pw_allocator.block.with_layout INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
+    pw_allocator
     pw_allocator.block.alignable
-    pw_allocator.deallocator
     pw_allocator.hardening
 )
+
+# Block implementations
 
 pw_add_library(pw_allocator.block.detailed_block INTERFACE
   HEADERS
@@ -128,6 +132,7 @@ pw_add_library(pw_allocator.block.detailed_block INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
+    pw_allocator
     pw_allocator.block.alignable
     pw_allocator.block.allocatable
     pw_allocator.block.basic
@@ -135,12 +140,13 @@ pw_add_library(pw_allocator.block.detailed_block INTERFACE
     pw_allocator.block.iterable
     pw_allocator.block.poisonable
     pw_allocator.block.with_layout
-    pw_allocator.deallocator
     pw_allocator.hardening
     pw_assert
     pw_bytes
     pw_status
 )
+
+# Testing
 
 pw_add_library(pw_allocator.block.testing INTERFACE
   HEADERS

@@ -482,6 +482,9 @@ gn_chre_googletest_nanopb_sapphire_build = PigweedGnGenNinja(
         pw_function_CONFIG=lambda ctx: '"{}"'.format(
             ctx.root / 'pw_function:enable_dynamic_allocation'
         ),
+        pw_crypto_AES_BACKEND=lambda ctx: '"{}"'.format(
+            ctx.root / 'pw_crypto:aes_boringssl'
+        ),
         pw_bluetooth_sapphire_ENABLED=True,
         pw_C_OPTIMIZATION_LEVELS=_OPTIMIZATION_LEVELS,
     ),
@@ -763,8 +766,9 @@ gn_host_tools = PigweedGnGenNinja(
 
 
 def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
-    build.install_package(ctx, 'nanopb')
     build.install_package(ctx, 'emboss')
+    build.install_package(ctx, 'flatbuffers')
+    build.install_package(ctx, 'nanopb')
 
     env = None
     if 'clang' in toolchain:
@@ -776,9 +780,10 @@ def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
         '--fresh',
         f'-DCMAKE_TOOLCHAIN_FILE={toolchain_path}',
         '-DCMAKE_EXPORT_COMPILE_COMMANDS=1',
+        f'-Ddir_pw_third_party_emboss={ctx.package_root / "emboss"}',
+        f'-Ddir_pw_third_party_flatbuffers={ctx.package_root / "flatbuffers"}',
         f'-Ddir_pw_third_party_nanopb={ctx.package_root / "nanopb"}',
         '-Dpw_third_party_nanopb_ADD_SUBDIRECTORY=ON',
-        f'-Ddir_pw_third_party_emboss={ctx.package_root / "emboss"}',
         env=env,
     )
 
@@ -1674,6 +1679,7 @@ OTHER_CHECKS = (
     gn_platform_build_check,
     module_owners.presubmit_check(),
     npm_presubmit.npm_test,
+    npm_presubmit.vscode_test,
     pw_transfer_integration_test,
     python_checks.diff_upstream_python_constraints,
     python_checks.update_upstream_python_constraints,

@@ -25,10 +25,12 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         "//pw_allocator:hardening",
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_status",
     ],
 )
+
+# Block mixins
 
 cc_library(
     name = "alignable",
@@ -36,7 +38,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":allocatable",
-        "//pw_allocator:deallocator",
+        "//pw_allocator",
         "//pw_allocator:hardening",
         "//pw_bytes:alignment",
         "//pw_status",
@@ -51,7 +53,7 @@ cc_library(
     deps = [
         ":contiguous",
         ":result",
-        "//pw_allocator:deallocator",
+        "//pw_allocator",
         "//pw_allocator:hardening",
         "//pw_bytes:alignment",
         "//pw_status",
@@ -62,7 +64,7 @@ cc_library(
     name = "basic",
     srcs = ["basic.cc"],
     hdrs = ["public/pw_allocator/block/basic.h"],
-    implementation_deps = ["//pw_assert"],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         "//pw_allocator:hardening",
@@ -77,7 +79,7 @@ cc_library(
     name = "contiguous",
     srcs = ["contiguous.cc"],
     hdrs = ["public/pw_allocator/block/contiguous.h"],
-    implementation_deps = ["//pw_assert"],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         ":basic",
@@ -100,7 +102,7 @@ cc_library(
     name = "poisonable",
     srcs = ["poisonable.cc"],
     hdrs = ["public/pw_allocator/block/poisonable.h"],
-    implementation_deps = ["//pw_assert"],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         ":contiguous",
@@ -116,10 +118,13 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":alignable",
-        "//pw_allocator:deallocator",
+        "//pw_allocator",
         "//pw_allocator:hardening",
+        "//pw_assert:assert",
     ],
 )
+
+# Block implementations
 
 cc_library(
     name = "detailed_block",
@@ -133,13 +138,53 @@ cc_library(
         ":iterable",
         ":poisonable",
         ":with_layout",
-        "//pw_allocator:deallocator",
+        "//pw_allocator",
         "//pw_allocator:hardening",
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_bytes",
         "//pw_status",
     ],
 )
+
+cc_library(
+    name = "small_block_base",
+    hdrs = ["public/pw_allocator/block/small_block_base.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":allocatable",
+        ":basic",
+        ":contiguous",
+        ":iterable",
+        "//pw_allocator/bucket:fast_sorted",
+        "//pw_bytes",
+    ],
+)
+
+cc_library(
+    name = "small_block",
+    hdrs = ["public/pw_allocator/block/small_block.h"],
+    strip_include_prefix = "public",
+    deps = [":small_block_base"],
+)
+
+cc_library(
+    name = "small_alignable_block",
+    hdrs = ["public/pw_allocator/block/small_alignable_block.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":alignable",
+        ":small_block_base",
+    ],
+)
+
+cc_library(
+    name = "tiny_block",
+    hdrs = ["public/pw_allocator/block/tiny_block.h"],
+    strip_include_prefix = "public",
+    deps = [":small_block_base"],
+)
+
+# Testing
 
 cc_library(
     name = "testing",
@@ -153,7 +198,7 @@ cc_library(
         ":allocatable",
         ":result",
         "//pw_allocator:testing",
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_bytes:alignment",
         "//pw_status",
         "//third_party/fuchsia:stdcompat",
@@ -176,12 +221,37 @@ pw_cc_test(
     deps = [
         ":detailed_block",
         ":testing",
-        "//pw_assert",
-        "//pw_bytes",
-        "//pw_bytes:alignment",
-        "//pw_span",
-        "//pw_status",
-        "//third_party/fuchsia:stdcompat",
+        "//pw_unit_test",
+    ],
+)
+
+pw_cc_test(
+    name = "small_block_test",
+    srcs = ["small_block_test.cc"],
+    deps = [
+        ":small_block",
+        ":testing",
+        "//pw_unit_test",
+    ],
+)
+
+pw_cc_test(
+    name = "small_alignable_block_test",
+    srcs = ["small_alignable_block_test.cc"],
+    deps = [
+        ":small_alignable_block",
+        ":testing",
+        "//pw_unit_test",
+    ],
+)
+
+pw_cc_test(
+    name = "tiny_block_test",
+    srcs = ["tiny_block_test.cc"],
+    deps = [
+        ":testing",
+        ":tiny_block",
+        "//pw_unit_test",
     ],
 )
 
@@ -196,6 +266,9 @@ filegroup(
         "public/pw_allocator/block/iterable.h",
         "public/pw_allocator/block/poisonable.h",
         "public/pw_allocator/block/result.h",
+        "public/pw_allocator/block/small_alignable_block.h",
+        "public/pw_allocator/block/small_block.h",
+        "public/pw_allocator/block/tiny_block.h",
         "public/pw_allocator/block/with_layout.h",
     ],
 )

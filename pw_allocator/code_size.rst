@@ -19,9 +19,7 @@ The following shows the code size incurred by the
 of the interface is measured using an empty implementation,
 :ref:`module-pw_allocator-api-null_allocator`.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: allocator_api_size_report
-.. include:: ../size_report_notice
+.. include:: allocator_api_size_report
 
 ---------------------
 Block implementations
@@ -33,9 +31,7 @@ memory overhead for blocks varies depending on what features are included.
 The following are code sizes for the block implementations provided by this
 module.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: blocks_size_report
-.. include:: ../size_report_notice
+.. include:: blocks_size_report
 
 Impact of different hardening levels
 ====================================
@@ -43,9 +39,7 @@ This module includes :ref:`module-pw_allocator-config-hardening` which sets
 which validation checks are included. Additional checks can detect more errors
 at the cost of additional code size, as illustrated in the size report below:
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: hardening_size_report
-.. include:: ../size_report_notice
+.. include:: hardening_size_report
 
 ----------------------
 Bucket implementations
@@ -59,9 +53,7 @@ module. These are measured relative to the container they use, as reusing
 container types may save code size. See :ref:`module-pw_containers` for code
 size information on each container type.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: buckets_size_report
-.. include:: ../size_report_notice
+.. include:: buckets_size_report
 
 -------------------------------
 Block allocator implementations
@@ -71,9 +63,7 @@ are derived from :ref:`module-pw_allocator-api-block_allocator`. The following
 are code sizes for each of the block allocator implementations, and are measured
 relative to the blocks they use.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: block_allocators_size_report
-.. include:: ../size_report_notice
+.. include:: block_allocators_size_report
 
 ----------------------------------------
 Other concrete allocator implementations
@@ -83,9 +73,7 @@ directly manage the memory they use to fulfill requests, but that do not derive
 from :ref:`module-pw_allocator-api-block_allocator`. These are measured relative
 to the empty implementation measured above.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: concrete_allocators_size_report
-.. include:: ../size_report_notice
+.. include:: concrete_allocators_size_report
 
 -------------------------------------
 Forwarding allocators implementations
@@ -96,6 +84,4 @@ by having the forwarding allocator wrap a
 :ref:`module-pw_allocator-api-first_fit_allocator`, and are measured relative to
 that implementation.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: forwarding_allocators_size_report
-.. include:: ../size_report_notice
+.. include:: forwarding_allocators_size_report
