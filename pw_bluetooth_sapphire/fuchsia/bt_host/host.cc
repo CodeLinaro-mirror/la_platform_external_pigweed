@@ -74,16 +74,19 @@ bool BtHostComponent::Initialize(
           std::move(vendor_client_end), async_get_default_dispatcher());
 
   bt_log(INFO, "bt-host", "Create HCI transport layer");
-  hci_ =
-      std::make_unique<hci::Transport>(std::move(controller), pw_dispatcher_);
+  hci_ = std::make_unique<hci::Transport>(
+      std::move(controller), pw_dispatcher_, lease_provider_);
 
   bt_log(INFO, "bt-host", "Create GATT layer");
   gatt_ = gatt::GATT::Create();
   gap::Adapter::Config config = {
       .legacy_pairing_enabled = legacy_pairing_enabled,
   };
-  gap_ = gap::Adapter::Create(
-      pw_dispatcher_, hci_->GetWeakPtr(), gatt_->GetWeakPtr(), config);
+  gap_ = gap::Adapter::Create(pw_dispatcher_,
+                              hci_->GetWeakPtr(),
+                              gatt_->GetWeakPtr(),
+                              config,
+                              lease_provider_);
   if (!gap_) {
     bt_log(WARN, "bt-host", "GAP could not be created");
     return false;

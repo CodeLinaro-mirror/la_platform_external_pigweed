@@ -1,4 +1,4 @@
-// Copyright 2020 The Pigweed Authors
+// Copyright 2025 The Pigweed Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not
 // use this file except in compliance with the License. You may obtain a copy of
@@ -11,24 +11,22 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
+#![no_std]
+#![feature(naked_functions)]
 
-#include "pw_assert/check.h"
-#include "pw_log/log.h"
-#include "pw_rpc_system_server/rpc_server.h"
-#include "pw_unit_test/unit_test_service.h"
+pub use syscall_defs::SysCallInterface;
 
-namespace {
+#[cfg(feature = "arch_arm_cortex_m")]
+mod arm_cortex_m;
+#[cfg(feature = "arch_arm_cortex_m")]
+pub use arm_cortex_m::SysCall;
 
-pw::unit_test::UnitTestService unit_test_service;
+#[cfg(feature = "arch_riscv")]
+mod riscv;
+#[cfg(feature = "arch_riscv")]
+pub use riscv::SysCall;
 
-}  // namespace
-
-int main() {
-  pw::rpc::system_server::Init();
-  pw::rpc::system_server::Server().RegisterService(unit_test_service);
-
-  PW_LOG_INFO("Starting pw_rpc server");
-  PW_CHECK_OK(pw::rpc::system_server::Start());
-
-  return 0;
-}
+#[cfg(feature = "arch_host")]
+mod host;
+#[cfg(feature = "arch_host")]
+pub use host::SysCall;
