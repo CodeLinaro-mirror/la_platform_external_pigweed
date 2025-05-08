@@ -29,10 +29,7 @@ inline BinarySemaphore::BinarySemaphore() : native_type_() {
 
 inline BinarySemaphore::~BinarySemaphore() = default;
 
-inline void BinarySemaphore::release() {
-  PW_DASSERT(!interrupt::InInterruptContext());
-  k_sem_give(&native_type_);
-}
+inline void BinarySemaphore::release() { k_sem_give(&native_type_); }
 
 inline void BinarySemaphore::acquire() {
   PW_DASSERT(!interrupt::InInterruptContext());
