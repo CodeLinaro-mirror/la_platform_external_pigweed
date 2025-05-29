@@ -593,7 +593,46 @@ def zephyr_build(ctx: PresubmitContext) -> None:
         *testsuite_roots_list,
         env=env,
     )
-    # Produces reports at (ctx.root / 'twister_out' / 'twister*.xml')
+    # Find all the raw profile files
+    raw_profile_files = list(
+        (ctx.root / 'twister-out').rglob('default.profraw')
+    )
+    # Find the corresponding executables
+    executable_files = list((ctx.root / 'twister-out').rglob('zephyr.exe'))
+
+    if not raw_profile_files or not executable_files:
+        _LOG.info("No llvm coverage files generated, skipping coverage report")
+        return
+
+    # Needs to index the reports
+    prof_data_file = ctx.root / 'twister-out' / 'coverage.profdata'
+    call(
+        *(
+            [
+                'llvm-profdata',
+                'merge',
+                '--sparse',
+                '-o',
+                str(prof_data_file),
+            ]
+            + [str(p) for p in raw_profile_files]
+        )
+    )
+
+    # Produce the report in twister-out/coverage
+    call(
+        *(
+            [
+                'llvm-cov',
+                'show',
+                '--format=html',
+                f'--instr-profile={prof_data_file}',
+                f'--output-dir={ctx.root / "twister-out" / "coverage"}',
+                '--ignore-filename-regex=(.*/)?(environment|twister-out)/.*',
+            ]
+            + [f'--object={p}' for p in executable_files]
+        )
+    )
 
 
 def assert_non_empty_directory(directory: Path) -> None:
@@ -744,12 +783,6 @@ def docs_build(ctx: PresubmitContext) -> None:
         dirs_exist_ok=True,
     )
     assert_non_empty_directory(examples_html_output_dir)
-
-
-gn_host_tools = PigweedGnGenNinja(
-    name='gn_host_tools',
-    ninja_targets=('host_tools',),
-)
 
 
 def _run_cmake(ctx: PresubmitContext, toolchain='host_clang') -> None:
@@ -1733,7 +1766,6 @@ QUICK = (
 FULL = (
     _LINTFORMAT,
     gn_combined_build_check,
-    gn_host_tools,
     bazel_build,
     python_checks.gn_python_check,
     python_checks.gn_python_test_coverage,

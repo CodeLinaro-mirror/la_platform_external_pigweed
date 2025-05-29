@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_doc", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -35,6 +35,7 @@ rust_library(
         "arch/arm_cortex_m/features.rs",
         "arch/arm_cortex_m/regs.rs",
         "arch/arm_cortex_m/regs/mpu.rs",
+        "arch/arm_cortex_m/regs/msr.rs",
         "arch/arm_cortex_m/regs/nvic.rs",
         "arch/arm_cortex_m/regs/scb.rs",
         "arch/arm_cortex_m/regs/systick.rs",
@@ -47,6 +48,7 @@ rust_library(
         "arch/riscv.rs",
         "arch/riscv/exceptions.rs",
         "arch/riscv/regs.rs",
+        "arch/riscv/regs/pmp.rs",
         "arch/riscv/spinlock.rs",
         "arch/riscv/threads.rs",
         "arch/riscv/timer.rs",
@@ -97,4 +99,25 @@ rust_library(
         "@platforms//cpu:riscv32": RISCV_DEPS,
         "//conditions:default": [],
     }),
+)
+
+rust_doc(
+    name = "kernel_doc",
+    crate = ":kernel",
+    rustdoc_flags = [
+        "--document-private-items",
+        "--cfg=feature=\"user_space\"",
+    ] + select({
+        # Arch feature selection will be removed when arch support moves out of
+        # the kernel crate.
+        "@pigweed//pw_build/constraints/arm:cortex-m0": ["--cfg=feature=\"arch_arm_cortex_m\""],
+        "@pigweed//pw_build/constraints/arm:cortex-m3": ["--cfg=feature=\"arch_arm_cortex_m\""],
+        "@pigweed//pw_build/constraints/arm:cortex-m33": ["--cfg=feature=\"arch_arm_cortex_m\""],
+        "@platforms//cpu:riscv32": ["--cfg=feature=\"arch_riscv\""],
+        "//conditions:default": [
+            "--cfg=feature=\"arch_host\"",
+            "--cfg=feature=\"std_panic_handler\"",
+        ],
+    }),
+    tags = ["kernel"],
 )
