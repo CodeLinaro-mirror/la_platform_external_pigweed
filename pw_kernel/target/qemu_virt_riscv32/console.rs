@@ -14,6 +14,7 @@
 #![no_std]
 
 use core::ptr;
+
 use kernel::sync::spinlock::SpinLock;
 use pw_status::Result;
 
@@ -32,14 +33,15 @@ impl Uart {
                 // will never back up. This is reasonable for a first
                 // implementation, but it is possible for qemu to eventually
                 // fill its buffers.
-                ptr::write_volatile(self.base_addr as *mut u8, *c);
+                let ptr = ptr::with_exposed_provenance_mut::<u8>(self.base_addr);
+                ptr::write_volatile(ptr, *c);
             }
             Ok(())
         }
     }
 }
 
-static UART: SpinLock<Uart> = SpinLock::new(Uart {
+static UART: SpinLock<arch_riscv::BareSpinLock, Uart> = SpinLock::new(Uart {
     base_addr: BASE_ADDR,
 });
 

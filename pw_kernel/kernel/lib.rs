@@ -12,251 +12,184 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 #![no_std]
-#![feature(const_trait_impl)]
-#![feature(naked_functions)]
 
-use core::cell::UnsafeCell;
-use foreign_box::ForeignBox;
 use pw_log::info;
 
-mod arch;
+pub mod memory;
 #[cfg(not(feature = "std_panic_handler"))]
 mod panic;
-mod scheduler;
+pub mod scheduler;
 pub mod sync;
-mod syscall;
+pub mod syscall;
 mod target;
-mod timer;
-
-use arch::{Arch, ArchInterface};
-use kernel_config::{KernelConfig, KernelConfigInterface};
-use scheduler::SCHEDULER_STATE;
-pub use scheduler::{
-    sleep_until, start_thread,
-    thread::{Process, Stack, Thread},
-    yield_timeslice,
-};
-pub use timer::{Clock, Duration};
 
 // Used by the `init_thread!` macro.
+use kernel_config::{KernelConfig, KernelConfigInterface};
+pub use memory::{MemoryRegion, MemoryRegionType};
+use scheduler::thread::{self, ThreadState};
+pub use scheduler::thread::{Process, Stack, Thread};
 #[doc(hidden)]
 pub use scheduler::thread::{StackStorage, StackStorageExt};
+pub use scheduler::timer::Duration;
+use scheduler::timer::TimerQueue;
+pub use scheduler::{sleep_until, start_thread, yield_timeslice};
+use scheduler::{SchedulerContext, SchedulerState, SchedulerStateContext};
+use sync::spinlock::SpinLock;
 
-#[no_mangle]
-#[allow(non_snake_case)]
-pub extern "C" fn pw_assert_HandleFailure() -> ! {
-    Arch::panic();
+pub trait KernelContext: Sized {
+    fn early_init(self) {}
+    fn init(self) {}
+
+    fn panic() -> ! {
+        #[allow(clippy::empty_loop)]
+        loop {}
+    }
 }
 
-// A structure intended to be statically allocated to hold a Thread structure that will
-// be constructed at run time.
-#[repr(C, align(4))]
-pub struct ThreadBuffer {
-    buffer: [u8; size_of::<Thread>()],
+pub trait KernelStateContext: SchedulerContext + KernelContext {
+    fn get_state(self) -> &'static KernelState<Self>;
 }
 
-impl ThreadBuffer {
+pub struct KernelState<C: KernelStateContext> {
+    scheduler: SpinLock<C::BareSpinLock, SchedulerState<C::ThreadState>>,
+    timer_queue: SpinLock<C::BareSpinLock, TimerQueue<C::Clock>>,
+}
+
+impl<C: KernelStateContext> KernelState<C> {
+    #[must_use]
     pub const fn new() -> Self {
-        ThreadBuffer {
-            buffer: [0; size_of::<Thread>()],
-        }
-    }
-
-    // Create and new a thread out of the internal u8 buffer.
-    // TODO: figure out how to properly statically construct a thread or
-    // make sure this function can only be called once.
-    #[inline(never)]
-    pub fn alloc_thread(&mut self, name: &'static str) -> ForeignBox<Thread> {
-        pw_assert::eq!(
-            self.buffer.as_ptr().align_offset(align_of::<Thread>()) as usize,
-            0 as usize
-        );
-        let thread_ptr = self.buffer.as_mut_ptr() as *mut Thread;
-        unsafe {
-            thread_ptr.write(Thread::new(name));
-            ForeignBox::new_from_ptr(&mut *thread_ptr)
+        Self {
+            scheduler: SpinLock::new(SchedulerState::new()),
+            timer_queue: SpinLock::new(TimerQueue::new()),
         }
     }
 }
 
-impl Default for ThreadBuffer {
-    fn default() -> Self {
-        Self::new()
+struct ThreadStorage<S: ThreadState> {
+    thread: Thread<S>,
+    stack: StackStorage<{ KernelConfig::KERNEL_STACK_SIZE_BYTES }>,
+}
+
+impl<S: ThreadState> ThreadStorage<S> {
+    pub const fn new() -> Self {
+        Self {
+            thread: Thread::new(""),
+            stack: StackStorage::ZEROED,
+        }
+    }
+}
+
+pub struct InitKernelState<S: ThreadState> {
+    bootstrap_thread: ThreadStorage<S>,
+    idle_thread: ThreadStorage<S>,
+}
+
+impl<S: ThreadState> InitKernelState<S> {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            bootstrap_thread: ThreadStorage::new(),
+            idle_thread: ThreadStorage::new(),
+        }
     }
 }
 
 pub struct Kernel {}
 
-pub struct StaticProcess {
-    process_cell: UnsafeCell<Process>,
-}
-
-#[allow(dead_code)]
-impl StaticProcess {
-    pub const fn new(name: &'static str) -> Self {
-        Self {
-            process_cell: UnsafeCell::new(Process::new(name)),
-        }
-    }
-
-    pub fn get(&self) -> *mut Process {
-        self.process_cell.get()
-    }
-}
-
-unsafe impl Sync for StaticProcess {}
-unsafe impl Send for StaticProcess {}
-
-#[cfg(feature = "user_space")]
-#[macro_export]
-macro_rules! init_non_priv_process {
-    ($name:literal) => {{
-        use kernel::StaticProcess;
-        use pw_log::info;
-        info!(
-            "allocating non-privileged process: {}",
-            $name as &'static str
-        );
-
-        static process: StaticProcess = StaticProcess::new($name);
-        unsafe { (*process.get()).register() };
-        &process
-    }};
-}
-
-#[macro_export]
-macro_rules! init_thread {
-    ($name:literal, $entry:expr, $stack_size:expr) => {{
-        info!("allocating thread: {}", $name as &'static str);
-        use $crate::Stack;
-        use $crate::ThreadBuffer;
-        let mut thread = {
-            static mut THREAD_BUFFER: ThreadBuffer = ThreadBuffer::new();
-            #[allow(static_mut_refs)]
-            unsafe {
-                THREAD_BUFFER.alloc_thread($name)
-            }
-        };
-
-        info!("initializing thread: {}", $name as &'static str);
-        thread.initialize_kernel_thread(
-            {
-                static mut STACK_STORAGE: $crate::StackStorage<{ $stack_size }> =
-                    $crate::StackStorageExt::ZEROED;
-                #[allow(static_mut_refs)]
-                unsafe {
-                    Stack::from_slice(&STACK_STORAGE)
-                }
-            },
-            $entry,
-            0,
-        );
-
-        thread
-    }};
-}
-
-#[cfg(feature = "user_space")]
-#[macro_export]
-macro_rules! init_non_priv_thread {
-    ($name:literal, $process:expr, $entry:expr, $stack_size:expr) => {{
-        use pw_log::info;
-        info!(
-            "allocating non-privileged thread: {}, entry {:#x}",
-            $name as &'static str, $entry as usize
-        );
-        use $crate::Stack;
-        use $crate::ThreadBuffer;
-        let mut thread = {
-            static mut THREAD_BUFFER: ThreadBuffer = ThreadBuffer::new();
-            #[allow(static_mut_refs)]
-            unsafe {
-                THREAD_BUFFER.alloc_thread($name)
-            }
-        };
-
-        info!(
-            "initializing non-privileged thread: {}",
-            $name as &'static str
-        );
-        unsafe {
-            thread.initialize_non_priv_thread(
-                {
-                    static mut STACK_STORAGE: $crate::StackStorage<{ $stack_size }> =
-                        $crate::StackStorageExt::ZEROED;
-                    #[allow(static_mut_refs)]
-                    unsafe {
-                        Stack::from_slice(&STACK_STORAGE)
-                    }
-                },
-                {
-                    static mut STACK_STORAGE: $crate::StackStorage<{ $stack_size }> =
-                        $crate::StackStorageExt::ZEROED;
-                    #[allow(static_mut_refs)]
-                    unsafe {
-                        Stack::from_slice(&STACK_STORAGE)
-                    }
-                },
-                $process.get(),
-                $entry,
-                0,
-            );
-        }
-
-        thread
-    }};
+// Module re-exporting modules into a scope that can be referenced by macros
+// in this crate.
+#[doc(hidden)]
+pub mod macro_exports {
+    pub use pw_assert;
 }
 
 impl Kernel {
-    pub fn main() -> ! {
+    pub fn main<C: KernelStateContext>(
+        ctx: C,
+        init_state: &'static mut InitKernelState<C::ThreadState>,
+    ) -> ! {
         target::console_init();
         info!("Welcome to Maize on {}!", target::name() as &str);
 
-        Arch::early_init();
+        ctx.early_init();
 
         // Prepare the scheduler for thread initialization.
-        scheduler::initialize();
+        scheduler::initialize(ctx);
 
-        let bootstrap_thread = init_thread!(
+        let bootstrap_thread = thread::init_thread_in(
+            ctx,
+            &mut init_state.bootstrap_thread.thread,
+            &mut init_state.bootstrap_thread.stack,
             "bootstrap",
             bootstrap_thread_entry,
-            KernelConfig::KERNEL_STACK_SIZE_BYTES
+            &mut init_state.idle_thread,
         );
         info!("created thread, bootstrapping");
 
         // special case where we bootstrap the system by half context switching to this thread
-        scheduler::bootstrap_scheduler(bootstrap_thread);
+        scheduler::bootstrap_scheduler(ctx, bootstrap_thread);
 
         // never get to here
     }
 }
 
 // completion of main in thread context
-fn bootstrap_thread_entry(_arg: usize) {
+fn bootstrap_thread_entry<C: KernelStateContext>(
+    ctx: C,
+    idle_thread_storage: &'static mut ThreadStorage<C::ThreadState>,
+) {
     info!("Welcome to the first thread, continuing bootstrap");
-    pw_assert::assert!(Arch::interrupts_enabled());
+    pw_assert::assert!(ctx.interrupts_enabled());
 
-    Arch::init();
+    ctx.init();
 
-    SCHEDULER_STATE.lock().dump_all_threads();
+    ctx.get_scheduler().lock().dump_all_threads();
 
-    let idle_thread = init_thread!(
+    let idle_thread = thread::init_thread_in(
+        ctx,
+        &mut idle_thread_storage.thread,
+        &mut idle_thread_storage.stack,
         "idle",
         idle_thread_entry,
-        KernelConfig::KERNEL_STACK_SIZE_BYTES
+        0,
     );
 
-    SCHEDULER_STATE.lock().dump_all_threads();
+    ctx.get_scheduler().lock().dump_all_threads();
 
-    scheduler::start_thread(idle_thread);
+    scheduler::start_thread(ctx, idle_thread);
 
     target::main()
 }
 
-fn idle_thread_entry(_arg: usize) {
+fn idle_thread_entry<C: KernelStateContext>(ctx: C, _arg: usize) {
     // Fake idle thread to keep the runqueue from being empty if all threads are blocked.
-    pw_assert::assert!(Arch::interrupts_enabled());
+    pw_assert::assert!(ctx.interrupts_enabled());
     loop {
-        Arch::idle();
+        ctx.idle();
     }
+}
+
+#[doc(hidden)]
+pub mod __private {
+    /// Takes a mutable reference to a global static.
+    ///
+    /// # Safety
+    ///
+    /// Each invocation of `static_mut_ref!` must be executed at most once at
+    /// run time.
+    #[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`
+    #[macro_export]
+    macro_rules! static_mut_ref {
+        ($ty:ty = $value:expr) => {{
+            static mut __STATIC: $ty = $value;
+            // SAFETY: The caller promises that this macro will be executed at
+            // most once, and so taking a `&mut` reference to this global
+            // static, which is defined per-call site, will not violate
+            // aliasing.
+            #[allow(static_mut_refs)]
+            &mut __STATIC
+        }};
+    }
+
+    pub use foreign_box;
 }

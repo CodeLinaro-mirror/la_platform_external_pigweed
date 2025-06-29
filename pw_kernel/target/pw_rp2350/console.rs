@@ -16,11 +16,10 @@
 use embedded_io::Write;
 use kernel::sync::spinlock::SpinLock;
 use pw_status::{Error, Result};
-use rp235x_hal::{
-    gpio::{bank0::Gpio12, bank0::Gpio13, FunctionUart, Pin, PullDown},
-    pac::UART0,
-    uart::{self, UartPeripheral},
-};
+use rp235x_hal::gpio::bank0::{Gpio12, Gpio13};
+use rp235x_hal::gpio::{FunctionUart, Pin, PullDown};
+use rp235x_hal::pac::UART0;
+use rp235x_hal::uart::{self, UartPeripheral};
 
 pub type ConsoleUart = UartPeripheral<
     uart::Enabled,
@@ -31,7 +30,7 @@ pub type ConsoleUart = UartPeripheral<
     ),
 >;
 
-static UART: SpinLock<Option<ConsoleUart>> = SpinLock::new(None);
+static UART: SpinLock<arch_arm_cortex_m::BareSpinLock, Option<ConsoleUart>> = SpinLock::new(None);
 
 #[no_mangle]
 pub fn console_backend_write_all(buf: &[u8]) -> Result<()> {

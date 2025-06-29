@@ -14,13 +14,18 @@
 
 #![no_main]
 
-use console_backend as _;
-use kernel as _;
+use {arch_host as _, console_backend as _, kernel as _};
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn pw_assert_HandleFailure() -> ! {
+    panic!()
+}
 
 #[no_mangle]
 pub extern "C" fn main() -> core::ffi::c_int {
     #[cfg(test)]
-    match unittest_core::run_bare_metal_tests() {
+    match unittest_core::run_bare_metal_tests!() {
         unittest_core::TestsResult::AllPassed => 0,
         unittest_core::TestsResult::SomeFailed => 1,
     }

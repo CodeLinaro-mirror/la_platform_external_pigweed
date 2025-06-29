@@ -12,15 +12,17 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-use pw_status::{Error, Result};
-
+use pw_cast::CastInto as _;
 use pw_log::info;
+use pw_status::{Error, Result};
 use syscall_defs::{SysCallId, SysCallReturnValue};
-use time::Clock;
+
+use crate::scheduler::SchedulerStateContext;
 
 const SYSCALL_DEBUG: bool = false;
 
-pub fn handle_syscall(
+pub fn handle_syscall<C: SchedulerStateContext>(
+    ctx: C,
     id: u16,
     arg0: usize,
     arg1: usize,
@@ -33,7 +35,7 @@ pub fn handle_syscall(
     // extern "C" function pointers could be kept and use the architecture's
     // calling convention to directly call them.
     //
-    // This allows [`crate::arch::arm_cortex_m::in_interrupt_handler()`] to treat
+    // This allows [`arch::arm_cortex_m::in_interrupt_handler()`] to treat
     // active SVCalls as not in interrupt context.
     let id: SysCallId = id.try_into()?;
     let res = match id {
@@ -45,18 +47,22 @@ pub fn handle_syscall(
                 arg0 as usize,
                 arg1 as usize,
             );
-            crate::sleep_until(crate::Clock::now() + crate::Duration::from_secs(1));
+            crate::sleep_until(ctx, ctx.now() + crate::Duration::from_secs(1));
             log_if::debug_if!(SYSCALL_DEBUG, "sycall: DebugAdd woken");
             match arg0.checked_add(arg1) {
-                Some(res) => Ok(res as u64),
+                Some(res) => Ok(res.cast_into()),
                 None => Err(Error::OutOfRange),
             }
         }
+        // TODO: Remove this syscall when logging is added.
         SysCallId::DebugPutc => {
-            crate::sleep_until(crate::Clock::now() + crate::Duration::from_secs(1));
-            let c = unsafe { char::from_u32_unchecked(arg0 as u32) };
+            crate::sleep_until(ctx, ctx.now() + crate::Duration::from_secs(1));
+            let c = u32::try_from(arg0)
+                .ok()
+                .and_then(char::from_u32)
+                .ok_or(Error::InvalidArgument)?;
             info!("{}", c as char);
-            Ok(c as u64)
+            Ok(arg0.cast_into())
         }
     };
     log_if::debug_if!(SYSCALL_DEBUG, "syscall: {:#06x} returning", id as usize);
@@ -64,7 +70,14 @@ pub fn handle_syscall(
 }
 
 #[allow(dead_code)]
-pub fn raw_handle_syscall(id: u16, arg0: usize, arg1: usize, arg2: usize, arg3: usize) -> i64 {
-    let ret_val: SysCallReturnValue = handle_syscall(id, arg0, arg1, arg2, arg3).into();
+pub fn raw_handle_syscall<C: SchedulerStateContext>(
+    ctx: C,
+    id: u16,
+    arg0: usize,
+    arg1: usize,
+    arg2: usize,
+    arg3: usize,
+) -> i64 {
+    let ret_val: SysCallReturnValue = handle_syscall(ctx, id, arg0, arg1, arg2, arg3).into();
     ret_val.0
 }

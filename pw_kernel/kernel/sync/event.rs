@@ -14,7 +14,8 @@
 
 use pw_status::Result;
 
-use crate::{scheduler::WaitQueueLock, timer::Instant};
+use crate::scheduler::timer::Instant;
+use crate::scheduler::{SchedulerContext, SchedulerStateContext, WaitQueueLock};
 
 /// Configuration for the behavior of an [`Event`].
 #[derive(Eq, PartialEq)]
@@ -50,20 +51,21 @@ struct EventState {
 /// [`wait_until`]: Event::wait_until
 /// [`signal`]: Event::signal
 /// [`unsignal`]: Event::unsignal
-pub struct Event {
+pub struct Event<C: SchedulerContext> {
     config: EventConfig,
-    state: WaitQueueLock<EventState>,
+    state: WaitQueueLock<C, EventState>,
 }
 
-unsafe impl Sync for Event {}
-unsafe impl Send for Event {}
+unsafe impl<C: SchedulerContext> Sync for Event<C> {}
+unsafe impl<C: SchedulerContext> Send for Event<C> {}
 
-impl Event {
+impl<C: SchedulerStateContext> Event<C> {
     /// Constructs a new `Event` with the given configuration.
-    pub const fn new(config: EventConfig) -> Self {
+    #[must_use]
+    pub const fn new(ctx: C, config: EventConfig) -> Self {
         Self {
             config,
-            state: WaitQueueLock::new(EventState { signaled: false }),
+            state: WaitQueueLock::new(ctx, EventState { signaled: false }),
         }
     }
 
@@ -97,7 +99,7 @@ impl Event {
     /// # Interrupt context
     ///
     /// This method is *not* safe to call in an interrupt context.
-    pub fn wait_until(&self, deadline: Instant) -> Result<()> {
+    pub fn wait_until(&self, deadline: Instant<C::Clock>) -> Result<()> {
         let mut state = self.state.lock();
         if !state.signaled {
             let (_state, result) = state.wait_until(deadline);

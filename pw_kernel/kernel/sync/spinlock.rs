@@ -15,18 +15,34 @@
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 
-use crate::arch::{Arch, ArchInterface};
+pub trait BareSpinLock {
+    type Guard<'a>
+    where
+        Self: 'a;
 
-pub use crate::arch::BareSpinLock as BareSpinLockApi;
+    const NEW: Self;
 
-pub type BareSpinLock = <Arch as ArchInterface>::BareSpinLock;
+    fn try_lock(&self) -> Option<Self::Guard<'_>>;
 
-pub struct SpinLockGuard<'lock, T> {
-    lock: &'lock SpinLock<T>,
-    _inner_guard: <BareSpinLock as BareSpinLockApi>::Guard<'lock>,
+    #[inline(always)]
+    fn lock(&self) -> Self::Guard<'_> {
+        loop {
+            if let Some(sentinel) = self.try_lock() {
+                return sentinel;
+            }
+        }
+    }
+
+    // TODO - konkers: Add optimized path for functions that know they are in
+    // atomic context (i.e. interrupt handlers).
 }
 
-impl<T> Deref for SpinLockGuard<'_, T> {
+pub struct SpinLockGuard<'lock, L: BareSpinLock, T> {
+    lock: &'lock SpinLock<L, T>,
+    _inner_guard: L::Guard<'lock>,
+}
+
+impl<L: BareSpinLock, T> Deref for SpinLockGuard<'_, L, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -34,36 +50,37 @@ impl<T> Deref for SpinLockGuard<'_, T> {
     }
 }
 
-impl<T> DerefMut for SpinLockGuard<'_, T> {
+impl<L: BareSpinLock, T> DerefMut for SpinLockGuard<'_, L, T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.lock.data.get() }
     }
 }
 
-pub struct SpinLock<T> {
+pub struct SpinLock<L, T> {
     data: UnsafeCell<T>,
-    inner: BareSpinLock,
+    inner: L,
 }
 
-// As long as the inner type is `Send` the lock can be shared between threads.
-unsafe impl<T: Send> Sync for SpinLock<T> {}
+// As long as the inner type is `Send` and the bare spinlock is `Sync`, the lock
+// can be shared between threads.
+unsafe impl<L: Sync, T: Send> Sync for SpinLock<L, T> {}
 
-impl<T> SpinLock<T> {
+impl<L: BareSpinLock, T> SpinLock<L, T> {
     pub const fn new(initial_value: T) -> Self {
         Self {
             data: UnsafeCell::new(initial_value),
-            inner: BareSpinLock::new(),
+            inner: L::NEW,
         }
     }
 
-    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
+    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, L, T>> {
         self.inner.try_lock().map(|guard| SpinLockGuard {
             lock: self,
             _inner_guard: guard,
         })
     }
 
-    pub fn lock(&self) -> SpinLockGuard<'_, T> {
+    pub fn lock(&self) -> SpinLockGuard<'_, L, T> {
         let inner_guard = self.inner.lock();
         SpinLockGuard {
             lock: self,

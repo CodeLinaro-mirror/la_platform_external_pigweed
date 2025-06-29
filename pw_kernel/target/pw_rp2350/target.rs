@@ -14,15 +14,16 @@
 #![no_std]
 #![no_main]
 
-use console_backend as _;
-use kernel as _;
-
-use rp235x_hal as hal;
-
+use arch_arm_cortex_m::{Arch, ArchThreadState};
 use hal::fugit::RateExtU32;
 use hal::uart::{DataBits, StopBits, UartConfig};
 use hal::Clock;
+use kernel::InitKernelState;
 use target_common::{declare_target, TargetInterface};
+use {console_backend as _, kernel as _, rp235x_hal as hal};
+
+#[cfg(test)]
+use integration_tests as _;
 
 #[link_section = ".start_block"]
 #[used]
@@ -88,14 +89,20 @@ impl TargetInterface for Target {
         unsafe { target_common::run_ctors() };
 
         #[cfg(not(test))]
-        demo::main();
+        {
+            static mut DEMO_STATE: demo::DemoState<Arch> = demo::DemoState::new(Arch);
+            // SAFETY: `main` is only executed once, so we never generate more
+            // than one `&mut` reference to `DEMO_STATE`.
+            #[allow(static_mut_refs)]
+            demo::main(Arch, unsafe { &mut DEMO_STATE });
+        }
 
         #[cfg(test)]
         {
             use cortex_m_semihosting::debug::*;
             use unittest_core::TestsResult;
 
-            exit(match unittest_core::run_all_tests() {
+            exit(match unittest_core::run_all_tests!() {
                 TestsResult::AllPassed => EXIT_SUCCESS,
                 TestsResult::SomeFailed => EXIT_FAILURE,
             });
@@ -109,8 +116,21 @@ impl TargetInterface for Target {
 
 declare_target!(Target);
 
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "C" fn pw_assert_HandleFailure() -> ! {
+    use kernel::KernelContext as _;
+    Arch::panic()
+}
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     Target::console_init();
-    kernel::Kernel::main()
+
+    static mut INIT_STATE: InitKernelState<ArchThreadState> = InitKernelState::new();
+
+    // SAFETY: `main` is only executed once, so we never generate more than one
+    // `&mut` reference to `INIT_STATE`.
+    #[allow(static_mut_refs)]
+    kernel::Kernel::main(Arch, unsafe { &mut INIT_STATE });
 }
