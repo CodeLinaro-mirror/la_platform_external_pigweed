@@ -263,40 +263,60 @@ class BasicMultiBuf {
 
   BasicMultiBuf(BasicMultiBuf&&) = delete;
 
-  template <Property... kOtherProperties>
-  BasicMultiBuf(BasicMultiBuf<kOtherProperties...>&&) = delete;
-
   BasicMultiBuf& operator=(BasicMultiBuf&&) = delete;
-
-  template <Property... kOtherProperties>
-  BasicMultiBuf& operator=(BasicMultiBuf<kOtherProperties...>&&) = delete;
 
   // Conversions
 
   template <typename OtherMultiBuf>
-  OtherMultiBuf& as() {
+  OtherMultiBuf& as() & {
     multibuf_impl::AssertIsConvertible<BasicMultiBuf, OtherMultiBuf>();
     return generic().template as<OtherMultiBuf>();
   }
 
   template <typename OtherMultiBuf>
-  const OtherMultiBuf& as() const {
+  const OtherMultiBuf& as() const& {
     multibuf_impl::AssertIsConvertible<BasicMultiBuf, OtherMultiBuf>();
     return generic().template as<OtherMultiBuf>();
   }
 
+  template <typename OtherMultiBuf>
+  OtherMultiBuf&& as() && {
+    multibuf_impl::AssertIsConvertible<BasicMultiBuf, OtherMultiBuf>();
+    return std::move(generic().template as<OtherMultiBuf>());
+  }
+
+  template <typename OtherMultiBuf>
+  const OtherMultiBuf&& as() const&& {
+    multibuf_impl::AssertIsConvertible<BasicMultiBuf, OtherMultiBuf>();
+    return std::move(generic().template as<OtherMultiBuf>());
+  }
+
   template <typename OtherMultiBuf,
             typename = multibuf_impl::EnableIfConvertible<BasicMultiBuf,
                                                           OtherMultiBuf>>
-  operator OtherMultiBuf&() {
+  operator OtherMultiBuf&() & {
     return as<OtherMultiBuf>();
   }
 
   template <typename OtherMultiBuf,
             typename = multibuf_impl::EnableIfConvertible<BasicMultiBuf,
                                                           OtherMultiBuf>>
-  operator const OtherMultiBuf&() const {
+  operator const OtherMultiBuf&() const& {
     return as<OtherMultiBuf>();
+  }
+
+  template <typename OtherMultiBuf,
+            typename = multibuf_impl::EnableIfConvertible<BasicMultiBuf,
+                                                          OtherMultiBuf>>
+  operator OtherMultiBuf&&() && {
+    return std::move(as<OtherMultiBuf>());
+  }
+
+  template <typename OtherMultiBuf,
+            typename = multibuf_impl::EnableIfConvertible<BasicMultiBuf,
+                                                          OtherMultiBuf>>
+  operator const OtherMultiBuf&&() const&& {
+    return std::move(as<OtherMultiBuf>());
   }
 
   // Accessors
@@ -1080,6 +1100,29 @@ class BasicMultiBuf {
     return generic().UnsealTopLayer();
   }
 
+  /// Returns whether the "sealed" flag is set in the top layer.
+  [[nodiscard]] bool IsTopLayerSealed() {
+    static_assert(
+        is_layerable(),
+        "`IsTopLayerSealed` may only be called on layerable MultiBufs");
+    return generic().IsTopLayerSealed();
+  }
+
+  /// Shortens the length of the current top layer.
+  ///
+  /// `length` MUST be less than or equal to the MultiBuf's current size.
+  /// It is an error to call this method when `NumLayers()` < 2.
+  ///
+  /// Crashes if the top layer is sealed.
+  ///
+  /// @param[in]  length  New length of the top layer.
+  void TruncateTopLayer(size_t length) {
+    static_assert(
+        is_layerable(),
+        "`TruncateTopLayer` may only be called on layerable MultiBufs");
+    generic().TruncateTopLayer(length);
+  }
+
   /// Resizes the current top layer.
   ///
   /// The range given by `offset` and `length` MUST fall within this MultiBuf.
@@ -1105,12 +1148,11 @@ class BasicMultiBuf {
   ///
   /// It is an error to call this method when `NumLayers()` < 2.
   ///
-  /// Returns false and leaves the object unmodified if the top layer is sealed;
-  /// otherwise returns true.
-  [[nodiscard]] bool PopLayer() {
+  /// Crashes if the top layer is sealed.
+  void PopLayer() {
     static_assert(is_layerable(),
                   "`PopLayer` may only be called on layerable MultiBufs");
-    return generic().PopLayer();
+    generic().PopLayer();
   }
 
  protected:
@@ -1332,12 +1374,22 @@ class GenericMultiBuf final
   /// @copydoc BasicMultiBuf<>::UnsealTopLayer
   void UnsealTopLayer();
 
+  /// @copydoc BasicMultiBuf<>::TruncateTopLayer
+  void TruncateTopLayer(size_t length) {
+    PW_ASSERT(length <= size());
+    PW_ASSERT(!IsTopLayerSealed());
+    if (length < size()) {
+      // TODO: b/432038569 - Reconsider the `ResizeTopLayer` API.
+      std::ignore = ResizeTopLayer(GetOffset(0), length);
+    }
+  }
+
   /// @copydoc BasicMultiBuf<>::ResizeTopLayer
   [[nodiscard]] bool ResizeTopLayer(size_t offset,
                                     size_t length = dynamic_extent);
 
   /// @copydoc BasicMultiBuf<>::PopLayer
-  [[nodiscard]] bool PopLayer();
+  void PopLayer();
 
   // Implementation methods.
   //
@@ -1608,14 +1660,24 @@ class Instance {
 
   constexpr Instance& operator=(MultiBufType&& mb) { base_ = std::move(mb); }
 
-  MultiBufType& operator*() { return base_.as<MultiBufType>(); }
-  const MultiBufType& operator*() const { return base_.as<MultiBufType>(); }
-
   MultiBufType* operator->() { return &base_.as<MultiBufType>(); }
   const MultiBufType* operator->() const { return &base_.as<MultiBufType>(); }
 
-  operator MultiBufType&() { return base_.as<MultiBufType>(); }
-  operator const MultiBufType&() const { return base_.as<MultiBufType>(); }
+  MultiBufType& operator*() & { return base_.as<MultiBufType>(); }
+  const MultiBufType& operator*() const& { return base_.as<MultiBufType>(); }
+
+  MultiBufType&& operator*() && { return std::move(base_.as<MultiBufType>()); }
+  const MultiBufType&& operator*() const&& {
+    return std::move(base_.as<MultiBufType>());
+  }
+
+  operator MultiBufType&() & { return base_.as<MultiBufType>(); }
+  operator const MultiBufType&() const& { return base_.as<MultiBufType>(); }
+
+  operator MultiBufType&&() && { return std::move(base_.as<MultiBufType>()); }
+  operator const MultiBufType&&() const&& {
+    return std::move(base_.as<MultiBufType>());
+  }
 
  private:
   GenericMultiBuf base_;
