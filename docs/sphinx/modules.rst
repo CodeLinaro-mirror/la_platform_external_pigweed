@@ -37,6 +37,7 @@ Modules
    pw_build_mcuxpresso/docs
    pw_bytes/docs
    pw_channel/docs
+   pw_change/docs
    pw_checksum/docs
    pw_chre/docs
    pw_chrono/docs

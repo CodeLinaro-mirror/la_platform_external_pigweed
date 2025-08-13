@@ -30,10 +30,18 @@ ALIASES                = "rst=^^\verbatim embed:rst:leading-asterisk^^" \
                          "cpp_func{1}=@crossref{cpp,func,\1}" \
                          "cpp_type{1}=@crossref{cpp,type,\1}" \
                          "cpp_enum{1}=@crossref{cpp,type,\1}" \
-                         "pw_status{1}=@crossref{c,enumerator,\1}"
+                         "pw_status{1}=@crossref{c,enumerator,\1}" \
+                         "module{2}=\defgroup \1 \1^^@brief \2: https://pigweed.dev/\1"
 
 # https://www.doxygen.nl/manual/config.html#cfg_case_sense_names
 CASE_SENSE_NAMES       = NO
+
+# This option, along with FULL_SIDEBAR and GENERATE_TREEVIEW,
+# controls the overall layout of the Doxygen HTML site.
+# https://www.doxygen.nl/manual/customize.html#minor_tweaks_treeview
+#
+# https://www.doxygen.nl/manual/config.html#cfg_disable_index
+DISABLE_INDEX          = NO
 
 # https://www.doxygen.nl/manual/config.html#cfg_extract_package
 EXTRACT_PACKAGE        = YES
@@ -44,11 +52,24 @@ EXTRACT_PRIV_VIRTUAL   = YES
 # https://www.doxygen.nl/manual/config.html#cfg_extract_static
 EXTRACT_STATIC         = YES
 
+# This option, along with DISABLE_INDEX and GENERATE_TREEVIEW,
+# controls the overall layout of the Doxygen HTML site.
+# https://www.doxygen.nl/manual/customize.html#minor_tweaks_treeview
+#
+# https://www.doxygen.nl/manual/config.html#cfg_full_sidebar
+FULL_SIDEBAR           = NO
+
 # https://www.doxygen.nl/manual/config.html#cfg_generate_buglist
 GENERATE_BUGLIST       = NO
 
 # https://www.doxygen.nl/manual/config.html#cfg_generate_latex
 GENERATE_LATEX         = NO
+
+# rules_doxygen replaces `OUTDIR` with the correct output directory path:
+# https://github.com/TendTo/rules_doxygen/blob/main/docs/doxygen_doc.md
+#
+# https://www.doxygen.nl/manual/config.html#cfg_generate_tagfile
+GENERATE_TAGFILE       = {{OUTDIR}}/html/index.tag
 
 # https://www.doxygen.nl/manual/config.html#cfg_generate_testlist
 GENERATE_TESTLIST      = NO
@@ -56,14 +77,21 @@ GENERATE_TESTLIST      = NO
 # https://www.doxygen.nl/manual/config.html#cfg_generate_todolist
 GENERATE_TODOLIST      = NO
 
+# This option, along with DISABLE_INDEX and FULL_SIDEBAR,
+# controls the overall layout of the Doxygen HTML site.
+# https://www.doxygen.nl/manual/customize.html#minor_tweaks_treeview
+#
 # https://www.doxygen.nl/manual/config.html#cfg_generate_treeview
-GENERATE_TREEVIEW      = NO
+GENERATE_TREEVIEW      = YES
 
 # Breathe uses Doxygen's XML output to inject the API reference
 # information into our Sphinx site.
 #
 # https://www.doxygen.nl/manual/config.html#cfg_generate_xml
 GENERATE_XML           = YES
+
+# https://www.doxygen.nl/manual/config.html#cfg_html_colorstyle
+HTML_COLORSTYLE        = TOGGLE
 
 # https://www.doxygen.nl/manual/config.html#cfg_html_dynamic_menus
 HTML_DYNAMIC_MENUS     = NO
@@ -88,13 +116,11 @@ MACRO_EXPANSION        = YES
 # https://www.doxygen.nl/manual/config.html#cfg_num_proc_threads
 NUM_PROC_THREADS       = 0
 
+# rules_doxygen replaces `OUTDIR` with the correct output directory path:
+# https://github.com/TendTo/rules_doxygen/blob/main/docs/doxygen_doc.md
+#
 # https://www.doxygen.nl/manual/config.html#cfg_output_directory
-# OUTPUT_DIRECTORY       =
-# IMPORTANT: rules_doxygen replaces the {{OUTPUT_DIRECTORY}} comment
-# below with the correct runtime path for the output directory.
-# https://github.com/TendTo/rules_doxygen/blob/2.2.0/doxygen/doxygen.bzl#L38
-# Do not modify the comment on the next line!
-# {{OUTPUT DIRECTORY}}
+OUTPUT_DIRECTORY       = {{OUTDIR}}
 
 # TODO: https://pwbug.dev/402489948 - Replace PW_ALLOCATOR_HAS_ATOMICS
 # when `pw_atomic` provides portable atomics.
@@ -124,6 +150,12 @@ PREDEFINED             = __cplusplus=202002L \
 # https://www.doxygen.nl/manual/config.html#cfg_project_brief
 PROJECT_BRIEF          = "C/C++ API Reference"
 
+# We hardcode the logo in header.html. We don't attempt to set it via
+# PROJECT_LOGO because Doxygen expects the PROJECT_LOGO file to be local
+# whereas we fetch our logo over CDN.
+# https://www.doxygen.nl/manual/config.html#cfg_project_logo
+# PROJECT_LOGO           =
+
 # https://www.doxygen.nl/manual/config.html#cfg_project_name
 PROJECT_NAME           = "Pigweed"
 
@@ -141,10 +173,18 @@ RECURSIVE              = YES
 # https://www.doxygen.nl/manual/config.html#cfg_show_headerfile
 SHOW_HEADERFILE        = NO
 
+# Alphabetically sort the modules index page.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_sort_group_names
+SORT_GROUP_NAMES       = YES
+
 # https://google.github.io/styleguide/cppguide.html#Spaces_vs._Tabs
 #
 # https://www.doxygen.nl/manual/config.html#cfg_tab_size
 TAB_SIZE               = 2
+
+# https://www.doxygen.nl/manual/config.html#cfg_use_mdfile_as_mainpage
+USE_MDFILE_AS_MAINPAGE = docs/doxygen/index.md
 
 # TODO: https://pwbug.dev/393634135 - Turn this on.
 #

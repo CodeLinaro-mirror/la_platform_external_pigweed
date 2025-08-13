@@ -50,6 +50,11 @@ native_binary(
 )
 
 alias(
+    name = "change",
+    actual = "//pw_change/py:change",
+)
+
+alias(
     name = "watch",
     actual = "//pw_watch/py:bazel",
 )
@@ -57,6 +62,16 @@ alias(
 alias(
     name = "format",
     actual = "//pw_presubmit/py:format",
+)
+
+alias(
+    name = "push",
+    actual = "//pw_change/py:push",
+)
+
+alias(
+    name = "review",
+    actual = "//pw_change/py:review",
 )
 
 alias(
@@ -78,7 +93,10 @@ copy_file(
 refresh_compile_commands(
     name = "refresh_compile_commands_for_fuchsia_sdk",
     out_dir = ".compile_commands",
-    tags = ["nopylint"],
+    tags = [
+        "nomypy",
+        "nopylint",
+    ],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],

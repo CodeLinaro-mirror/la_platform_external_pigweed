@@ -64,6 +64,7 @@ declare_args() {
   dir_pw_build_info = get_path_info("../pw_build_info", "abspath")
   dir_pw_build_mcuxpresso = get_path_info("../pw_build_mcuxpresso", "abspath")
   dir_pw_bytes = get_path_info("../pw_bytes", "abspath")
+  dir_pw_change = get_path_info("../pw_change", "abspath")
   dir_pw_channel = get_path_info("../pw_channel", "abspath")
   dir_pw_checksum = get_path_info("../pw_checksum", "abspath")
   dir_pw_chre = get_path_info("../pw_chre", "abspath")
@@ -272,6 +273,7 @@ declare_args() {
     dir_pw_build_info,
     dir_pw_build_mcuxpresso,
     dir_pw_bytes,
+    dir_pw_change,
     dir_pw_channel,
     dir_pw_checksum,
     dir_pw_chre,
@@ -462,6 +464,7 @@ declare_args() {
     "$dir_pw_build_info:tests",
     "$dir_pw_build_mcuxpresso:tests",
     "$dir_pw_bytes:tests",
+    "$dir_pw_change:tests",
     "$dir_pw_channel:tests",
     "$dir_pw_checksum:tests",
     "$dir_pw_chre:tests",
@@ -652,6 +655,7 @@ declare_args() {
     "$dir_pw_build_info:docs",
     "$dir_pw_build_mcuxpresso:docs",
     "$dir_pw_bytes:docs",
+    "$dir_pw_change:docs",
     "$dir_pw_channel:docs",
     "$dir_pw_checksum:docs",
     "$dir_pw_chre:docs",
