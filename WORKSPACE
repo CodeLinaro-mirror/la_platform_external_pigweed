@@ -23,9 +23,9 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 git_repository(
     name = "fuchsia_infra",
     # ROLL: Warning: this entry is automatically updated.
-    # ROLL: Last updated 2025-08-10.
-    # ROLL: By https://cr-buildbucket.appspot.com/build/8706960765974476289.
-    commit = "cec86888f22754d1dab71f8dcab5e2b48a92ce1a",
+    # ROLL: Last updated 2025-08-24.
+    # ROLL: By https://cr-buildbucket.appspot.com/build/8705692406520452033.
+    commit = "bbe280756862a19bbff76c940b6ff85408d3feea",
     remote = "https://fuchsia.googlesource.com/fuchsia-infra-bazel-rules",
 )
 
