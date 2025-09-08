@@ -16,10 +16,97 @@
 // TODO: b/426012010 - Auto-generate this file from the metadata provided
 // in //docs/sphinx/module_metadata.json.
 
+// TODO: b/441319784 - Move each module's content into that module's directory.
+// E.g. the pw_allocator content should go into //pw_allocator/doxygen.h
+
 // clang-format off
 
 /// @defgroup pw_alignment pw_alignment
 /// @brief Natural object alignment, guaranteed. Main docs: https://pigweed.dev/pw_alignment
+
+/// @defgroup pw_allocator pw_allocator
+/// @brief Flexible, safe, and measurable memory allocation
+/// @details Main docs: [Home](../../pw_allocator/docs.html) |
+/// [Guides](../../pw_allocator/guide.html) |
+/// [Design & roadmap](../../pw_allocator/design.html) |
+/// [Code size analysis](../../pw_allocator/code_size.html)
+
+/// @defgroup pw_allocator_block Blocks
+/// @ingroup pw_allocator
+/// @brief An allocatable region of memory
+/// @details Blocks are the fundamental type managed by several of the
+/// @ref pw_allocator_concrete_block
+
+/// @defgroup pw_allocator_block_impl Block implementations
+/// @ingroup pw_allocator_block
+/// @brief The following combine block mix-ins and provide both the methods
+/// they require as well as a concrete representation of the data those methods
+/// need
+
+/// @brief Blocks are defined using several stateless “mix-in” interface types
+/// @details These provide specific functionality, while deferring the detailed
+/// representation of a block to a derived type.
+
+/// @defgroup pw_allocator_block_mixins Block mix-ins
+/// @ingroup pw_allocator_block
+/// @brief Blocks are defined using several stateless “mix-in” interface types
+/// @details These provide specific functionality, while deferring the detailed
+/// representation of a block to a derived type.
+
+/// @defgroup pw_allocator_bucket Buckets
+/// @ingroup pw_allocator
+/// @brief Data structures that track free blocks
+
+/// @defgroup pw_allocator_config Configuration
+/// @ingroup pw_allocator
+/// @brief Options for controlling block poisoning intervals, validation
+/// checks, and deprecation warnings
+
+/// @defgroup pw_allocator_concrete Concrete allocators
+/// @ingroup pw_allocator
+/// @brief Concrete allocator implementations that provide memory dynamically
+
+/// @defgroup pw_allocator_concrete_block Block allocators
+/// @ingroup pw_allocator_concrete
+
+/// @defgroup pw_allocator_core Core interfaces
+/// @ingroup pw_allocator
+/// @brief Generic allocator interfaces that can be injected into routines that
+/// need dynamic memory
+/// @details These include `Allocator`, as well as the `Layout` type that is
+/// passed to it and the managed smart pointer types, such as `UniquePtr`, that
+/// can be returned from it.
+
+/// @defgroup pw_allocator_forwarding Forwarding allocators
+/// @ingroup pw_allocator
+/// @brief Allocator implementations that don’t allocate memory directly
+/// and instead rely on other allocators while providing additional behaviors
+/// @details Learn more: [Forwarding allocator
+/// concept](../../pw_allocator/design.html#module-pw-allocator-design-forwarding)
+
+/// @defgroup pw_allocator_impl_test_fuzz FuzzTest support
+/// @ingroup pw_allocator_impl_test
+
+/// @defgroup pw_allocator_impl Implementation interfaces
+/// @ingroup pw_allocator
+/// @brief Interfaces for allocator implementers
+/// @details These interfaces are intended for allocator implementers, not for
+/// `pw_allocator` consumers.
+
+/// @defgroup pw_allocator_impl_size Size reports
+/// @ingroup pw_allocator_impl
+/// @brief Generate code size reports for allocator implementations
+
+/// @defgroup pw_allocator_impl_test Testing and debugging
+/// @ingroup pw_allocator_impl
+/// @brief Test utilities for allocator implementers
+/// @details These facilitate writing unit tests and fuzz tests for both
+/// concrete and forwarding allocator implementations. They are not intended to
+/// be used by module consumers.
+
+/// @defgroup pw_allocator_util Utilities
+/// @ingroup pw_allocator
+/// @brief Helpers for metrics, fragmentation, and buffer management
 
 /// @defgroup pw_analog pw_analog
 /// @brief Analog-to-digital converter libraries and utilities. Main docs: https://pigweed.dev/pw_analog
@@ -154,7 +241,53 @@
 /// @brief Replacement interface for standard libc dynamic memory operations. Main docs: https://pigweed.dev/pw_malloc
 
 /// @defgroup pw_multibuf pw_multibuf
-/// @brief A buffer API optimized for zero-copy messaging. Main docs: https://pigweed.dev/pw_multibuf
+/// @brief A buffer API optimized for zero-copy messaging.
+/// @details Main docs: [Home](../../pw_multibuf/docs.html) |
+/// [Code size analysis](../../pw_multibuf/code_size.html)
+
+/// @defgroup pw_multibuf_v1 Legacy v1 API
+/// @ingroup pw_multibuf
+/// @brief Interfaces that will eventually be deprecated
+/// @details Most users of `pw_multibuf` will start by allocating a `MultiBuf`
+/// using a `MultiBufAllocator` class, such as the `SimpleAllocator`.
+///
+/// A `MultiBuf` consists of a number of `Chunk` instances representing
+/// contiguous memory regions. A `Chunk` can be grown or shrunk which allows
+/// `MultiBuf` to be grown or shrunk. This allows, for example, lower layers to
+/// reserve part of a `MultiBuf` for a header or footer. See `Chunk` for more
+/// details.
+///
+/// `MultiBuf` exposes an `std::byte` iterator interface as well as a `Chunk`
+/// iterator available through the `Chunks()` method. It allows extracting a
+/// `Chunk` as an RAII-style `OwnedChunk` which manages its own lifetime.
+
+/// @defgroup pw_multibuf_v1_impl Allocator implementation API
+/// @ingroup pw_multibuf_v1
+/// @details Some users will need to directly implement the `MultiBufAllocator`
+/// interface in order to provide allocation out of a particular region,
+/// provide particular allocation policy, fix chunks to some size (such as MTU
+/// size - header for socket implementations), or specify other custom behavior.
+/// These users will also need to understand and implement the
+/// `ChunkRegionTracker` API.
+///
+/// A simple implementation of a `ChunkRegionTracker` is provided, called
+/// `HeaderChunkRegionTracker`. It stores its `Chunk` and region metadata in a
+/// `Allocator` allocation alongside the data. The allocation process is
+/// synchronous, making this class suitable for testing. The allocated region or
+/// `Chunk` must not outlive the provided allocator.
+///
+/// Another `ChunkRegionTracker` specialization is the lightweight
+/// `SingleChunkRegionTracker`, which does not rely on `Allocator` and uses the
+/// provided memory view to create a single chunk. This is useful when a single
+/// `Chunk` is sufficient at no extra overhead. However, the user needs to own
+/// the provided memory and know when a new `Chunk` can be requested.
+
+/// @defgroup pw_multibuf_v1_test Test-only features
+/// @ingroup pw_multibuf_v1
+
+/// @defgroup pw_multibuf_v2 Experimental v2 API
+/// @ingroup pw_multibuf
+/// @brief Experimental API that separates out the concern of memory allocation
 
 /// @defgroup pw_numeric pw_numeric
 /// @brief Efficient mathematical utilities for embedded. Main docs: https://pigweed.dev/pw_numeric
@@ -177,8 +310,61 @@
 /// @defgroup pw_span pw_span
 /// @brief std::span for C++17. Main docs: https://pigweed.dev/pw_span
 
+/// @defgroup pw_stream pw_stream
+/// @brief A foundational interface for streaming data
+/// @details Main docs: [Home](../../pw_stream/docs.html) |
+/// [Backends](../../pw_stream/backends.html) |
+/// [Python](../../pw_stream/py/docs.html)
+
+/// @defgroup pw_stream_interface Interfaces
+/// @ingroup pw_stream
+/// @brief Generic stream interfaces that support a combination of reading,
+/// writing, and seeking
+
+/// @defgroup pw_stream_interface_reader Readers
+/// @ingroup pw_stream_interface
+/// @brief Streams that support reading but not writing
+
+/// @defgroup pw_stream_interface_writer Writers
+/// @ingroup pw_stream_interface
+/// @brief Streams that support writing but not reading
+
+/// @defgroup pw_stream_interface_readerwriter ReaderWriters
+/// @ingroup pw_stream_interface
+/// @brief Streams that support both reading and writing
+
+/// @defgroup pw_stream_concrete Implementations
+/// @ingroup pw_stream
+/// @brief Concrete implementations of stream interfaces for general use
+
 /// @defgroup pw_stream_uart_linux pw_stream_uart_linux
 /// @brief Main docs: https://pigweed.dev/pw_stream_uart_linux
+
+/// @defgroup pw_string pw_string
+/// @brief Efficient, easy, and safe string manipulation
+/// @details Main docs: [Home](../../pw_string/docs.html) |
+/// [Get started & guides](../../pw_string/guide.html) |
+/// [Design & roadmap](../../pw_string/design.html) |
+/// [Code size analysis](../../pw_string/code_size.html)
+
+/// @defgroup pw_string_inline InlineString and InlineBasicString
+/// @ingroup pw_string
+/// @brief Safer alternatives to `std::string` and `std::basic_string`
+
+/// @defgroup pw_string_builder StringBuilder
+/// @ingroup pw_string
+/// @brief The flexibility of `std::ostringstream` but with a small footprint
+
+/// @defgroup pw_string_util Utilities
+/// @ingroup pw_string
+/// @brief Safer alternatives to C++ standard library string functions
+
+/// @defgroup pw_string_utf8 UTF-8 helpers
+/// @ingroup pw_string
+/// @brief Basic helpers for reading and writing UTF-8-encoded strings
+
+/// @defgroup pw_sync pw_sync
+/// @brief Main docs: [Home](../../pw_sync/docs.html)
 
 /// @defgroup pw_sys_io pw_sys_io
 /// @brief Main docs: https://pigweed.dev/pw_sys_io
@@ -188,6 +374,30 @@
 
 /// @defgroup pw_thread pw_thread
 /// @brief Main docs: https://pigweed.dev/pw_thread
+
+/// @defgroup pw_tokenizer pw_tokenizer
+/// @brief Compress strings to shrink logs by +75%
+/// @details Main docs: [Home](../../pw_tokenizer/docs.html) |
+/// [Quickstart](../../pw_tokenizer/get_started.html) |
+/// [Tokenization](../../pw_tokenizer/tokenization.html) |
+/// [Token databases](../../pw_tokenizer/token_databases.html) |
+/// [Detokenization](../../pw_tokenizer/detokenization.html)
+
+/// @defgroup pw_tokenizer_tokenize Tokenization
+/// @ingroup pw_tokenizer
+/// @brief Convert string literals to tokens
+
+/// @defgroup pw_tokenizer_detokenize Detokenization
+/// @ingroup pw_tokenizer
+/// @brief Expand a token to the string it represents and decode its arguments
+
+/// @defgroup pw_tokenizer_database Token databases
+/// @ingroup pw_tokenizer
+/// @brief Store a mapping of tokens to the strings they represent
+
+/// @defgroup pw_tokenizer_config Configuration
+/// @ingroup pw_tokenizer
+/// @brief Tokenization customization options
 
 /// @defgroup pw_toolchain pw_toolchain
 /// @brief Embedded toolchains for GN-based Pigweed projects. Main docs: https://pigweed.dev/pw_toolchain
