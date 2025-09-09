@@ -534,6 +534,7 @@ def should_add_rust_link(module_name: str, languages: list[str] | None) -> bool:
 def should_add_doxygen_link(module_name) -> bool:
     ok = [
         'pw_alignment',
+        'pw_allocator',
         'pw_analog',
         'pw_async',
         'pw_async2',
@@ -574,10 +575,14 @@ def should_add_doxygen_link(module_name) -> bool:
         'pw_preprocessor',
         'pw_random',
         'pw_span',
+        'pw_stream',
         'pw_stream_uart_linux',
+        'pw_string',
+        'pw_sync',
         'pw_sys_io',
         'pw_system',
         'pw_thread',
+        'pw_tokenizer',
         'pw_toolchain',
         'pw_trace_tokenized',
         'pw_transfer',
