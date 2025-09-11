@@ -110,7 +110,6 @@
           "module_name": "npm_action"
         }
       ],
-      "gni_file": "build_overrides/pigweed_environment.gni",
       "cipd_package_files": [
         "pw_env_setup/py/pw_env_setup/cipd_setup/upstream.json"
       ],
@@ -166,6 +165,11 @@
             "test",
             "--config=lm3s6965evb",
             "//pw_status/..."
+          ],
+          [
+            "test",
+            "--test_tag_filters=jni",
+            "//..."
           ],
           [
             "build",
