@@ -177,6 +177,42 @@
 /// @defgroup pw_bytes pw_bytes
 /// @brief Utilities for manipulating binary data. Main docs: https://pigweed.dev/pw_bytes
 
+/// @defgroup pw_bytes_ptr Packed pointers
+/// @ingroup pw_bytes
+/// @brief Store data in unused pointer bits
+
+/// @defgroup pw_bytes_align Alignment
+/// @ingroup pw_bytes
+/// @brief Functions for memory alignment
+
+/// @defgroup pw_bytes_array Byte arrays
+/// @ingroup pw_bytes
+/// @brief Compile-time construction of byte arrays
+
+/// @defgroup pw_bytes_build Byte builders
+/// @ingroup pw_bytes
+/// @brief Dynamically build byte sequences in fixed-size buffers
+
+/// @defgroup pw_bytes_bit Bit manipulation
+/// @ingroup pw_bytes
+/// @brief C++20 `<bit>` features and extensions
+
+/// @defgroup pw_bytes_endian Endian conversion
+/// @ingroup pw_bytes
+/// @brief Utilities for handling byte order
+
+/// @defgroup pw_bytes_suffix Byte suffixes
+/// @ingroup pw_bytes
+/// @brief Convenient literal for `std::byte`
+
+/// @defgroup pw_bytes_unit Byte units
+/// @ingroup pw_bytes
+/// @brief Constants and literals for byte sizes e.g. KiB
+
+/// @defgroup pw_bytes_span Byte spans
+/// @ingroup pw_bytes
+/// @brief Aliases for `pw::span` of bytes
+
 /// @defgroup pw_channel pw_channel
 /// @brief Async, zero-copy API for sending and receiving bytes or datagrams. Main docs: https://pigweed.dev/pw_channel
 
@@ -233,6 +269,49 @@
 
 /// @defgroup pw_kvs pw_kvs
 /// @brief Lightweight, persistent key-value store. Main docs: https://pigweed.dev/pw_kvs
+
+/// @defgroup pw_log pw_log
+/// @brief Robust and portable logging for embedded projects
+/// @details Main docs: [Home](../../pw_log/docs.html) |
+/// [The pw_log protobuf](../../pw_log/protobuf.html) |
+/// [Tokenized log arguments](../../pw_log/tokenized_args.html) |
+/// [Backends](../../pw_log/backends.html)
+
+/// @defgroup pw_log_global_config Global config
+/// @ingroup pw_log
+/// @details These configuration options differ from the options in
+/// `pw_log/options.h` in that these should be set at a global level in the
+/// build system rather than at a module or compile unit level.
+
+/// @defgroup pw_log_module_config Module config
+/// @ingroup pw_log
+/// @details These configuration options differ from the options in
+/// `pw_log/config.h` in that these should be set at a module/compile unit
+/// level rather than a global level.
+
+/// @defgroup pw_log_proto Protobuf helpers
+/// @ingroup pw_log
+/// @details Learn more: [The pw_log protobuf](../../pw_log/protobuf.html)
+
+/// @defgroup pw_log_short Short macros
+/// @ingroup pw_log
+/// @brief Optional shortened versions of the `PW_LOG` macros
+/// @details These shortened versions are not prefixed with `PW_*`, so may
+/// collide with other macros.
+
+/// @defgroup pw_log_glog Google Logging (glog) macros
+/// @ingroup pw_log
+/// @details @warning Pigweed strongly recommends sticking to `printf`-style
+/// logging instead of C++ stream-style glog logging unless absolutely
+/// necessary. These macros are only provided for compatibility with
+/// non-embedded code.
+
+/// @defgroup pw_log_tokenized_args Tokenized args
+/// @ingroup pw_log
+/// @details Learn more: [Tokenized log arguments](../../pw_log/tokenized_args.html)
+
+/// @defgroup pw_log_string pw_log_string
+/// @brief Main docs: https://pigweed.dev/pw_log_string
 
 /// @defgroup pw_log_tokenized pw_log_tokenized
 /// @brief Main docs: https://pigweed.dev/pw_log_tokenized
@@ -304,11 +383,53 @@
 /// @defgroup pw_preprocessor pw_preprocessor
 /// @brief Helpful preprocessor macros. Main docs: https://pigweed.dev/pw_preprocessor
 
+/// @defgroup pw_protobuf pw_protobuf
+/// @brief Expressive interface for encoding and decoding protocol buffers
+/// @details Main docs: [Home](../../pw_protobuf/docs.html) |
+/// [Extended size report](../../pw_protobuf/size_report.html)
+
+/// @defgroup pw_protobuf_find Find APIs
+/// @ingroup pw_protobuf
+
 /// @defgroup pw_random pw_random
 /// @brief Main docs: https://pigweed.dev/pw_random
 
+/// @defgroup pw_rpc pw_rpc
+/// @brief Efficient, low-code-size RPC system for embedded devices
+/// @details Main docs: [Home](../../pw_rpc/docs.html) |
+/// [Quickstart & guides](../../pw_rpc/guides.html) |
+/// [Client, server, and protobuf libraries](../../pw_rpc/libraries.html) |
+/// [C++ server and client](../../pw_rpc/cpp.html) |
+/// [Python client](../../pw_rpc/py/docs.html) |
+/// [TypeScript client](../../pw_rpc/ts/docs.html) |
+/// [Nanopb codegen](../../pw_rpc/nanopb/docs.html) |
+/// [pw_protobuf codegen](../../pw_rpc/pwpb/docs.html) |
+/// [Packet protocol](../../pw_rpc/protocol.html) |
+/// [Design & roadmap](../../pw_rpc/design.html) |
+/// [HDLC example](../../pw_hdlc/rpc_example/docs.html)
+
+/// @defgroup pw_rpc_test Benchmarking & testing
+/// @ingroup pw_rpc
+
+/// @defgroup pw_rpc_channel Channels
+/// @ingroup pw_rpc
+
+/// @defgroup pw_rpc_sync Synchronous API
+/// @ingroup pw_rpc
+/// @details Main docs: [Client synchronous call
+/// wrappers](../../pw_rpc/cpp.html#client-synchronous-call-wrappers)
+
+/// @defgroup pw_rpc_config Configuration
+/// @ingroup pw_rpc
+
 /// @defgroup pw_span pw_span
 /// @brief std::span for C++17. Main docs: https://pigweed.dev/pw_span
+
+/// @defgroup pw_status pw_status
+/// @brief Exception-free error propagation for embedded
+/// @details Main docs: [Home](../../pw_status/docs.html) |
+/// [Quickstart & guides](../../pw_status/guide.html) |
+/// [Reference](../../pw_status/reference.html)
 
 /// @defgroup pw_stream pw_stream
 /// @brief A foundational interface for streaming data
@@ -414,10 +535,51 @@
 /// @defgroup pw_uart pw_uart
 /// @brief Core interfaces for UART communication. Main docs: https://pigweed.dev/pw_uart
 
+/// @defgroup pw_unit_test pw_unit_test
+/// @brief GoogleTest for embedded
+/// @details Main docs: [Home](../../pw_unit_test/docs.html)
+
+/// @defgroup pw_unit_test_declaration Test declaration
+/// @ingroup pw_unit_test
+
+/// @defgroup pw_unit_test_control Test control
+/// @ingroup pw_unit_test
+
+/// @defgroup pw_unit_test_expectations Expectations
+/// @ingroup pw_unit_test
+/// @details When a test fails an expectation, the framework marks the test as
+/// a failure and then continues executing the test. They’re useful when you
+/// want to verify multiple dimensions of the same feature and see all the
+/// errors at the same time.
+
+/// @defgroup pw_unit_test_assertions Assertions
+/// @ingroup pw_unit_test
+/// @details Assertions work the same as expectations except they stop the
+/// execution of the test as soon as a failed condition is met.
+
+/// @defgroup pw_unit_test_events Event handlers
+/// @ingroup pw_unit_test
+
+/// @defgroup pw_unit_test_configuration Configuration
+/// @ingroup pw_unit_test
+
+/// @defgroup pw_unit_test_helpers Helpers
+/// @ingroup pw_unit_test
+
+/// @defgroup pw_unit_test_constexpr Constexpr tests
+/// @ingroup pw_unit_test
+
 /// @defgroup pw_uuid pw_uuid
 /// @brief 128-bit universally unique identifier (UUID). Main docs: https://pigweed.dev/pw_uuid
 
 /// @defgroup pw_work_queue pw_work_queue
 /// @brief Main docs: https://pigweed.dev/pw_work_queue
+
+/// @defgroup third_party third-party
+/// @brief API integrations with third-party software e.g. FreeRTOS
+
+/// @defgroup third_party_freertos FreeRTOS
+/// @ingroup third_party
+/// @brief FreeRTOS application functions
 
 // clang-format on

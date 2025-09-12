@@ -52,7 +52,7 @@ _ALL_COMPILE_EXTS = _C_COMPILE_EXTS + _CPP_COMPILE_EXTS
 
 # This value is somewhat arbitrary. It's roughly associated with the maximum
 # number of direct dependencies any one target may have.
-_MAX_STACK_ITERATIONS = 999
+_MAX_STACK_ITERATIONS = 99999
 
 def _get_one_compile_command(ctx, src, action):
     """Extracts compile commands associated with the source.
@@ -275,7 +275,7 @@ def _compile_commands_aspect_impl(target, ctx):
             # Always return this OutputGroupInfo, or transitive compile commands
             # will not be generated if the target itself doesn't emit compile
             # commands.
-            OutputGroupInfo(compile_commands_fragments = transitive_fragments),
+            OutputGroupInfo(pw_cc_compile_commands_fragments = transitive_fragments),
         ]
 
     fragment_file = ctx.actions.declare_file(
@@ -293,10 +293,10 @@ def _compile_commands_aspect_impl(target, ctx):
 
     return [
         CompileCommandsFragmentInfo(fragments = compile_command_fragments),
-        OutputGroupInfo(compile_commands_fragments = compile_command_fragments),
+        OutputGroupInfo(pw_cc_compile_commands_fragments = compile_command_fragments),
     ]
 
-compile_commands_aspect = aspect(
+pw_cc_compile_commands_aspect = aspect(
     implementation = _compile_commands_aspect_impl,
     attr_aspects = ["*"],
     fragments = ["cpp"],
