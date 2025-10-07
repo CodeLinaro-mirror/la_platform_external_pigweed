@@ -346,7 +346,7 @@ cc_library(
     deps = [
         ":config",
         "//pw_assert:assert",
-        "//pw_preprocessor",
+        "//pw_numeric:checked_arithmetic",
     ],
 )
 
@@ -411,6 +411,7 @@ cc_library(
         ":pw_allocator",
         "//pw_sync:borrow",
         "//pw_sync:lock_annotations",
+        "//pw_sync:no_lock",
     ],
 )
 
@@ -449,6 +450,25 @@ cc_library(
         ":chunk_pool",
         ":hardening",
         "//pw_bytes",
+    ],
+)
+
+cc_library(
+    name = "guarded_allocator",
+    srcs = ["guarded_allocator.cc"],
+    hdrs = ["public/pw_allocator/guarded_allocator.h"],
+    implementation_deps = [
+        "//pw_assert:check",
+        "//pw_bytes:alignment",
+        "//pw_span",
+        "//third_party/fuchsia:stdcompat",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        "//pw_allocator",
+        "//pw_allocator:synchronized_allocator",
+        "//pw_result",
+        "//pw_sync:borrow",
     ],
 )
 
@@ -503,14 +523,7 @@ cc_library(
 cc_library(
     name = "block_allocator_testing",
     testonly = True,
-    srcs = ["block_allocator_testing.cc"],
     hdrs = ["public/pw_allocator/block_allocator_testing.h"],
-    implementation_deps = [
-        "//pw_assert:check",
-        "//pw_bytes:alignment",
-        "//pw_status",
-        "//third_party/fuchsia:stdcompat",
-    ],
     strip_include_prefix = "public",
     deps = [
         ":block_allocator",
@@ -521,7 +534,10 @@ cc_library(
         "//pw_allocator/block:detailed_block",
         "//pw_allocator/block:testing",
         "//pw_assert:assert",
+        "//pw_bytes:alignment",
+        "//pw_status",
         "//pw_unit_test",
+        "//third_party/fuchsia:stdcompat",
     ],
 )
 
@@ -534,6 +550,28 @@ cc_library(
     deps = [
         ":pw_allocator",
         ":testing",
+        "//pw_unit_test",
+    ],
+)
+
+cc_library(
+    name = "sync_allocator_testing",
+    testonly = True,
+    srcs = ["sync_allocator_testing.cc"],
+    hdrs = ["public/pw_allocator/sync_allocator_testing.h"],
+    implementation_deps = [
+        ":deallocator",
+        "//pw_status",
+        "//pw_thread:yield",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":allocator",
+        "//pw_containers:vector",
+        "//pw_sync:binary_semaphore",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
+        "//pw_thread:thread_core",
         "//pw_unit_test",
     ],
 )
@@ -735,6 +773,19 @@ pw_cc_test(
 )
 
 pw_cc_test(
+    name = "guarded_allocator_test",
+    srcs = ["guarded_allocator_test.cc"],
+    deps = [
+        ":first_fit_block_allocator",
+        ":guarded_allocator",
+        ":sync_allocator_testing",
+        "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:mutex",
+        "//pw_unit_test",
+    ],
+)
+
+pw_cc_test(
     name = "layout_test",
     srcs = ["layout_test.cc"],
     deps = [
@@ -798,20 +849,13 @@ pw_cc_test(
         "//conditions:default": [],
     }),
     deps = [
+        ":sync_allocator_testing",
         ":synchronized_allocator",
         ":test_harness",
         ":testing",
-        "//pw_containers:vector",
-        "//pw_random",
-        "//pw_status",
-        "//pw_sync:binary_semaphore",
         "//pw_sync:interrupt_spin_lock",
         "//pw_sync:mutex",
-        "//pw_sync:virtual_basic_lockable",
-        "//pw_thread:test_thread_context",
-        "//pw_thread:thread",
-        "//pw_thread:thread_core",
-        "//pw_thread:yield",
+        "//pw_unit_test",
     ],
 )
 
@@ -903,6 +947,7 @@ filegroup(
         "public/pw_allocator/first_fit.h",
         "public/pw_allocator/fragmentation.h",
         "public/pw_allocator/fuzzing.h",
+        "public/pw_allocator/guarded_allocator.h",
         "public/pw_allocator/layout.h",
         "public/pw_allocator/libc_allocator.h",
         "public/pw_allocator/metrics.h",
@@ -1138,6 +1183,13 @@ pw_size_diff(
 )
 
 pw_size_diff(
+    name = "guarded_allocator_size_report",
+    base = "//pw_allocator/size_report:best_fit",
+    label = "GuardedAllocator",
+    target = "//pw_allocator/size_report:guarded_allocator",
+)
+
+pw_size_diff(
     name = "pmr_allocator_size_report",
     base = "//pw_allocator/size_report:pmr_allocator_base",
     label = "AsPmrAllocator",
@@ -1176,6 +1228,7 @@ pw_size_table(
     name = "forwarding_allocators_size_report",
     reports = [
         ":fallback_allocator_size_report",
+        ":guarded_allocator_size_report",
         ":pmr_allocator_size_report",
         ":synchronized_allocator_size_report_isl",
         ":synchronized_allocator_size_report_mutex",

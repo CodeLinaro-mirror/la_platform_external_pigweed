@@ -34,6 +34,7 @@ using pw::async2::Context;
 using pw::async2::Dispatcher;
 using pw::async2::Pending;
 using pw::async2::Poll;
+using pw::async2::PollResult;
 using pw::async2::Ready;
 using pw::async2::Task;
 using pw::async2::Waker;
@@ -77,7 +78,7 @@ class PacketReaderWriterStub
   constexpr PacketReaderWriterStub() = default;
 
  private:
-  Poll<Result<TestPacket>> DoPendRead(Context&) override { return Pending(); }
+  PollResult<TestPacket> DoPendRead(Context&) override { return Pending(); }
 
   Poll<Status> DoPendReadyToWrite(Context&, size_t) override {
     return Pending();
@@ -98,7 +99,7 @@ class ReadOnlyPacketStub
   constexpr ReadOnlyPacketStub() = default;
 
  private:
-  Poll<Result<TestPacket>> DoPendRead(Context&) override { return Pending(); }
+  PollResult<TestPacket> DoPendRead(Context&) override { return Pending(); }
 
   pw::async2::Poll<pw::Status> DoPendClose(pw::async2::Context&) override {
     return Pending();
@@ -114,8 +115,8 @@ class TestPacketWriterImpl
   void set_ready_to_write(bool ready) {
     bool old_ready_to_write = ready_to_write_;
     ready_to_write_ = ready;
-    if (!old_ready_to_write && ready_to_write_ && !waker_.IsEmpty()) {
-      std::move(waker_).Wake();
+    if (!old_ready_to_write && ready_to_write_ && !write_waker().IsEmpty()) {
+      std::move(write_waker()).Wake();
     }
   }
   void ClearPackets() { packets_.clear(); }
@@ -125,12 +126,15 @@ class TestPacketWriterImpl
       pw::channel::PacketWriter<Packet>>::GetAvailableWrites;
 
  private:
+  using AnyPacketChannel<Packet>::write_waker;
+
   Poll<Status> DoPendReadyToWrite(pw::async2::Context& context,
                                   size_t /*num*/) override {
     if (ready_to_write_) {
       return pw::async2::Ready(pw::OkStatus());
     }
-    PW_ASYNC_STORE_WAKER(context, waker_, "waiting for set_ready_to_write");
+    PW_ASYNC_STORE_WAKER(
+        context, write_waker(), "waiting for set_ready_to_write");
     return pw::async2::Pending();
   }
 
@@ -148,7 +152,6 @@ class TestPacketWriterImpl
   }
 
   bool ready_to_write_ = true;
-  pw::async2::Waker waker_;
   pw::Vector<Packet, 5> packets_;
 };
 
@@ -176,7 +179,7 @@ class TestPacketReader
   size_t queue_size() const { return packet_queue_.size(); }
 
  private:
-  Poll<Result<TestPacket>> DoPendRead(Context& cx) override {
+  PollResult<TestPacket> DoPendRead(Context& cx) override {
     if (!packet_queue_.empty()) {
       TestPacket packet = std::move(packet_queue_.front());
       packet_queue_.pop_front();
@@ -214,7 +217,7 @@ class ReadPacketsTask : public Task {
  private:
   Poll<> DoPend(Context& cx) override {
     while (received_packets.size() < packets_to_read_) {
-      Poll<Result<TestPacket>> poll_result = reader_.PendRead(cx);
+      PollResult<TestPacket> poll_result = reader_.PendRead(cx);
       if (poll_result.IsPending()) {
         return Pending();
       }
@@ -484,6 +487,40 @@ PW_NC_EXPECT("Cannot use a non-readable channel as a readable channel");
 void ConvertWriterToReader() {
   TestPacketWriterImpl<> ws;
   TakesPacketReader(ws.channel().template as<PacketReader<TestPacket>>());
+}
+#elif PW_NC_TEST(PacketChannelInvalidOrdering)
+PW_NC_EXPECT("Properties must be specified in the following order");
+bool Illegal(
+    pw::channel::PacketChannel<TestPacket, kReadable, pw::channel::kReliable>&
+        foo) {
+  return foo.is_read_open();
+}
+#elif PW_NC_TEST(PacketChannelImplInvalidOrdering)
+PW_NC_EXPECT("Properties must be specified in the following order");
+class BadChannel
+    : public pw::channel::PacketChannelImpl<TestPacket, kWritable, kReadable> {
+};
+#elif PW_NC_TEST(PacketChannelNoReadOrWrite)
+PW_NC_EXPECT("At least one of kReadable or kWritable must be provided");
+bool Illegal(pw::channel::PacketChannel<TestPacket>& foo) {
+  return foo.is_read_open();
+}
+#elif PW_NC_TEST(PacketChannelImplNoReadOrWrite)
+PW_NC_EXPECT("At least one of kReadable or kWritable must be provided");
+class BadChannel : public pw::channel::PacketChannelImpl<TestPacket> {};
+#elif PW_NC_TEST(PacketChannelDuplicateProperties)
+PW_NC_EXPECT("without duplicates");
+bool Illegal(
+    pw::channel::PacketChannel<TestPacket, kReadable, kReadable>& foo) {
+  return foo.is_read_open();
+}
+#elif PW_NC_TEST(PacketChannelUnsupportedProperty)
+PW_NC_EXPECT(
+    "PacketChannel only supports the kReadable and kWritable properties");
+bool Illegal(
+    pw::channel::PacketChannel<TestPacket, pw::channel::kReliable, kReadable>&
+        foo) {
+  return foo.is_read_open();
 }
 #endif  // PW_NC_TEST
 

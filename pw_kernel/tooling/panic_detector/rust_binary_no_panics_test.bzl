@@ -55,21 +55,32 @@ _rust_binary_no_panics_test = rule(
             # be checked is compiled without the tests, as test
             # code, is, well, panicky by design...
             cfg = disable_tests_transition,
-            allow_single_file = True,
             mandatory = True,
         ),
         "_panic_detector": attr.label(
             executable = True,
             cfg = "exec",
-            default = "//pw_kernel/tooling/panic_detector:panic_detector",
+            default = "//pw_kernel/tooling/panic_detector:panic_detector_tool",
         ),
     },
     doc = "Check whether the rust binary contains any panics.",
 )
 
 def rust_binary_no_panics_test(name, binary, **kwargs):
+    """Check whether the rust binary contains any panics.
+
+    Args:
+        name: Name of the target
+        binary: Target to check for panics
+        **kwargs: Args to pass through to the underlying rule.
+    """
+
     if kwargs.get("target_compatible_with") == None:
         kwargs["target_compatible_with"] = incompatible_with_mcu()
+
+    tags = kwargs.get("tags", default = [])
+    tags.append("kernel_panic_test")
+    kwargs["tags"] = tags
 
     _rust_binary_no_panics_test(
         name = name,

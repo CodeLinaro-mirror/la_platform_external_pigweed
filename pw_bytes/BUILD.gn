@@ -48,9 +48,9 @@ pw_source_set("alignment") {
   public = [ "public/pw_bytes/alignment.h" ]
   public_deps = [
     ":pw_bytes",
+    "$dir_pw_numeric:checked_arithmetic",
     "$pw_external_fuchsia:stdcompat",
     dir_pw_assert,
-    dir_pw_preprocessor,
   ]
   sources = [ "alignment.cc" ]
 }
@@ -109,7 +109,10 @@ pw_test("byte_builder_test") {
 }
 
 pw_test("endian_test") {
-  deps = [ ":pw_bytes" ]
+  deps = [
+    ":pw_bytes",
+    "$dir_pw_unit_test:constexpr",
+  ]
   sources = [ "endian_test.cc" ]
 }
 
@@ -122,6 +125,7 @@ pw_test("packed_ptr_test") {
 pw_test("span_test") {
   deps = [ ":pw_bytes" ]
   sources = [ "span_test.cc" ]
+  negative_compilation_tests = true
 }
 
 pw_test("suffix_test") {

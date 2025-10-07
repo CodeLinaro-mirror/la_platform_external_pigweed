@@ -50,6 +50,11 @@ pw_cc_binary(
 pw_py_binary(
     name = "proxy",
     srcs = ["proxy.py"],
+    tags = [
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
+    ],
     deps = [
         ":config_pb2",
         "//pw_hdlc/py:pw_hdlc",
@@ -67,6 +72,11 @@ pw_py_test(
     ],
     imports = ["."],
     main = "proxy_test.py",
+    tags = [
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
+    ],
     deps = [
         ":config_pb2",
         "//pw_hdlc/py:pw_hdlc",
@@ -142,6 +152,11 @@ py_library(
     ],
     features = ["-conversion_warnings"],
     imports = ["."],
+    # TODO: b/434032260 - Fix these warnings.
+    tags = [
+        "nomypy",
+        "nopylint",
+    ],
     deps = [
         ":config_pb2",
         "//pw_protobuf:status_proto_pb2",
@@ -200,6 +215,9 @@ pw_py_test(
     features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
@@ -219,6 +237,9 @@ pw_py_test(
     features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
@@ -238,6 +259,9 @@ pw_py_test(
     features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
@@ -256,6 +280,9 @@ pw_py_test(
     features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
@@ -272,6 +299,9 @@ pw_py_test(
     features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
@@ -293,6 +323,9 @@ pw_py_test(
     features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     # Legacy binaries were only built for linux-x86_64.
     target_compatible_with = ["@platforms//os:linux"],
@@ -325,6 +358,11 @@ java_binary(
 pw_py_binary(
     name = "python_client",
     srcs = ["python_client.py"],
+    tags = [
+        # TODO: b/434032260 - Fix these warnings.
+        "nomypy",
+        "nopylint",
+    ],
     deps = [
         ":config_pb2",
         "//pw_hdlc/py:pw_hdlc",

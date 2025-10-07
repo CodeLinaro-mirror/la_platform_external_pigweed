@@ -8,12 +8,6 @@ APIs
 
 .. _module-pw_clock_tree-references:
 
-ClockTree
-=========
-.. doxygenclass:: pw::clock_tree::ClockTree
-   :members:
-
-
 Element
 =======
 .. doxygenclass:: pw::clock_tree::Element
@@ -61,7 +55,7 @@ ClockDividerElement
    :members:
    :protected-members:
 
-ElementController
-=================
-.. doxygenclass:: pw::clock_tree::ElementController
+OptionalElement
+===============
+.. doxygenclass:: pw::clock_tree::OptionalElement
    :members:

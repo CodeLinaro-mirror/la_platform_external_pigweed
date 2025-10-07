@@ -50,6 +50,10 @@ py_library(
         "pw_env_setup/config_file.py",
     ],
     imports = ["."],
+    # Must have the same tags as pw_env_setup_private to avoid action conflicts.
+    # See the last point in
+    # https://github.com/bazel-contrib/rules_python/blob/main/docs/precompiling.md#known-issues-caveats-and-idiosyncrasies
+    tags = ["nomypy"],
     # This library should be considered Pigweed implementation details.
     # Projects outside of Pigweed should never directly depend on the API of
     # this module.
@@ -68,16 +72,23 @@ py_library(
         "pw_env_setup/cipd_setup/__init__.py",
         "pw_env_setup/cipd_setup/update.py",
         "pw_env_setup/cipd_setup/wrapper.py",
+        "pw_env_setup/colors.py",
         "pw_env_setup/config_file.py",
+        "pw_env_setup/entry_points/__init__.py",
+        "pw_env_setup/entry_points/arm_gdb.py",
+        "pw_env_setup/env_setup.py",
         "pw_env_setup/environment.py",
         "pw_env_setup/github_visitor.py",
         "pw_env_setup/gni_visitor.py",
         "pw_env_setup/json_visitor.py",
+        "pw_env_setup/npm_action.py",
         "pw_env_setup/python_packages.py",
         "pw_env_setup/shell_visitor.py",
+        "pw_env_setup/spinner.py",
         "pw_env_setup/virtualenv_setup/__init__.py",
         "pw_env_setup/virtualenv_setup/__main__.py",
         "pw_env_setup/virtualenv_setup/install.py",
+        "pw_env_setup/windows_env_start.py",
     ],
     data = [
         "pw_env_setup/cipd_setup/.cipd_version",
@@ -104,7 +115,6 @@ py_library(
         "pw_env_setup/cipd_setup/python311.json",
         "pw_env_setup/cipd_setup/rbe.json",
         "pw_env_setup/cipd_setup/riscv.json",
-        "pw_env_setup/cipd_setup/ruff.json",
         "pw_env_setup/cipd_setup/rust.json",
         "pw_env_setup/cipd_setup/testing.json",
         "pw_env_setup/cipd_setup/upstream.json",
@@ -115,8 +125,12 @@ py_library(
         ":pigweed_json",
     ],
     imports = ["."],
+    # error: Cannot find implementation or library stub for module named "pkg_resources"  [import-not-found]
+    # Maybe https://github.com/python/mypy/issues/18839 ? Unclear why it only
+    # happens in Bazel, though.
+    tags = ["nomypy"],
     # Nobody in the Bazel ecosystem should ever use these parts of pw_env_setup.
-    visibility = ["//docs:__pkg__"],
+    visibility = ["//docs/sphinx:__pkg__"],
     deps = [
         "@pigweed_python_packages//setuptools",  # For import pkg_resources
         "@pigweed_python_packages//six",
@@ -154,5 +168,13 @@ pw_py_test(
     srcs = ["environment_test.py"],
     deps = [
         ":pw_env_setup_private",
+        "@pigweed_python_packages//six",
     ],
+)
+
+pw_py_test(
+    name = "python_packages_test",
+    srcs = ["python_packages_test.py"],
+    tags = ["manual"],  # TODO: b/431912506 - Fix this test in Bazel.
+    deps = [":pw_env_setup_private"],
 )

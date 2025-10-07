@@ -53,8 +53,10 @@ pw_py_binary(
     main = "pw_rpc/plugin_raw.py",
     python_version = "PY3",
     deps = [
+        ":pw_rpc",
         "//pw_protobuf/py:plugin_library",
         "//pw_protobuf_compiler/py:pw_protobuf_compiler",
+        "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "@com_google_protobuf//:protobuf_python",
     ],
@@ -67,8 +69,10 @@ pw_py_binary(
     main = "pw_rpc/plugin_nanopb.py",
     python_version = "PY3",
     deps = [
+        ":pw_rpc",
         "//pw_protobuf/py:plugin_library",
         "//pw_protobuf_compiler/py:pw_protobuf_compiler",
+        "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "@com_google_protobuf//:protobuf_python",
     ],
@@ -81,8 +85,10 @@ pw_py_binary(
     main = "pw_rpc/plugin_pwpb.py",
     python_version = "PY3",
     deps = [
+        ":pw_rpc",
         "//pw_protobuf/py:plugin_library",
         "//pw_protobuf_compiler/py:pw_protobuf_compiler",
+        "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "@com_google_protobuf//:protobuf_python",
     ],
@@ -94,6 +100,8 @@ py_library(
         "pw_rpc/__init__.py",
         "pw_rpc/client.py",
         "pw_rpc/client_utils.py",
+        "pw_rpc/lossy_channel.py",
+        "pw_rpc/testing.py",
         ":pw_rpc_common_sources",
     ],
     imports = ["."],
@@ -103,6 +111,7 @@ py_library(
         "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "//pw_stream/py:pw_stream",
+        "@com_google_protobuf//:protobuf_python",
     ],
 )
 
@@ -280,4 +289,21 @@ sphinx_docs_library(
         "docs.rst",
     ],
     target_compatible_with = incompatible_with_mcu(),
+)
+
+pw_py_test(
+    name = "python_client_cpp_server_test",
+    srcs = ["tests/python_client_cpp_server_test.py"],
+    args = [
+        "--port=3304",  # From pw_rpc/internal/integration_test_ports.gni
+        "--test-server-command",
+        "$(rootpath //pw_rpc:test_rpc_server)",
+    ],
+    data = ["//pw_rpc:test_rpc_server"],
+    tags = ["manual"],
+    deps = [
+        ":pw_rpc",
+        ":pw_rpc_benchmark",
+        "//pw_hdlc/py:pw_hdlc",
+    ],
 )

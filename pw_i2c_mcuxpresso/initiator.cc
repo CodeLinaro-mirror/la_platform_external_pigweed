@@ -11,6 +11,9 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
+
+#define PW_LOG_MODULE_NAME "I2C"
+
 #include "pw_i2c_mcuxpresso/initiator.h"
 
 #include <mutex>
@@ -46,7 +49,7 @@ Status HalStatusToPwStatus(status_t status) {
 void McuxpressoInitiator::Enable() {
   std::lock_guard lock(mutex_);
 
-  PW_CHECK_OK(element_controller_.Acquire());
+  PW_CHECK_OK(clock_tree_element_.Acquire());
 
   i2c_master_config_t master_config;
   I2C_MasterGetDefaultConfig(&master_config);
@@ -63,7 +66,7 @@ void McuxpressoInitiator::Enable() {
 void McuxpressoInitiator::Disable() {
   std::lock_guard lock(mutex_);
   I2C_MasterDeinit(base_);
-  element_controller_.Release().IgnoreError();
+  clock_tree_element_.Release().IgnoreError();
   enabled_ = false;
 }
 

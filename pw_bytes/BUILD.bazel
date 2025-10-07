@@ -59,7 +59,7 @@ cc_library(
     deps = [
         "//pw_assert:assert",
         "//pw_bytes",
-        "//pw_preprocessor",
+        "//pw_numeric:checked_arithmetic",
         "//third_party/fuchsia:stdcompat",
     ],
 )
@@ -113,7 +113,10 @@ pw_cc_test(
 pw_cc_test(
     name = "endian_test",
     srcs = ["endian_test.cc"],
-    deps = [":pw_bytes"],
+    deps = [
+        ":pw_bytes",
+        "//pw_unit_test:constexpr",
+    ],
 )
 
 pw_cc_test(
@@ -129,7 +132,10 @@ pw_cc_test(
 pw_cc_test(
     name = "span_test",
     srcs = ["span_test.cc"],
-    deps = [":pw_bytes"],
+    deps = [
+        ":pw_bytes",
+        "//pw_compilation_testing:negative_compilation_testing",
+    ],
 )
 
 pw_cc_test(

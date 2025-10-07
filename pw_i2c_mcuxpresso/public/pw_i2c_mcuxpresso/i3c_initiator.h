@@ -42,13 +42,14 @@ class I3cMcuxpressoInitiator final : public pw::i2c::Initiator {
     bool enable_open_drain_high;  // Enable Open-Drain High to be 1 PPBAUD count
                                   // for I3C messages, or 1 ODBAUD.
   };
+
   I3cMcuxpressoInitiator(const Config& config,
-                         pw::clock_tree::ClockTree& clock_tree,
                          pw::clock_tree::Element& clock_tree_element)
       : Initiator(Initiator::Feature::kStandard),
         config_(config),
         base_(reinterpret_cast<I3C_Type*>(config.base_address)),
-        element_controller_(&clock_tree, &clock_tree_element) {}
+        clock_tree_element_(clock_tree_element) {}
+
   I3cMcuxpressoInitiator(const Config& config)
       : Initiator(Initiator::Feature::kStandard),
         config_(config),
@@ -156,6 +157,17 @@ class I3cMcuxpressoInitiator final : public pw::i2c::Initiator {
   pw::Result<uint16_t> GetMaxReadLength(pw::i2c::Address address)
       PW_LOCKS_EXCLUDED(mutex_);
 
+  // Set the target's maximum write length by sending an i3c SETMWL message.
+  // The target i3c device must have `address` assigned as its i3c address.
+  pw::Status SetMaxWriteLength(pw::i2c::Address address,
+                               uint16_t max_write_length)
+      PW_LOCKS_EXCLUDED(mutex_);
+
+  // Get the target's maximum write length by sending an i3c GETMWL message.
+  // The target i3c device must have `address` assigned as its i3c address.
+  pw::Result<uint16_t> GetMaxWriteLength(pw::i2c::Address address)
+      PW_LOCKS_EXCLUDED(mutex_);
+
  private:
   pw::Status DoTransferCcc(I3cCccAction rnw,
                            I3cCcc ccc_id,
@@ -196,7 +208,7 @@ class I3cMcuxpressoInitiator final : public pw::i2c::Initiator {
 
   const Config& config_;
   I3C_Type* base_;
-  pw::clock_tree::ElementController element_controller_;
+  pw::clock_tree::OptionalElement clock_tree_element_;
   i3c_device_info_t* device_list_ = nullptr;
   uint8_t device_count_ = 0;
   bool enabled_ PW_GUARDED_BY(mutex_) = false;

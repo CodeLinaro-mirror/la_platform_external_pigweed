@@ -42,7 +42,29 @@ py_library(
     imports = ["."],
     deps = [
         "//pw_cli/py:pw_cli",
+        "//pw_tokenizer:tokenizer_proto_py_pb2",
+        "@com_google_protobuf//:protobuf_python",
+        "@pigweed_python_packages//pyserial",
     ],
+)
+
+py_library(
+    name = "generate_argument_types_macro",
+    srcs = ["generate_argument_types_macro.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "generate_hash_macro",
+    srcs = ["generate_hash_macro.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "generate_hash_test_data",
+    srcs = ["generate_hash_test_data.py"],
+    imports = ["."],
+    deps = [":pw_tokenizer"],
 )
 
 pw_py_binary(

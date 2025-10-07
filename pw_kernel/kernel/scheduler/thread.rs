@@ -15,12 +15,13 @@
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 
-use foreign_box::ForeignBox;
+use foreign_box::{ForeignBox, ForeignRc};
 use list::*;
 use pw_log::info;
 use pw_status::Result;
 
-use crate::scheduler::SchedulerStateContext;
+use crate::Kernel;
+use crate::object::{KernelObject, ObjectTable};
 
 /// The memory backing a thread's stack before it has been started.
 ///
@@ -177,40 +178,58 @@ pub trait ThreadState: 'static + Sized {
     ) -> Result<()>;
 }
 
-pub struct Process<S: ThreadState> {
+pub struct Process<K: Kernel> {
     // List of the processes in the system
     pub link: Link,
 
     // TODO - konkers: allow this to be tokenized.
     pub name: &'static str,
 
-    memory_config: S::MemoryConfig,
+    memory_config: <K::ThreadState as ThreadState>::MemoryConfig,
 
-    thread_list: UnsafeList<Thread<S>, ProcessThreadListAdapter<S>>,
+    object_table: ForeignBox<dyn ObjectTable<K>>,
+
+    thread_list: UnsafeList<Thread<K>, ProcessThreadListAdapter<K>>,
 }
 
-list::define_adapter!(pub ProcessListAdapter<S: ThreadState> => Process<S>::link);
+list::define_adapter!(pub ProcessListAdapter<K: Kernel> => Process<K>::link);
 
-impl<S: ThreadState> Process<S> {
+impl<K: Kernel> Process<K> {
     /// Creates a new, empty, unregistered process.
     #[must_use]
-    pub const fn new(name: &'static str, memory_config: S::MemoryConfig) -> Self {
+    pub const fn new(
+        name: &'static str,
+        memory_config: <K::ThreadState as ThreadState>::MemoryConfig,
+        object_table: ForeignBox<dyn ObjectTable<K>>,
+    ) -> Self {
         Self {
             link: Link::new(),
             name,
             memory_config,
+            object_table,
             thread_list: UnsafeList::new(),
         }
     }
 
+    pub fn get_object(
+        &self,
+        kernel: K,
+        handle: u32,
+    ) -> Option<ForeignRc<K::AtomicUsize, dyn KernelObject<K>>> {
+        self.object_table.get_object(kernel, handle)
+    }
+
     /// Registers process with scheduler.
-    pub fn register<C: SchedulerStateContext<ThreadState = S>>(&mut self, ctx: C) {
+    pub fn register(&mut self, kernel: K) {
         unsafe {
-            ctx.get_scheduler().lock().add_process_to_list(self);
+            kernel
+                .get_scheduler()
+                .lock(kernel)
+                .add_process_to_list(self);
         }
     }
 
-    pub fn add_to_thread_list(&mut self, thread: &mut Thread<S>) {
+    pub fn add_to_thread_list(&mut self, thread: &mut Thread<K>) {
         unsafe {
             self.thread_list.push_front_unchecked(thread);
         }
@@ -242,7 +261,7 @@ impl<S: ThreadState> Process<S> {
     }
 }
 
-pub struct Thread<S: ThreadState> {
+pub struct Thread<K: Kernel> {
     // List of threads in a given process.
     pub process_link: Link,
 
@@ -251,23 +270,22 @@ pub struct Thread<S: ThreadState> {
 
     // Safety: All accesses to the parent process must be done with the
     // scheduler lock held.
-    process: *mut Process<S>,
+    process: *mut Process<K>,
 
     pub(super) state: State,
-    pub(super) preempt_disable_count: u32,
     stack: Stack,
 
     // Architecturally specific thread state, saved on context switch
-    pub arch_thread_state: UnsafeCell<S>,
+    pub arch_thread_state: UnsafeCell<K::ThreadState>,
 
     // TODO - konkers: allow this to be tokenized.
     pub name: &'static str,
 }
 
-list::define_adapter!(pub ThreadListAdapter<S: ThreadState> => Thread<S>::active_link);
-list::define_adapter!(pub ProcessThreadListAdapter<S: ThreadState> => Thread<S>::process_link);
+list::define_adapter!(pub ThreadListAdapter<K: Kernel> => Thread<K>::active_link);
+list::define_adapter!(pub ProcessThreadListAdapter<K: Kernel> => Thread<K>::process_link);
 
-impl<S: ThreadState> Thread<S> {
+impl<K: Kernel> Thread<K> {
     // Create an empty, uninitialzed thread
     #[must_use]
     pub const fn new(name: &'static str) -> Self {
@@ -276,18 +294,22 @@ impl<S: ThreadState> Thread<S> {
             active_link: Link::new(),
             process: core::ptr::null_mut(),
             state: State::New,
-            preempt_disable_count: 0,
-            arch_thread_state: UnsafeCell::new(ThreadState::NEW),
+            arch_thread_state: UnsafeCell::new(K::ThreadState::NEW),
             stack: Stack::new(),
             name,
         }
     }
 
-    extern "C" fn trampoline<A0: ThreadArg, A1: ThreadArg>(
-        entry_point: usize,
-        arg0: usize,
-        arg1: usize,
-    ) {
+    pub fn get_object(
+        &self,
+        kernel: K,
+        handle: u32,
+    ) -> Option<ForeignRc<K::AtomicUsize, dyn KernelObject<K>>> {
+        // SAFETY: `self.process` will always outlive `self`.
+        unsafe { self.process.as_ref()? }.get_object(kernel, handle)
+    }
+
+    extern "C" fn trampoline<A1: ThreadArg>(entry_point: usize, arg0: usize, arg1: usize) {
         let entry_point = core::ptr::with_exposed_provenance::<()>(entry_point);
         // SAFETY: This function is only ever passed to the
         // architecture-specific call to `initialize_frame` below. It is
@@ -296,32 +318,32 @@ impl<S: ThreadState> Thread<S> {
         // this transmute preserves validity, and the preceding
         // `with_exposed_provenance` ensures that the resulting `fn(usize)`
         // has valid provenance for its referent.
-        let entry_point: fn(A0, A1) = unsafe { core::mem::transmute(entry_point) };
-        let arg0 = unsafe { A0::from_usize(arg0) };
+        let entry_point: fn(K, A1) = unsafe { core::mem::transmute(entry_point) };
+        let kernel = unsafe { K::from_usize(arg0) };
         let arg1 = unsafe { A1::from_usize(arg1) };
-        entry_point(arg0, arg1);
+        entry_point(kernel, arg1);
     }
 
-    pub fn initialize_kernel_thread<C: SchedulerStateContext<ThreadState = S>, A: ThreadArg>(
+    pub fn initialize_kernel_thread<A: ThreadArg>(
         &mut self,
-        ctx: C,
+        kernel: K,
         kernel_stack: Stack,
-        entry_point: fn(C, A),
+        entry_point: fn(K, A),
         arg: A,
-    ) -> &mut Thread<S> {
+    ) -> &mut Thread<K> {
         pw_assert::assert!(self.state == State::New);
-        let process = ctx.get_scheduler().lock().kernel_process.get();
-        let args = (entry_point as usize, ctx.into_usize(), arg.into_usize());
+        let process = kernel.get_scheduler().lock(kernel).kernel_process.get();
+        let args = (entry_point as usize, kernel.into_usize(), arg.into_usize());
         unsafe {
             (*self.arch_thread_state.get()).initialize_kernel_frame(
                 kernel_stack,
                 &raw const (*process).memory_config,
-                Self::trampoline::<C, A>,
+                Self::trampoline::<A>,
                 args,
             );
         }
 
-        unsafe { self.initialize(ctx, process, kernel_stack) }
+        unsafe { self.initialize(kernel, process, kernel_stack) }
     }
 
     #[cfg(feature = "user_space")]
@@ -329,15 +351,15 @@ impl<S: ThreadState> Thread<S> {
     /// It is up to the caller to ensure that *process is valid.
     /// Initialize the mutable parts of the non privileged thread, must be
     /// called once per thread prior to starting it
-    pub unsafe fn initialize_non_priv_thread<C: SchedulerStateContext<ThreadState = S>>(
+    pub unsafe fn initialize_non_priv_thread(
         &mut self,
-        ctx: C,
+        kernel: K,
         kernel_stack: Stack,
         initial_sp: usize,
-        process: *mut Process<S>,
+        process: *mut Process<K>,
         initial_pc: usize,
         args: (usize, usize, usize),
-    ) -> Result<&mut Thread<S>> {
+    ) -> Result<&mut Thread<K>> {
         pw_assert::assert!(self.state == State::New);
 
         unsafe {
@@ -350,7 +372,7 @@ impl<S: ThreadState> Thread<S> {
                 args,
             )?;
         }
-        unsafe { Ok(self.initialize(ctx, process, kernel_stack)) }
+        unsafe { Ok(self.initialize(kernel, process, kernel_stack)) }
     }
 
     /// # Preconditions
@@ -360,18 +382,18 @@ impl<S: ThreadState> Thread<S> {
     /// It is up to the caller to ensure that *process is valid.
     /// Initialize the mutable parts of the thread, must be called once per
     /// thread prior to starting it
-    unsafe fn initialize<C: SchedulerStateContext<ThreadState = S>>(
+    unsafe fn initialize(
         &mut self,
-        ctx: C,
-        process: *mut Process<S>,
+        kernel: K,
+        process: *mut Process<K>,
         kernel_stack: Stack,
-    ) -> &mut Thread<S> {
+    ) -> &mut Thread<K> {
         self.stack = kernel_stack;
         self.process = process;
 
         self.state = State::Initial;
 
-        let _sched_state = ctx.get_scheduler().lock();
+        let _sched_state = kernel.get_scheduler().lock(kernel);
         unsafe {
             // Safety: *process is only accessed with the scheduler lock held.
 
@@ -542,14 +564,12 @@ macro_rules! init_thread {
         use $crate::scheduler::thread::{Stack, StackStorage, StackStorageExt, Thread};
         use $crate::static_mut_ref;
 
-        type ArchThreadState = <arch::Arch as $crate::scheduler::SchedulerContext>::ThreadState;
-
         /// SAFETY: This must be executed at most once at run time.
-        unsafe fn __init_thread() -> ForeignBox<Thread<ArchThreadState>> {
+        unsafe fn __init_thread() -> ForeignBox<Thread<arch::Arch>> {
             info!("allocating thread: {}", $name as &'static str);
             // SAFETY: The caller promises that this function will be executed
             // at most once.
-            let thread = unsafe { static_mut_ref!(Thread<ArchThreadState> = Thread::new($name)) };
+            let thread = unsafe { static_mut_ref!(Thread<arch::Arch> = Thread::new($name)) };
             let mut thread = ForeignBox::from(thread);
 
             info!("initializing thread: {}", $name as &'static str);
@@ -578,13 +598,11 @@ macro_rules! init_thread {
 #[cfg(feature = "user_space")]
 #[macro_export]
 macro_rules! init_non_priv_process {
-    ($name:literal, $memory_config:expr) => {{
+    ($name:literal, $memory_config:expr, $object_table:expr $(,)?) => {{
         use $crate::scheduler::thread::Process;
 
-        type ArchThreadState = <arch::Arch as $crate::scheduler::SchedulerContext>::ThreadState;
-
         /// SAFETY: This must be executed at most once at run time.
-        unsafe fn __init_non_priv_process() -> &'static mut Process<ArchThreadState> {
+        unsafe fn __init_non_priv_process() -> &'static mut Process<arch::Arch> {
             use pw_log::info;
             info!(
                 "allocating non-privileged process: {}",
@@ -594,8 +612,10 @@ macro_rules! init_non_priv_process {
             // SAFETY: The caller promises that this function will be executed
             // at most once.
             let proc =
-                unsafe { $crate::static_mut_ref!(Process<ArchThreadState> = Process::new($name, $memory_config)) };
-            proc.register(arch::Arch);
+                unsafe {
+                    $crate::static_mut_ref!(Process<arch::Arch> =
+                         Process::new($name, $memory_config, $object_table))
+                };            proc.register(arch::Arch);
             proc
         }
 
@@ -612,19 +632,17 @@ macro_rules! init_non_priv_process {
 #[cfg(feature = "user_space")]
 #[macro_export]
 macro_rules! init_non_priv_thread {
-    ($name:literal, $process:expr, $entry:expr, $initial_sp:expr, $kernel_stack_size:expr) => {{
+    ($name:literal, $process:expr, $entry:expr, $initial_sp:expr, $kernel_stack_size:expr  $(,)?) => {{
         use $crate::static_mut_ref;
         use $crate::__private::foreign_box::ForeignBox;
         use $crate::scheduler::thread::{Process, Stack, StackStorage, StackStorageExt, Thread};
 
-        type ArchThreadState = <arch::Arch as $crate::scheduler::SchedulerContext>::ThreadState;
-
         /// SAFETY: This must be executed at most once at run time.
         unsafe fn __init_non_priv_thread(
-            proc: &mut Process<ArchThreadState>,
+            proc: &mut Process<arch::Arch>,
             entry: usize,
             initial_sp: usize,
-        ) -> ForeignBox<Thread<ArchThreadState>> {
+        ) -> ForeignBox<Thread<arch::Arch>> {
             use pw_log::info;
             info!(
                 "allocating non-privileged thread: {}, entry {:#x}",
@@ -632,7 +650,7 @@ macro_rules! init_non_priv_thread {
             );
             // SAFETY: The caller promises that this function will be executed
             // at most once.
-            let thread = unsafe { static_mut_ref!(Thread<ArchThreadState> = Thread::new($name)) };
+            let thread = unsafe { static_mut_ref!(Thread<arch::Arch> = Thread::new($name)) };
             let mut thread = ForeignBox::from(thread);
 
             info!(
@@ -666,16 +684,16 @@ macro_rules! init_non_priv_thread {
 }
 
 /// Initializes a thread in the given storage.
-pub fn init_thread_in<C: SchedulerStateContext, T: ThreadArg, const STACK_SIZE: usize>(
-    ctx: C,
-    thread: &'static mut Thread<C::ThreadState>,
+pub fn init_thread_in<K: Kernel, T: ThreadArg, const STACK_SIZE: usize>(
+    kernel: K,
+    thread: &'static mut Thread<K>,
     stack: &'static mut StackStorage<STACK_SIZE>,
     name: &'static str,
-    entry: fn(C, T),
+    entry: fn(K, T),
     arg: T,
-) -> ForeignBox<Thread<C::ThreadState>> {
+) -> ForeignBox<Thread<K>> {
     *thread = Thread::new(name);
     let mut thread = ForeignBox::from(thread);
-    thread.initialize_kernel_thread(ctx, Stack::from_slice(&*stack), entry, arg);
+    thread.initialize_kernel_thread(kernel, Stack::from_slice(&*stack), entry, arg);
     thread
 }

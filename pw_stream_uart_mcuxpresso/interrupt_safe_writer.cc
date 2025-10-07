@@ -24,11 +24,11 @@ pw::Status InterruptSafeUartWriterMcuxpresso::Enable() {
   usart_config.enableRx = false;
   usart_config.enableTx = true;
 
-  PW_TRY(element_controller_.Acquire());
+  PW_TRY(clock_tree_element_.Acquire());
 
   if (USART_Init(base(), &usart_config, CLOCK_GetFreq(clock_name_)) !=
       kStatus_Success) {
-    element_controller_.Release().IgnoreError();
+    clock_tree_element_.Release().IgnoreError();
     return pw::Status::Internal();
   }
 
@@ -36,6 +36,12 @@ pw::Status InterruptSafeUartWriterMcuxpresso::Enable() {
 }
 
 pw::Status InterruptSafeUartWriterMcuxpresso::DoWrite(pw::ConstByteSpan data) {
+  if (data.empty()) {
+    // USART_WriteBlocking() will abort if its data argument is null, even if
+    // length is zero.
+    return pw::OkStatus();
+  }
+
   const status_t hal_status = USART_WriteBlocking(
       base(), reinterpret_cast<const uint8_t*>(data.data()), data.size_bytes());
   return hal_status == kStatus_Success ? pw::OkStatus()

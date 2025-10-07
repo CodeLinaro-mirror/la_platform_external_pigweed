@@ -13,8 +13,15 @@
 // the License.
 #![no_std]
 
-extern "C" {
+#[cfg(not(feature = "default_handler"))]
+unsafe extern "C" {
     pub fn pw_assert_HandleFailure() -> !;
+}
+
+#[cfg(feature = "default_handler")]
+#[allow(non_snake_case)]
+pub unsafe extern "C" fn pw_assert_HandleFailure() -> ! {
+    core::panic!("pw_assert panic")
 }
 
 // Re-export pw_log for use by panic/assert macros.
@@ -127,7 +134,7 @@ macro_rules! assert {
           // Ideally we'd combine these two log statements.  However, the `pw_log` API
           // does not support passing through `PW_FMT_CONCAT` tokens to `pw_format`.
           $crate::__private_log_panic_banner!();
-          $crate::__private::fatal!("assert!() failed");
+          $crate::__private::fatal!("assert!() failed @{}", line!() as u32);
           unsafe{$crate::pw_assert_HandleFailure()}
       }
   }};
@@ -154,7 +161,7 @@ macro_rules! debug_assert {
         // Ideally we'd combine these two log statements.  However, the `pw_log` API
         // does not support passing through `PW_FMT_CONCAT` tokens to `pw_format`.
         $crate::__private_log_panic_banner!();
-        $crate::__private::fatal!("debug_assert!() failed");
+        $crate::__private::fatal!("debug_assert!() failed on line {}", line!() as u32);
         unsafe{$crate::pw_assert_HandleFailure()}
     }
   };

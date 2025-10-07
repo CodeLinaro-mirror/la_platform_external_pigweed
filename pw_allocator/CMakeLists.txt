@@ -334,7 +334,26 @@ pw_add_library(pw_allocator.hardening INTERFACE
   PUBLIC_DEPS
     pw_allocator.config
     pw_assert.assert
-    pw_preprocessor
+    pw_numeric.checked_arithmetic
+)
+
+pw_add_library(pw_allocator.guarded_allocator STATIC
+  HEADERS
+    public/pw_allocator/guarded_allocator.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_allocator.allocator
+    pw_allocator.deallocator
+    pw_result
+    pw_sync.borrow
+  PRIVATE_DEPS
+    pw_assert.check
+    pw_bytes.alignment
+    pw_span
+    pw_third_party.fuchsia.stdcompat
+  SOURCES
+    guarded_allocator.cc
 )
 
 # TODO(b/376730645): Remove deprecated interfaces.
@@ -409,6 +428,7 @@ pw_add_library(pw_allocator.synchronized_allocator INTERFACE
     pw_allocator
     pw_sync.borrow
     pw_sync.lock_annotations
+    pw_sync.no_lock
 )
 
 pw_add_library(pw_allocator.tlsf_allocator INTERFACE
@@ -461,6 +481,7 @@ pw_add_library(pw_allocator.worst_fit INTERFACE
     pw_allocator.config
 )
 
+# TODO(b/376730645): Remove deprecated interfaces.
 pw_add_library(pw_allocator.worst_fit_block_allocator INTERFACE
   HEADERS
     public/pw_allocator/worst_fit_block_allocator.h
@@ -494,7 +515,7 @@ pw_add_library(pw_allocator.testing INTERFACE
     pw_unit_test
 )
 
-pw_add_library(pw_allocator.block_allocator_testing STATIC
+pw_add_library(pw_allocator.block_allocator_testing INTERFACE
   HEADERS
     public/pw_allocator/block_allocator_testing.h
   PUBLIC_INCLUDES
@@ -508,14 +529,10 @@ pw_add_library(pw_allocator.block_allocator_testing STATIC
     pw_allocator.fuzzing
     pw_allocator.test_harness
     pw_assert.assert
-    pw_unit_test
-  PRIVATE_DEPS
-    pw_assert.check
     pw_bytes.alignment
     pw_status
     pw_third_party.fuchsia.stdcompat
-  SOURCES
-    block_allocator_testing.cc
+    pw_unit_test
 )
 
 pw_add_library(pw_allocator.counter STATIC
@@ -529,6 +546,28 @@ pw_add_library(pw_allocator.counter STATIC
     pw_unit_test
   SOURCES
     counter.cc
+)
+
+pw_add_library(pw_allocator.sync_allocator_testing STATIC
+  HEADERS
+    public/pw_allocator/sync_allocator_testing.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_allocator.allocator
+    pw_allocator.test_config
+    pw_containers.vector
+    pw_sync.binary_semaphore
+    pw_thread.test_thread_context
+    pw_thread.thread
+    pw_thread.thread_core
+    pw_unit_test
+  PRIVATE_DEPS
+    pw_allocator.deallocator
+    pw_status
+    pw_thread.yield
+  SOURCES
+    sync_allocator_testing.cc
 )
 
 pw_add_library(pw_allocator.test_harness STATIC
@@ -753,6 +792,20 @@ pw_add_test(pw_allocator.freelist_heap_test
     pw_allocator
 )
 
+pw_add_test(pw_allocator.guarded_allocator_test
+  SOURCES
+    guarded_allocator_test.cc
+  PRIVATE_DEPS
+    pw_allocator.first_fit_block_allocator
+    pw_allocator.guarded_allocator
+    pw_allocator.sync_allocator_testing
+    pw_sync.interrupt_spin_lock
+    pw_sync.mutex
+  GROUPS
+    modules
+    pw_allocator
+)
+
 pw_add_test(pw_allocator.layout_test
   SOURCES
     layout_test.cc
@@ -832,16 +885,9 @@ pw_add_test(pw_allocator.synchronized_allocator_test
     pw_allocator.testing
     pw_allocator.test_harness
     pw_allocator.synchronized_allocator
-    pw_containers.vector
-    pw_random
-    pw_status
-    pw_sync.binary_semaphore
+    pw_allocator.sync_allocator_testing
     pw_sync.interrupt_spin_lock
     pw_sync.mutex
-    pw_thread.test_thread_context
-    pw_thread.thread
-    pw_thread.thread_core
-    pw_thread.yield
   GROUPS
     modules
     pw_allocator

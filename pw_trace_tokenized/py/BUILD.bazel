@@ -16,9 +16,12 @@ load("@rules_python//python:defs.bzl", "py_library")
 
 package(default_visibility = ["//visibility:public"])
 
+licenses(["notice"])
+
 py_library(
     name = "pw_trace_tokenized",
     srcs = [
+        "pw_trace_tokenized/__init__.py",
         "pw_trace_tokenized/get_trace.py",
         "pw_trace_tokenized/trace_tokenized.py",
     ],

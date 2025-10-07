@@ -554,6 +554,12 @@ std::optional<LockedL2capChannel> GetLockedChannel(
 
 }  // namespace
 
+namespace {
+static constexpr std::uint8_t kH4PacketIndicatorSize = 1;
+constexpr std::uint64_t kH4AclHeaderSize =
+    emboss::AclDataFrameHeader::IntrinsicSizeInBytes() + kH4PacketIndicatorSize;
+}  // namespace
+
 bool AclDataChannel::HandleAclData(Direction direction,
                                    emboss::AclDataFrameWriter& acl) {
   // This function returns whether or not the frame was handled here.
@@ -656,13 +662,14 @@ bool AclDataChannel::HandleAclData(Direction direction,
                                recombiner.local_cid(),
                                l2cap_channel_manager_);
           recombiner.EndRecombination(channel);
-        }
+        }  // recombiner.IsActive(). channel with channels_mutex_ released.
 
         // Currently, we require the full L2CAP header: We need the pdu_length
         // field so we know how much data to recombine, and we need the
         // channel_id field so we know whether or not this is a recognized L2CAP
         // channel and therefore whether or not we should recombine it.
-        // TODO: https://pwbug.dev/392652874 - Handle fragmented L2CAP header.
+        // TODO: https://pwbug.dev/437958454 - Handle fragments that are too
+        // small to contain the L2CAP header.
         emboss::BasicL2capHeaderView l2cap_header =
             emboss::MakeBasicL2capHeaderView(acl_payload.data(),
                                              acl_payload.size());
@@ -712,21 +719,23 @@ bool AclDataChannel::HandleAclData(Direction direction,
           is_fragment = true;
 
           // Start recombination
-          pw::Status status =
-              recombiner.StartRecombination(*channel, l2cap_frame_length);
+          pw::Status status = recombiner.StartRecombination(
+              *channel, l2cap_frame_length, kH4AclHeaderSize);
           if (!status.ok()) {
             // TODO: https://pwbug.dev/404275508 - This is an acquired channel,
             // so need to do something different than just pass on to AP.
             PW_LOG_ERROR(
-                "Cannot start recombination for L2capChannel %#x: "
-                "%s. Passing on.",
+                "Cannot start recombination for L2capChannel connection. Will "
+                "passthrough."
+                "channel: %#x, local_cid: %#x, status:%s",
+                channel->channel().connection_handle(),
                 channel->channel().local_cid(),
                 status.str());
             return kUnhandled;
           }
         }
         break;
-      }
+      }  // FIRST_FLUSHABLE. channel with channels_mutex_ released.
 
       default: {
         PW_LOG_ERROR(
@@ -741,8 +750,7 @@ bool AclDataChannel::HandleAclData(Direction direction,
     if (is_fragment) {
       // Recombine this fragment
 
-      // Note this conditionally acquires channels_mutex_ which, if nested,
-      // is expected to be acquired after/inside connection_mutex_.
+      // If value, includes channels_mutex_ unique_lock.
       std::optional<LockedL2capChannel> channel = GetLockedChannel(
           direction, handle, local_cid, l2cap_channel_manager_);
 
@@ -774,7 +782,7 @@ bool AclDataChannel::HandleAclData(Direction direction,
       // We will collect the recombination buffer from the channel below
       // (outside the connection mutex).
 
-    }  // is_fragment
+    }  // is_fragment. channel with channels_mutex_ released.
   }  // std::lock_guard lock(connection_mutex_)
 
   // At this point we have recombined a valid L2CAP frame. It may be
@@ -785,9 +793,10 @@ bool AclDataChannel::HandleAclData(Direction direction,
   // But note, our return value only controls the disposition of the current ACL
   // packet.
 
-  // We need channels lock and channel to send to. Also, if recombining, we get
-  // our recombined buf from it and must hold it for as long as
-  // `recombined_mbuf` and `send_l2cap_pdu` are accessed.
+  // If value, includes channels_mutex_ unique_lock.
+  // We need channel for handling PDU and for recombine buffers.
+  // channels_mutex_ must be held as long as `recombined_mbuf` and
+  // `send_l2cap_pdu` are accessed to ensure channel is not destroyed.
   std::optional<LockedL2capChannel> channel =
       GetLockedChannel(direction, handle, local_cid, l2cap_channel_manager_);
 
@@ -864,24 +873,79 @@ bool AclDataChannel::HandleAclData(Direction direction,
           : channel->channel().HandlePduFromHost(send_l2cap_pdu);
 
   if ((result == kUnhandled) && is_fragment) {
-    // Client rejected the entire PDU, but we just have the continuing packet
-    // with the last fragment. So we can't just return kUnhandled that would
-    // pass only this final fragment to the other side, and all preceding
-    // fragments would be missing.
-    // TODO: https://pwbug.dev/392663102 - Handle rejecting a recombined
-    // L2CAP PDU.
-    PW_LOG_ERROR(
-        "L2capChannel %#x indicates recombined PDU %s is unhandled, which is "
-        "unsupported. Dropping entire recombined PDU!",
-        local_cid,
-        DirectionToString(direction));
-    return kHandled;
-  }
+    // Client rejected the entire PDU. So grab extra header for H4/ACL headers,
+    // populate them, and pass that H4 packet on to the host.
 
-  // It's possible for a channel handling rx traffic to have queued tx traffic
-  // or events. So release the channel lock, then call
-  // `DrainChannelQueuesIfNewTx` and `DeliverPendingEvents`.
+    // Take back the extra header we reserved when starting the recombine.
+    PW_CHECK(recombined_mbuf->ClaimPrefix(kH4AclHeaderSize));
+    PW_CHECK(recombined_mbuf->IsContiguous());
+    const pw::span<uint8_t> h4_span =
+        pw::span_cast<uint8_t>(recombined_mbuf->ContiguousSpan().value());
+
+    // TODO: https://pwbug.dev/438315637 - Also do this check for the BR/EDR
+    // transport type once we know its max acl length.
+    if (channel->channel().transport() == AclTransportType::kLe) {
+      std::optional<uint16_t> le_packet_length =
+          l2cap_channel_manager_.le_acl_data_packet_length();
+
+      if (!le_packet_length) {
+        PW_LOG_WARN(
+            "le_acl_data_packet_length not known, so unable to check H4 "
+            "length.");
+      }
+      const size_t kMaxH4Length =
+          kH4PacketIndicatorSize + kH4AclHeaderSize + *le_packet_length;
+      if (h4_span.size() > kMaxH4Length) {
+        //  TODO: https://pwbug.dev/438543613 - Re-frag in this case.
+        PW_LOG_WARN(
+            "Recombined H4 length %zu is greater than allowed with "
+            "le_acl_data_packet_length "
+            "of %u for transport %u. Will still pass on single ACL packet.",
+            h4_span.size(),
+            *le_packet_length,
+            cpp23::to_underlying(channel->channel().transport()));
+      }
+    }
+
+    // Populate the H4 and ACL headers ahead of the recombined PDU.
+    h4_span[0] = static_cast<uint8_t>(emboss::H4PacketType::ACL_DATA);
+    pw::span<uint8_t> hci_span = h4_span.subspan(kH4PacketIndicatorSize);
+    Result<emboss::AclDataFrameWriter> recombined_acl =
+        MakeEmbossWriter<emboss::AclDataFrameWriter>(hci_span);
+    PW_CHECK_OK(recombined_acl);
+    recombined_acl->header().handle().Write(acl.header().handle().Read());
+    recombined_acl->header().packet_boundary_flag().Write(
+        emboss::AclDataPacketBoundaryFlag::FIRST_NON_FLUSHABLE);
+    recombined_acl->header().broadcast_flag().Write(
+        acl.header().broadcast_flag().Read());
+    recombined_acl->data_total_length().Write(h4_span.size() -
+                                              kH4AclHeaderSize);
+
+    // Send onward to its final destination.
+    switch (direction) {
+      case Direction::kFromController: {
+        H4PacketWithHci h4_packet{h4_span};
+        hci_transport_.SendToHost(h4_span);
+        break;
+      }
+      case Direction::kFromHost: {
+        H4PacketWithH4 h4_packet{h4_span};
+        hci_transport_.SendToController(std::move(h4_packet));
+        break;
+      }
+    }
+
+    // We still return kHandled here since the last fragment packet was already
+    // passed on to the host as part of the recombined H4 packet.
+    return kHandled;
+  }  // (result == kUnhandled) && is_fragment
+
+  // If value, releases unique_lock of channels_mutex_.
   channel.reset();
+
+  //  It's possible for a channel handling rx traffic to have queued tx traffic
+  //  or events. So call `DrainChannelQueuesIfNewTx` and `DeliverPendingEvents`
+  // (outside of channels_mutex_ lock).
   l2cap_channel_manager_.DrainChannelQueuesIfNewTx();
   l2cap_channel_manager_.DeliverPendingEvents();
 

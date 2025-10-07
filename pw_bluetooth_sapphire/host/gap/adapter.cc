@@ -413,6 +413,9 @@ class AdapterImpl final : public Adapter {
   // not in progress.
   bool CompleteInitialization(bool success);
 
+  // Initializes the ISO data channels on devices that support it.
+  void PerformIsoInitialization();
+
   // Reads LMP feature mask's bits from |page|
   void InitQueueReadLMPFeatureMaskPage(uint8_t page);
 
@@ -1097,6 +1100,26 @@ void AdapterImpl::InitializeStep2() {
 
   PW_DCHECK(init_seq_runner_->IsReady());
 
+  if (state_.SupportedCommands().write_default_link_policy_settings().Read()) {
+    // HCI_Write_Default_Link_Policy_Settings
+    auto write_default_link_policy_cmd = hci::CommandPacket::New<
+        pw::bluetooth::emboss::WriteDefaultLinkPolicySettingsCommandWriter>(
+        hci_spec::kWriteDefaultLinkPolicySettings);
+    auto view = write_default_link_policy_cmd.view_t();
+    view.default_link_policy_settings().enable_role_switch().Write(1);
+    view.default_link_policy_settings().enable_hold_mode().Write(0);
+    view.default_link_policy_settings().enable_sniff_mode().Write(1);
+    init_seq_runner_->QueueCommand(
+        write_default_link_policy_cmd,
+        [](const hci::EventPacket& cmd_complete) {
+          if (cmd_complete.ToResult().is_error()) {
+            bt_log(WARN, "gap", "Set Default Link Policy command FAILED");
+          } else {
+            bt_log(INFO, "gap", "Set Default Link Policy succeeded");
+          }
+        });
+  }
+
   // If the controller supports the Read Buffer Size command then send it.
   // Otherwise we'll default to 0 when initializing the ACLDataChannel.
   if (state_.SupportedCommands().read_buffer_size().Read()) {
@@ -1342,6 +1365,45 @@ void AdapterImpl::InitializeStep2() {
   });
 }
 
+void AdapterImpl::PerformIsoInitialization() {
+  const hci::DataBufferInfo iso_data_buffer_info =
+      state_.low_energy_state.iso_data_buffer_info();
+  if (!iso_data_buffer_info.IsAvailable()) {
+    bt_log(WARN, "gap", "Unable to read ISO data buffer information");
+    return;
+  }
+
+  bt_log(INFO,
+         "gap",
+         "ISO data buffer information available (size: %zu, count: %zu)",
+         iso_data_buffer_info.max_data_length(),
+         iso_data_buffer_info.max_num_packets());
+
+  if (!hci_->InitializeIsoDataChannel(iso_data_buffer_info)) {
+    bt_log(WARN,
+           "gap",
+           "Failed to initialize IsoDataChannel, proceeding without HCI ISO "
+           "support");
+    return;
+  }
+
+  bt_log(INFO, "gap", "IsoDataChannel initialized successfully");
+  bt_log(INFO, "gap", "Enabling ConnectedIsochronousStream (Host Support)");
+  auto cmd_packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::LESetHostFeatureCommandWriter>(
+      hci_spec::kLESetHostFeature);
+  auto params = cmd_packet.view_t();
+  params.bit_number().Write(
+      static_cast<uint8_t>(hci_spec::LESupportedFeatureBitPos::
+                               kConnectedIsochronousStreamHostSupport));
+  params.bit_value().Write(pw::bluetooth::emboss::GenericEnableParam::ENABLE);
+  init_seq_runner_->QueueCommand(
+      std::move(cmd_packet), [](const hci::EventPacket& event) {
+        HCI_IS_ERROR(
+            event, WARN, "gap", "Set Host Feature (ISO support) failed");
+      });
+}
+
 void AdapterImpl::InitializeStep3() {
   PW_CHECK(IsInitializing());
   PW_CHECK(init_seq_runner_->IsReady());
@@ -1362,30 +1424,6 @@ void AdapterImpl::InitializeStep3() {
     bt_log(ERROR, "gap", "Failed to initialize ACLDataChannel (step 3)");
     CompleteInitialization(/*success=*/false);
     return;
-  }
-
-  if (!state_.low_energy_state.IsFeatureSupported(
-          hci_spec::LESupportedFeature::
-              kConnectedIsochronousStreamPeripheral)) {
-    bt_log(INFO, "gap", "CIS Peripheral is not supported");
-  } else {
-    bt_log(INFO,
-           "gap",
-           "Connected Isochronous Stream Peripheral is supported. "
-           "Enabling ConnectedIsochronousStream (Host Support)");
-    auto cmd_packet = hci::CommandPacket::New<
-        pw::bluetooth::emboss::LESetHostFeatureCommandWriter>(
-        hci_spec::kLESetHostFeature);
-    auto params = cmd_packet.view_t();
-    params.bit_number().Write(
-        static_cast<uint8_t>(hci_spec::LESupportedFeatureBitPos::
-                                 kConnectedIsochronousStreamHostSupport));
-    params.bit_value().Write(pw::bluetooth::emboss::GenericEnableParam::ENABLE);
-    init_seq_runner_->QueueCommand(
-        std::move(cmd_packet), [](const hci::EventPacket& event) {
-          HCI_IS_ERROR(
-              event, WARN, "gap", "Set Host Feature (ISO support) failed");
-        });
   }
 
   // The controller may not support SCO flow control (as implied by not
@@ -1432,27 +1470,14 @@ void AdapterImpl::InitializeStep3() {
            sco_flow_control_supported);
   }
 
-  const hci::DataBufferInfo iso_data_buffer_info =
-      state_.low_energy_state.iso_data_buffer_info();
-  if (iso_data_buffer_info.IsAvailable()) {
-    bt_log(INFO,
-           "gap",
-           "ISO data buffer information available (size: %zu, count: %zu)",
-           iso_data_buffer_info.max_data_length(),
-           iso_data_buffer_info.max_num_packets());
-    if (hci_->InitializeIsoDataChannel(iso_data_buffer_info)) {
-      bt_log(INFO, "gap", "IsoDataChannel initialized successfully");
-    } else {
-      bt_log(WARN,
-             "gap",
-             "Failed to initialize IsoDataChannel, proceeding without HCI ISO "
-             "support");
-    }
-  } else {
-    bt_log(INFO,
-           "gap",
-           "No ISO data buffer information available, not starting data "
-           "channel");
+  bool supports_iso_peripheral = state_.low_energy_state.IsFeatureSupported(
+      hci_spec::LESupportedFeature::kConnectedIsochronousStreamPeripheral);
+  bool supports_iso_central = state_.low_energy_state.IsFeatureSupported(
+      hci_spec::LESupportedFeature::kConnectedIsochronousStreamCentral);
+
+  if (supports_iso_peripheral || supports_iso_central) {
+    // Configure support for in-band ISO channels.
+    PerformIsoInitialization();
   }
 
   hci_->AttachInspect(adapter_node_);

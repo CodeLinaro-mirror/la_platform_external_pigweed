@@ -19,14 +19,16 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
 
 cc_library(
     name = "pw_clock_tree",
-    hdrs = ["public/pw_clock_tree/clock_tree.h"],
+    hdrs = [
+        "public/pw_clock_tree/clock_tree.h",
+        "public/pw_clock_tree/internal/deferred_init.h",
+    ],
     strip_include_prefix = "public",
     deps = [
         "//pw_assert:assert",

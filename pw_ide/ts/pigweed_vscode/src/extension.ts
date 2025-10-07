@@ -77,21 +77,17 @@ import { shouldSupportGn } from './gn';
 import { shouldSupportCmake } from './cmake';
 import { CompileCommandsWatcher } from './clangd/compileCommandsWatcher';
 import { existsSync, statSync } from 'node:fs';
-import { createBazelInterceptorFile } from './clangd/compileCommandsUtils';
+import {
+  createBazelInterceptorFile,
+  deleteBazelInterceptorFile,
+} from './clangd/compileCommandsUtils';
 import { checkClangdVersion } from './clangd/extensionChecker';
+import { handleInactiveFileCodeIntelligenceEnabled } from './clangd/activeFilesCache';
+import * as path from 'path';
 
 interface CommandEntry {
   name: string;
   callback: VscCommandCallback;
-  // Commands can be defined to be registered under certain project conditions:
-  // - 'bazel': When it's only a Bazel project
-  // - 'bootstrap': When it's only a bootstrap project
-  // - 'both': When a project supports both Bazel and bootstrap
-  // - 'any': The command should run under any circumstances
-  // These can be combined, e.g., a command with ['bazel', 'both'] will be
-  // registered in projects that are Bazel only and projects that use both
-  // Bazel and bootstrap, but not projects that are bootstrap only.
-  projectType: ('bazel' | 'bootstrap' | 'both' | 'any')[];
 }
 
 const disposer = new Disposer();
@@ -104,102 +100,53 @@ async function registerCommands(
   refreshManager: RefreshManager<any>,
   clangdActiveFilesCache: ClangdActiveFilesCache,
 ): Promise<void> {
-  const useBazel = await shouldSupportBazel();
-  const useCmake = await shouldSupportCmake();
-  const useGn = await shouldSupportGn();
-
   const commands: CommandEntry[] = [
     {
       name: 'pigweed.open-output-panel',
       callback: output.show,
-      projectType: ['any'],
     },
     {
       name: 'pigweed.file-bug',
       callback: fileBug,
-      projectType: ['any'],
     },
     {
       name: 'pigweed.check-extensions',
       callback: checkExtensions,
-      projectType: ['any'],
     },
     {
       name: 'pigweed.sync-settings',
       callback: async () =>
         syncSettingsSharedToProject(await getSettingsData(), true),
-      projectType: ['any'],
     },
     {
       name: 'pigweed.disable-inactive-file-code-intelligence',
       callback: () =>
         disableInactiveFileCodeIntelligence(clangdActiveFilesCache),
-      projectType: ['any'],
     },
-
     {
       name: 'pigweed.enable-inactive-file-code-intelligence',
       callback: () =>
         enableInactiveFileCodeIntelligence(clangdActiveFilesCache),
-      projectType: ['any'],
     },
-
     {
       name: 'pigweed.select-target',
       callback: () => setCompileCommandsTarget(clangdActiveFilesCache),
-      projectType: ['any'],
     },
     {
       name: 'pigweed.launch-terminal',
       callback: launchTerminal,
-      projectType: ['bootstrap', 'both'],
-    },
-    {
-      name: 'pigweed.launch-terminal',
-      callback: () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bazel projects',
-        ),
-      projectType: ['bazel'],
     },
     {
       name: 'pigweed.bootstrap-terminal',
       callback: launchBootstrapTerminal,
-      projectType: ['bootstrap', 'both'],
-    },
-    {
-      name: 'pigweed.bootstrap-terminal',
-      callback: () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bazel projects',
-        ),
-      projectType: ['bazel'],
     },
     {
       name: 'pigweed.set-bazel-recommended-settings',
       callback: setBazelRecommendedSettings,
-      projectType: ['bazel', 'both'],
-    },
-    {
-      name: 'pigweed.set-bazel-recommended-settings',
-      callback: () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-      projectType: ['bootstrap'],
     },
     {
       name: 'pigweed.set-bazelisk-path',
       callback: interactivelySetBazeliskPath,
-      projectType: ['bazel', 'both'],
-    },
-    {
-      name: 'pigweed.set-bazelisk-path',
-      callback: () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-      projectType: ['bootstrap'],
     },
     {
       name: 'pigweed.refresh-compile-commands',
@@ -213,30 +160,15 @@ async function registerCommands(
           );
         }
       },
-      projectType: ['bazel', 'both'],
     },
     {
       name: 'pigweed.activate-bazelisk-in-terminal',
       callback: patchBazeliskIntoTerminalPath,
-      projectType: ['bazel', 'both'],
-    },
-    {
-      name: 'pigweed.activate-bazelisk-in-terminal',
-      callback: () =>
-        vscode.window.showWarningMessage(
-          'This command is currently not supported with Bootstrap projects',
-        ),
-      projectType: ['bootstrap'],
     },
   ];
 
-  const commandsToRegister = commands.filter((c) => {
-    if (c.projectType.includes('any')) return true;
-    return c.projectType.includes(projectType);
-  });
-
   const registerCommand = commandRegisterer(context);
-  commandsToRegister.forEach((c) => registerCommand(c.name, c.callback));
+  commands.forEach((c) => registerCommand(c.name, c.callback));
 }
 
 async function initAsBazelProject(refreshManager: RefreshManager<any>) {
@@ -384,11 +316,22 @@ async function configureProject(
     );
   }
 
-  return projectTypes.length === 2
-    ? 'both'
-    : projectTypes.length === 1
-      ? projectTypes[0]
-      : undefined;
+  const projectType =
+    projectTypes.length === 2
+      ? 'both'
+      : projectTypes.length === 1
+        ? projectTypes[0]
+        : undefined;
+
+  if (projectType) {
+    vscode.commands.executeCommand(
+      'setContext',
+      'pigweed.projectType',
+      projectType,
+    );
+  }
+
+  return projectType;
 }
 
 function buildSystemStatusReason(
@@ -461,11 +404,14 @@ export async function activate(context: vscode.ExtensionContext) {
   refreshManager.on(async () => {
     const target = getTarget();
     const allTargets = await availableTargets();
-    if (
-      (!target && allTargets.length > 0) ||
-      (target && !allTargets.map((t) => t.name).includes(target.name))
-    ) {
-      // Decide which target to pick, pick the one with biggest file
+
+    if (target && allTargets.some((t) => t.name === target.name)) {
+      // If we have a target and it's still in the list of available targets,
+      // just re-run the setup for it. This will fix any bad settings.
+      await setTargetWithClangd(target, clangdActiveFilesCache.writeToSettings);
+    } else if (allTargets.length > 0) {
+      // If there's no target, or the old one is gone, pick the biggest file as
+      // the new target.
       const fileSizes = await Promise.all(
         allTargets.map(async (t) => {
           if (existsSync(t.path)) {
@@ -555,8 +501,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
   logger.info('Extension initialization complete');
   didInit.fire();
+  refreshManager.refresh();
 }
 
-export function deactivate() {
+export async function deactivate() {
+  // Clean up the Bazel interceptor script
+  deleteBazelInterceptorFile();
+
+  // Clean up the .clangd file to a default state
+  const rootClangdPath = path.join(workingDir.get(), '.clangd');
+  const sharedClangdPath = path.join(workingDir.get(), '.clangd.shared');
+  handleInactiveFileCodeIntelligenceEnabled(rootClangdPath, sharedClangdPath);
+
   disposer.dispose();
 }

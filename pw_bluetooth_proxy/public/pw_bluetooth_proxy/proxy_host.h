@@ -25,6 +25,7 @@
 #include "pw_bluetooth_proxy/rfcomm_channel.h"
 #include "pw_status/status.h"
 
+/// Lightweight proxy for augmenting Bluetooth functionality
 namespace pw::bluetooth::proxy {
 
 /// `ProxyHost` acts as the main coordinator for proxy functionality. After
@@ -145,7 +146,7 @@ class ProxyHost {
   ///
   /// @param[in] event_fn          Handle asynchronous events such as errors and
   ///                              flow control events encountered by the
-  ///                              channel. See `l2cap_channel_event.h`.
+  ///                              channel. See `l2cap_channel_common.h`.
   ///
   /// @returns @rst
   ///
@@ -230,7 +231,7 @@ class ProxyHost {
   ///
   /// @param[in] event_fn          Handle asynchronous events such as errors and
   ///                              flow control events encountered by the
-  ///                              channel. See `l2cap_channel_event.h`.
+  ///                              channel. See `l2cap_channel_common.h`.
   ///
   /// @returns @rst
   ///

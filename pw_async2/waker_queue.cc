@@ -14,13 +14,17 @@
 
 #include "pw_async2/waker_queue.h"
 
+#include <mutex>
+
 #include "pw_log/tokenized_args.h"
 
 namespace pw::async2::internal {
 
 bool StoreWaker(Context& cx, WakerQueueBase& queue, log::Token wait_reason) {
   Waker waker;
-  CloneWaker(*cx.waker_, waker, wait_reason);
+  if (!CloneWaker(*cx.waker_, waker, wait_reason)) {
+    return false;
+  }
   return queue.Add(std::move(waker));
 }
 
@@ -31,6 +35,30 @@ void WakerQueueBase::WakeMany(size_t count) {
     queue_.pop();
     count--;
   }
+}
+
+bool WakerQueueBase::Add(Waker&& waker)
+    PW_LOCKS_EXCLUDED(impl::dispatcher_lock()) {
+  if (waker.IsEmpty()) {
+    return false;
+  }
+
+  {
+    // Don't store multiple wakers for the same task.
+    std::lock_guard lock(impl::dispatcher_lock());
+    for (Waker& queued_waker : queue_) {
+      if (waker.task_ == queued_waker.task_) {
+        return true;
+      }
+    }
+  }
+
+  if (queue_.full()) {
+    return false;
+  }
+
+  queue_.emplace(std::move(waker));
+  return true;
 }
 
 }  // namespace pw::async2::internal

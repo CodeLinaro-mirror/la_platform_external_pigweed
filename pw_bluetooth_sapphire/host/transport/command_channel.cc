@@ -21,6 +21,8 @@
 #include <pw_bluetooth/hci_common.emb.h>
 #include <pw_bytes/endian.h>
 
+#include <optional>
+
 #include "pw_bluetooth_sapphire/internal/host/common/log.h"
 #include "pw_bluetooth_sapphire/internal/host/common/trace.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/slab_allocators.h"
@@ -107,6 +109,7 @@ void CommandChannel::TransactionData::Complete(
   timeout_task_.Cancel();
 
   if (!callback_) {
+    wake_lease_.reset();
     return;
   }
 
@@ -120,6 +123,8 @@ void CommandChannel::TransactionData::Complete(
   // unexpected command complete events or status events do not call this
   // reference to callback_ twice.
   callback_ = nullptr;
+
+  wake_lease_.reset();
 }
 
 void CommandChannel::TransactionData::Cancel() {
@@ -330,8 +335,25 @@ CommandChannel::EventHandlerId CommandChannel::AddEventHandler(
   return handler_id;
 }
 
+std::optional<CommandChannel::OwnedEventHandle>
+CommandChannel::AddOwnedEventHandler(hci_spec::EventCode event_code,
+                                     EventCallback event_callback) {
+  EventHandlerId id = AddEventHandler(event_code, std::move(event_callback));
+  if (id != 0) {
+    return OwnedEventHandle(this, id);
+  } else {
+    return std::nullopt;
+  }
+}
+
 CommandChannel::EventHandlerId CommandChannel::AddLEMetaEventHandler(
-    hci_spec::EventCode le_meta_subevent_code, EventCallback event_callback) {
+    std::variant<hci_spec::EventCode, pw::bluetooth::emboss::LeSubEventCode>
+        le_meta_subevent_code_variant,
+    EventCallback event_callback) {
+  uint8_t le_meta_subevent_code =
+      std::visit([](auto&& code) { return static_cast<uint8_t>(code); },
+                 le_meta_subevent_code_variant);
+
   EventHandlerData* handler = FindLEMetaEventHandler(le_meta_subevent_code);
   if (handler && handler->is_async()) {
     bt_log(ERROR,

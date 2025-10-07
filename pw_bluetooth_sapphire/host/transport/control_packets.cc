@@ -24,6 +24,20 @@ namespace bt::hci {
 namespace android_hci = hci_spec::vendor::android;
 namespace android_emb = pw::bluetooth::vendor::android_hci;
 
+CommandPacket::CommandPacket(pw::bluetooth::emboss::OpCode opcode,
+                             size_t packet_size)
+    : DynamicPacket(packet_size) {
+  PW_CHECK(
+      packet_size >=
+          pw::bluetooth::emboss::CommandHeader::IntrinsicSizeInBytes(),
+      "command packet size must be at least 3 bytes to accommodate header");
+  auto header = view<pw::bluetooth::emboss::CommandHeaderWriter>();
+  header.opcode().Write(opcode);
+  header.parameter_total_size().Write(
+      packet_size -
+      pw::bluetooth::emboss::CommandHeader::IntrinsicSizeInBytes());
+}
+
 CommandPacket::CommandPacket(hci_spec::OpCode opcode, size_t packet_size)
     : DynamicPacket(packet_size) {
   PW_CHECK(packet_size >=
@@ -116,6 +130,8 @@ std::optional<pw::bluetooth::emboss::StatusCode> EventPacket::StatusCode()
     }
     case hci_spec::kRoleChangeEventCode:
       return StatusCodeFromView<pw::bluetooth::emboss::RoleChangeEventView>();
+    case hci_spec::kModeChangeEventCode:
+      return StatusCodeFromView<pw::bluetooth::emboss::ModeChangeEventView>();
     case hci_spec::kSimplePairingCompleteEventCode:
       return StatusCodeFromView<
           pw::bluetooth::emboss::SimplePairingCompleteEventView>();

@@ -22,10 +22,12 @@ py_library(
     srcs = [
         "pw_allocator/__init__.py",
         "pw_allocator/benchmarks.py",
+        "pw_allocator/heap_viewer.py",
     ],
     imports = ["."],
     deps = [
         "//pw_cli/py:pw_cli",
+        "@pigweed_python_packages//coloredlogs",
     ],
 )
 

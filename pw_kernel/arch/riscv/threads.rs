@@ -12,11 +12,13 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-use core::arch::naked_asm;
+use core::arch::{asm, naked_asm};
 use core::mem;
+use core::ptr::NonNull;
 
+use kernel::Arch;
 use kernel::scheduler::thread::Stack;
-use kernel::scheduler::{self, SchedulerContext, SchedulerState};
+use kernel::scheduler::{self, SchedulerState, ThreadLocalState};
 use kernel::sync::spinlock::SpinLockGuard;
 use log_if::debug_if;
 use pw_status::Result;
@@ -24,11 +26,13 @@ use pw_status::Result;
 use crate::protection::MemoryConfig;
 use crate::regs::{MStatusVal, PrivilegeLevel};
 use crate::spinlock::BareSpinLock;
-use crate::Arch;
 
 const LOG_CONTEXT_SWITCH: bool = false;
 const LOG_THREAD_CREATE: bool = false;
 
+static BOOT_THREAD_LOCAL_STATE: ThreadLocalState<crate::Arch> = ThreadLocalState::new();
+static mut THREAD_LOCAL_STATE: NonNull<ThreadLocalState<crate::Arch>> =
+    NonNull::from_ref(&BOOT_THREAD_LOCAL_STATE);
 #[repr(C)]
 struct ContextSwitchFrame {
     ra: usize,
@@ -50,6 +54,7 @@ pub struct ArchThreadState {
     frame: *mut ContextSwitchFrame,
     #[cfg(feature = "user_space")]
     memory_config: *const MemoryConfig,
+    local: ThreadLocalState<crate::Arch>,
 }
 
 impl ArchThreadState {
@@ -86,23 +91,24 @@ impl ArchThreadState {
     }
 }
 
-impl SchedulerContext for super::Arch {
+impl Arch for super::Arch {
     type ThreadState = ArchThreadState;
     type BareSpinLock = BareSpinLock;
     type Clock = super::timer::Clock;
+    type AtomicUsize = core::sync::atomic::AtomicUsize;
 
     #[inline(never)]
     unsafe fn context_switch<'a>(
         self,
-        sched_state: SpinLockGuard<'a, BareSpinLock, SchedulerState<ArchThreadState>>,
+        sched_state: SpinLockGuard<'a, Self, SchedulerState<Self>>,
         old_thread_state: *mut ArchThreadState,
         new_thread_state: *mut ArchThreadState,
-    ) -> SpinLockGuard<'a, BareSpinLock, SchedulerState<ArchThreadState>> {
+    ) -> SpinLockGuard<'a, Self, SchedulerState<Self>> {
         debug_if!(
             LOG_CONTEXT_SWITCH,
             "context switch from frame {:#08x} to frame {:#08x}",
-            (*old_thread_state).frame as usize,
-            (*new_thread_state).frame as usize,
+            unsafe { (*old_thread_state).frame } as usize,
+            unsafe { (*new_thread_state).frame } as usize,
         );
 
         // Memory config is swapped before the context switch instead of after.
@@ -112,17 +118,30 @@ impl SchedulerContext for super::Arch {
         // Memory context switch overhead is avoided for threads in the same
         // memory config space.
         #[cfg(feature = "user_space")]
-        if (*new_thread_state).memory_config != (*old_thread_state).memory_config {
-            (*(*new_thread_state).memory_config).write();
+        if unsafe { (*new_thread_state).memory_config }
+            != unsafe { (*old_thread_state).memory_config }
+        {
+            unsafe { (*(*new_thread_state).memory_config).write() };
         }
+
+        unsafe { THREAD_LOCAL_STATE = NonNull::from_ref(&(*new_thread_state).local) }
 
         // Note: there is a small window of time where the new memory configuration
         // is active (above) and the new thread is active (below).  Since this code
         // always executes in M-Mode, it bypasses the memory config and by the
         // time control is returned to user space, the memory config is correct.
-        riscv_context_switch(&mut (*old_thread_state).frame, (*new_thread_state).frame);
+        let old_thread_frame = unsafe { &mut (*old_thread_state).frame };
+        let new_thread_frame = unsafe { (*new_thread_state).frame };
+        riscv_context_switch(old_thread_frame, new_thread_frame);
 
         sched_state
+    }
+
+    fn thread_local_state(self) -> &'static ThreadLocalState<Self> {
+        unsafe {
+            #[allow(static_mut_refs)]
+            THREAD_LOCAL_STATE.as_ref()
+        }
     }
 
     fn now(self) -> time::Instant<super::timer::Clock> {
@@ -149,6 +168,27 @@ impl SchedulerContext for super::Arch {
     fn interrupts_enabled(self) -> bool {
         riscv::register::mstatus::read().mie()
     }
+
+    fn early_init(self) {
+        // Make sure interrupts are disabled
+        self.disable_interrupts();
+
+        crate::exceptions::early_init();
+
+        crate::timer::early_init();
+    }
+
+    fn init(self) {
+        crate::timer::init();
+    }
+
+    fn panic() -> ! {
+        unsafe {
+            asm!("ebreak");
+        }
+        #[allow(clippy::empty_loop)]
+        loop {}
+    }
 }
 
 impl kernel::scheduler::thread::ThreadState for ArchThreadState {
@@ -157,6 +197,7 @@ impl kernel::scheduler::thread::ThreadState for ArchThreadState {
         frame: core::ptr::null_mut(),
         #[cfg(feature = "user_space")]
         memory_config: core::ptr::null(),
+        local: ThreadLocalState::new(),
     };
 
     #[inline(never)]
@@ -203,7 +244,7 @@ impl kernel::scheduler::thread::ThreadState for ArchThreadState {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[unsafe(naked)]
 extern "C" fn riscv_context_switch(
     old_frame: *mut *mut ContextSwitchFrame,
@@ -252,7 +293,7 @@ extern "C" fn riscv_context_switch(
 
 // Since the context switch frame does not contain the function arg registers,
 // pass the initial function and arguments via two of the saved s registers.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[unsafe(naked)]
 extern "C" fn asm_user_trampoline() {
     naked_asm!(
@@ -279,7 +320,7 @@ extern "C" fn asm_user_trampoline() {
 
 // Since the context switch frame does not contain the function arg registers,
 // pass the initial function and arguments via two of the saved s registers.
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[unsafe(naked)]
 extern "C" fn asm_trampoline() {
     naked_asm!(
@@ -299,7 +340,7 @@ extern "C" fn asm_trampoline() {
 }
 
 #[allow(unused)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn trampoline(
     initial_function: extern "C" fn(usize, usize, usize),
     arg0: usize,
@@ -316,7 +357,7 @@ extern "C" fn trampoline(
     );
 
     // Enable interrupts
-    Arch.enable_interrupts();
+    crate::Arch.enable_interrupts();
 
     // TODO: figure out how to drop the scheduler lock here?
 
@@ -326,7 +367,7 @@ extern "C" fn trampoline(
     // Get a pointer to the current thread and call exit.
     // Note: must let the scope of the lock guard close,
     // since exit_thread() does not return.
-    scheduler::exit_thread(Arch);
+    scheduler::exit_thread(crate::Arch);
 
     // Does not reach.
 }

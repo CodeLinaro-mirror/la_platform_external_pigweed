@@ -52,6 +52,15 @@ pw_add_library(pw_sync.lock_annotations INTERFACE
     pw_preprocessor
 )
 
+pw_add_library(pw_sync.no_lock INTERFACE
+  HEADERS
+    public/pw_sync/no_lock.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_sync.lock_annotations
+)
+
 pw_add_library(pw_sync.lock_traits INTERFACE
   HEADERS
     public/pw_sync/lock_traits.h
@@ -237,7 +246,7 @@ pw_add_facade(pw_sync.condition_variable INTERFACE
 
 pw_add_library(pw_sync.threaded_testing INTERFACE
   HEADERS
-    public/pw_sync/internal/threaded_testing.h
+    public/pw_sync/test/threaded_testing.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
@@ -247,9 +256,20 @@ pw_add_library(pw_sync.threaded_testing INTERFACE
     pw_unit_test
 )
 
+pw_add_library(pw_sync.timed_threaded_testing INTERFACE
+  HEADERS
+    public/pw_sync/test/timed_threaded_testing.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_sync.threaded_testing
+    pw_chrono.system_clock
+    pw_thread.sleep
+)
+
 pw_add_library(pw_sync.lock_testing STATIC
   HEADERS
-    public/pw_sync/lock_testing.h
+    public/pw_sync/test/lock_testing.h
   SOURCES
     lock_testing.cc
   PUBLIC_INCLUDES
@@ -263,7 +283,7 @@ pw_add_library(pw_sync.lock_testing STATIC
 
 pw_add_library(pw_sync.borrow_testing INTERFACE
   HEADERS
-    public/pw_sync/borrow_testing.h
+    public/pw_sync/test/borrow_testing.h
   PUBLIC_DEPS
     pw_sync.borrow
     pw_sync.lock_traits
@@ -271,7 +291,7 @@ pw_add_library(pw_sync.borrow_testing INTERFACE
 
 pw_add_library(pw_sync.timed_borrow_testing INTERFACE
   HEADERS
-    public/pw_sync/timed_borrow_testing.h
+    public/pw_sync/test/timed_borrow_testing.h
   PUBLIC_DEPS
     pw_sync.borrow_testing
     pw_sync.timed_borrow
@@ -407,6 +427,7 @@ if(NOT "${pw_sync.timed_thread_notification_BACKEND}" STREQUAL "")
       timed_thread_notification_facade_test.cc
     PRIVATE_DEPS
       pw_sync.timed_thread_notification
+      pw_sync.timed_threaded_testing
     GROUPS
       modules
       pw_sync
@@ -425,4 +446,12 @@ pw_add_library(pw_sync.condition_variable_test STATIC
     pw_unit_test
   SOURCES
     condition_variable_test.cc
+)
+
+pw_add_test(pw_sync.no_lock_test
+  SOURCES
+    no_lock_test.cc
+  PRIVATE_DEPS
+    pw_sync.mutex
+    pw_sync.no_lock
 )

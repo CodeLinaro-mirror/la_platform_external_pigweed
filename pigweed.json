@@ -19,8 +19,12 @@
     "pw_cli": {
       "plugins": {
         "build": {
-          "module": "pw_build.pigweed_upstream_build",
+          "module": "pigweed_upstream_build.main",
           "function": "pigweed_upstream_main"
+        },
+        "change": {
+          "module": "pw_change.main",
+          "function": "main"
         },
         "console": {
           "module": "pw_system.console",
@@ -42,6 +46,10 @@
           "module": "pw_presubmit.format_code",
           "function": "main"
         },
+        "review": {
+          "module": "pw_change.review",
+          "function": "main"
+        },
         "heap-viewer": {
           "module": "pw_allocator.heap_viewer",
           "function": "main"
@@ -59,8 +67,8 @@
           "function": "main"
         },
         "push": {
-          "module": "pw_cli.push",
-          "function": "push"
+          "module": "pw_change.push",
+          "function": "main"
         },
         "requires": {
           "module": "pw_cli.requires",
@@ -202,6 +210,10 @@
             "test",
             "--platforms=//pw_grpc:test_platform",
             "//pw_grpc/..."
+          ],
+          [
+            "build",
+            "//docs"
           ]
         ],
         "docs": [
@@ -214,6 +226,16 @@
           [
             "run",
             "//pw_presubmit/py:check_formatting"
+          ],
+          [
+            "build",
+            "--config=pylint",
+            "//..."
+          ],
+          [
+            "build",
+            "--config=mypy",
+            "//..."
           ]
         ],
         "integration": [
@@ -233,6 +255,11 @@
           [
             "test",
             "--config=k_host",
+            "//pw_kernel/..."
+          ],
+          [
+            "test",
+            "--config=k_doctest",
             "//pw_kernel/..."
           ],
           [

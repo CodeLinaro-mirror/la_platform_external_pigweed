@@ -19,6 +19,7 @@
 #include "pw_bluetooth_sapphire/internal/host/gap/adapter.h"
 #include "pw_multibuf/allocator.h"
 
+/// Dual-mode Bluetooth host stack
 namespace pw::bluetooth_sapphire {
 
 /// Must only be constructed and destroyed on the Bluetooth thread.
@@ -68,8 +69,7 @@ class Central final : public pw::bluetooth::low_energy::Central2 {
     }
 
    private:
-    async2::Poll<pw::Result<ScanResult>> PendResult(
-        async2::Context& cx) override;
+    async2::PollResult<ScanResult> PendResult(async2::Context& cx) override;
 
     // std::unique_ptr custom Deleter
     void Release() override { delete this; }

@@ -15,6 +15,7 @@
 load("@aspect_bazel_lib//lib:directory_path.bzl", "directory_path")
 load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@pigweed//pw_build:compatibility.bzl", "incompatible_with_mcu")
@@ -43,6 +44,16 @@ filegroup(
     visibility = [":__subpackages__"],
 )
 
+native_binary(
+    name = "pw",
+    src = "//pw_build/py:workflows_launcher",
+)
+
+alias(
+    name = "change",
+    actual = "//pw_change/py:change",
+)
+
 alias(
     name = "watch",
     actual = "//pw_watch/py:bazel",
@@ -51,6 +62,21 @@ alias(
 alias(
     name = "format",
     actual = "//pw_presubmit/py:format",
+)
+
+alias(
+    name = "push",
+    actual = "//pw_change/py:push",
+)
+
+alias(
+    name = "review",
+    actual = "//pw_change/py:review",
+)
+
+alias(
+    name = "presubmit",
+    actual = "//pw_presubmit/py:local_presubmit",
 )
 
 # Symlink to clangd, for user convenience.
@@ -67,6 +93,10 @@ copy_file(
 refresh_compile_commands(
     name = "refresh_compile_commands_for_fuchsia_sdk",
     out_dir = ".compile_commands",
+    tags = [
+        "nomypy",
+        "nopylint",
+    ],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -149,11 +179,12 @@ sphinx_docs_library(
     name = "docs",
     srcs = [
         ".bazelversion",
+        ".clang-tidy",
         "Kconfig.zephyr",
         "PIGWEED_MODULES",
     ],
     target_compatible_with = incompatible_with_mcu(),
-    visibility = ["//visibility:public"],
+    visibility = [":__subpackages__"],
 )
 
 # NPM bundling via rollup
@@ -169,6 +200,24 @@ directory_path(
 js_binary(
     name = "rollup_bin",
     entry_point = ":rollup_entry_point",
+    target_compatible_with = incompatible_with_mcu(),
+    visibility = [":__subpackages__"],
+)
+
+directory_path(
+    name = "prettier_entry_point",
+    directory = "//:node_modules/prettier/dir",
+    path = "bin/prettier.cjs",
+    target_compatible_with = incompatible_with_mcu(),
+    visibility = [":__subpackages__"],
+)
+
+js_binary(
+    name = "prettier",
+    entry_point = ":prettier_entry_point",
+    env = {
+        "BAZEL_BINDIR": ".",
+    },
     target_compatible_with = incompatible_with_mcu(),
     visibility = [":__subpackages__"],
 )
@@ -261,4 +310,9 @@ filegroup(
     name = "clang_tidy_config",
     srcs = [".clang-tidy"],
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "pylintrc",
+    srcs = [".pylintrc"],
 )

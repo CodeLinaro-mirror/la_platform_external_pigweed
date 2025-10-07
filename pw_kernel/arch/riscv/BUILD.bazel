@@ -28,8 +28,20 @@ rust_library(
         "spinlock.rs",
         "threads.rs",
         "timer.rs",
-    ],
-    crate_features = ["user_space"],
+    ] + select({
+        "timer_clint": ["timer/clint.rs"],
+        "timer_mtime": ["timer/mtime.rs"],
+    }) + select({
+        "//pw_build/constraints/riscv/extensions:Smepmp": ["regs/epmp.rs"],
+        "//conditions:default": [],
+    }),
+    crate_features = ["user_space"] + select({
+        "timer_clint": ["timer_clint"],
+        "timer_mtime": ["timer_mtime"],
+    }) + select({
+        "//pw_build/constraints/riscv/extensions:Smepmp": ["epmp"],
+        "//conditions:default": [],
+    }),
     proc_macro_deps = [
         "//pw_kernel/macros:riscv_macro",
         "@rust_crates//:paste",
@@ -54,7 +66,6 @@ rust_library(
         "//pw_kernel/syscall:syscall_defs",
         "@pigweed//pw_log/rust:pw_log",
         "@rust_crates//:riscv",
-        "@rust_crates//:riscv-rt",
     ] + KERNEL_TEST_DEPS,
 )
 
@@ -67,4 +78,19 @@ rust_doc(
         "--cfg=feature=\"arch_riscv\"",
     ],
     tags = ["kernel"],
+)
+
+constraint_setting(
+    name = "timer",
+    default_constraint_value = "timer_clint",
+)
+
+constraint_value(
+    name = "timer_clint",
+    constraint_setting = ":timer",
+)
+
+constraint_value(
+    name = "timer_mtime",
+    constraint_setting = ":timer",
 )

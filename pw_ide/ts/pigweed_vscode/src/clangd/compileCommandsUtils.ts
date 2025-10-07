@@ -25,7 +25,7 @@ import {
   CompilationDatabaseMap,
   inferTarget,
 } from './parser';
-import { chmodSync, existsSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, rmSync, writeFileSync } from 'fs';
 
 interface CompDbProcessingSettings {
   compDbSearchPaths: string[][];
@@ -171,30 +171,6 @@ export async function processCompDbs() {
 }
 
 const SHELL = os.userInfo().shell || '/bin/sh';
-const bazelInterceptorScriptTemplate = `#!${SHELL}
-set -uo pipefail
-
- if [[ $# -gt 0 && ( "$1" == "build" || "$1" == "run" || "$1" == "test" ) ]]; then
-  # Run the real Bazel command first
-  $BAZEL_REAL "$@"
-  BAZEL_EXIT_CODE=$? # Capture the exit code of the Bazel command
-  if [ $BAZEL_EXIT_CODE -eq 0 ]; then
-    echo "⏳ Generating compile commands..."
-    $BAZEL_REAL --quiet run \
-      --show_result=0 \
-      @pigweed//pw_ide/ts/pigweed_vscode:compile_commands_generator_binary -- \
-      --target "$*" --cwd "$(pwd)" --bazelCmd "$BAZEL_REAL"
-    if [ $? -ne 0 ]; then
-      echo "⚠️ Compile commands generation failed (exit code $?), continuing..."
-    fi
-  fi
-else
-  $BAZEL_REAL "$@"
-  BAZEL_EXIT_CODE=$?
-fi
-
-exit $BAZEL_EXIT_CODE
-`;
 export function getBazelInterceptorPath() {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return false;
@@ -215,20 +191,84 @@ export async function createBazelInterceptorFile() {
       vscode.Uri.file(path.dirname(pathForBazelBuildInterceptor)),
     );
   }
-  writeFileSync(pathForBazelBuildInterceptor, bazelInterceptorScriptTemplate);
+
+  const usePythonGenerator = settings.usePythonCompileCommandsGenerator();
+  const generatorTarget = usePythonGenerator
+    ? '@pigweed//pw_ide/py:compile_commands_generator_binary'
+    : '@pigweed//pw_ide/ts/pigweed_vscode:compile_commands_generator_binary';
+  const canonicalizerTarget = '@pigweed//pw_ide/py:bazel_canonicalize_args';
+
+  let bazelInterceptorScript;
+
+  if (SHELL.endsWith('fish')) {
+    bazelInterceptorScript = `#!/usr/bin/env fish
+set -u
+
+if contains -- $argv[1] build run test
+  # First, get the canonicalized arguments for the bazel command.
+  set CANONICALIZED_ARGS ($BAZEL_REAL --quiet run --show_result=0 ${canonicalizerTarget} -- --cwd (pwd) --bazelCmd "$BAZEL_REAL" "$argv")
+
+  # Run the real Bazel command
+  $BAZEL_REAL $argv
+  set BAZEL_EXIT_CODE $status # Capture the exit code of the Bazel command
+  if [ $BAZEL_EXIT_CODE -eq 0 ]
+    echo "⏳ Generating compile commands..."
+    # Generate the compile commands now, make sure to run this with same args as original bazel invocation.
+    $BAZEL_REAL --quiet run $CANONICALIZED_ARGS --show_result=0 \
+      ${generatorTarget} -- \
+      --target "$argv" --cwd (pwd) --bazelCmd "$BAZEL_REAL"
+    if [ $status -ne 0 ]
+      echo "⚠️ Compile commands generation failed (exit code $status), continuing..."
+    end
+  end
+else
+  $BAZEL_REAL $argv
+  set BAZEL_EXIT_CODE $status
+end
+
+exit $BAZEL_EXIT_CODE
+`;
+  } else {
+    bazelInterceptorScript = `#!${SHELL}
+set -uo pipefail
+
+ if [[ $# -gt 0 && ( "$1" == "build" || "$1" == "run" || "$1" == "test" ) ]]; then
+  # First, get the canonicalized arguments for the bazel command.
+  CANONICALIZED_ARGS=$($BAZEL_REAL --quiet run --show_result=0 ${canonicalizerTarget} -- --cwd "$(pwd)" --bazelCmd "$BAZEL_REAL" "$*")
+
+  # Run the real Bazel command
+  $BAZEL_REAL "$@"
+  BAZEL_EXIT_CODE=$? # Capture the exit code of the Bazel command
+  if [ $BAZEL_EXIT_CODE -eq 0 ]; then
+    echo "⏳ Generating compile commands..."
+    # Generate the compile commands now, make sure to run this with same args as original bazel invocation.
+    $BAZEL_REAL --quiet run $CANONICALIZED_ARGS --show_result=0 \
+      ${generatorTarget} -- \
+      --target "$*" --cwd "$(pwd)" --bazelCmd "$BAZEL_REAL"
+    if [ $? -ne 0 ]; then
+      echo "⚠️ Compile commands generation failed (exit code $?), continuing..."
+    fi
+  fi
+else
+  $BAZEL_REAL "$@"
+  BAZEL_EXIT_CODE=$?
+fi
+
+exit $BAZEL_EXIT_CODE
+`;
+  }
+
+  writeFileSync(pathForBazelBuildInterceptor, bazelInterceptorScript);
   chmodSync(pathForBazelBuildInterceptor, 0o755);
 }
 
-export async function deleteBazelInterceptorFile() {
+export function deleteBazelInterceptorFile() {
   const pathForBazelBuildInterceptor = getBazelInterceptorPath();
   if (!pathForBazelBuildInterceptor) return;
   if (existsSync(pathForBazelBuildInterceptor)) {
-    await vscode.workspace.fs.delete(
-      vscode.Uri.file(pathForBazelBuildInterceptor),
-      {
-        recursive: true,
-        useTrash: false,
-      },
-    );
+    rmSync(pathForBazelBuildInterceptor, {
+      recursive: true,
+      force: true,
+    });
   }
 }

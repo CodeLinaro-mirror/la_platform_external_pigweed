@@ -114,14 +114,19 @@ class DynamicVector {
 
   /// Requests that the vector capacity be at least `new_capacity` elements.
   ///
-  /// Note: This operation is potentially fallible if memory allocation is
-  /// required and fails. Depending on the underlying DynamicDeque
-  /// implementation and Pigweed configuration, allocation failure may result
-  /// in a panic or assertion failure. Use `try_reserve()` for a fallible
-  /// version.
+  /// Crashes if allocation fails.
   ///
   /// @param new_capacity The minimum desired capacity.
   void reserve(size_type new_capacity) { deque_.reserve(new_capacity); }
+
+  /// Requests that the vector capacity be exactly `new_capacity` elements.
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param new_capacity The minimum desired capacity.
+  void reserve_exact(size_type new_capacity) {
+    deque_.reserve_exact(new_capacity);
+  }
 
   /// Attempts to request that the vector capacity be at least `new_capacity`
   /// elements.
@@ -132,6 +137,16 @@ class DynamicVector {
   /// @return `true` if successful, `false` otherwise.
   [[nodiscard]] bool try_reserve(size_type new_capacity) {
     return deque_.try_reserve(new_capacity);
+  }
+
+  /// Attempts to set the vector capacity to exactly `new_capacity` elements.
+  ///
+  /// Returns `true` on success, or `false` if allocation fails.
+  ///
+  /// @param new_capacity The exact desired capacity.
+  /// @return `true` if successful, `false` otherwise.
+  [[nodiscard]] bool try_reserve_exact(size_type new_capacity) {
+    return deque_.try_reserve_exact(new_capacity);
   }
 
   /// Reduces memory usage by releasing unused capacity.
@@ -290,6 +305,190 @@ class DynamicVector {
     return deque_.try_emplace_back(std::forward<Args>(args)...);
   }
 
+  /// Constructs an element in-place at the specified position.
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param pos The position at which to construct the element.
+  /// @param args Arguments to forward to the element's constructor.
+  /// @return Iterator to the emplaced element.
+  template <typename... Args>
+  iterator emplace(const_iterator pos, Args&&... args) {
+    auto deque_it = deque_.try_emplace_shift_right(ToDequeIterator(pos),
+                                                   std::forward<Args>(args)...);
+    PW_ASSERT(deque_it.has_value());
+    return iterator(data() + deque_it->pos_);
+  }
+
+  /// Attempts to construct an element in-place at the specified position.
+  ///
+  /// Returns an iterator to the new element on success, or `std::nullopt` if
+  /// allocation fails.
+  ///
+  /// @param pos The position at which to construct the element.
+  /// @param args Arguments to forward to the element's constructor.
+  /// @return Iterator to the emplaced element, or `std::nullopt` on failure.
+  template <typename... Args>
+  [[nodiscard]] std::optional<iterator> try_emplace(const_iterator pos,
+                                                    Args&&... args) {
+    auto deque_it = deque_.try_emplace_shift_right(ToDequeIterator(pos),
+                                                   std::forward<Args>(args)...);
+    if (!deque_it.has_value()) {
+      return std::nullopt;
+    }
+    return iterator(data() + deque_it->pos_);
+  }
+
+  /// Inserts an element at the specified position.
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param pos The position at which to insert the element.
+  /// @param value The value to insert.
+  /// @return Iterator to the inserted element.
+  iterator insert(const_iterator pos, const T& value) {
+    return emplace(pos, value);
+  }
+
+  /// Inserts an element at the specified position (move version).
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param pos The position at which to insert the element.
+  /// @param value The value to insert.
+  /// @return Iterator to the inserted element.
+  iterator insert(const_iterator pos, T&& value) {
+    return emplace(pos, std::move(value));
+  }
+
+  /// Inserts multiple copies of an element at the specified position.
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param pos The position at which to insert the elements.
+  /// @param count The number of elements to insert.
+  /// @param value The value to insert.
+  /// @return Iterator to the first inserted element.
+  iterator insert(const_iterator pos, size_type count, const T& value) {
+    auto deque_it =
+        deque_.try_insert_shift_right(ToDequeIterator(pos), count, value);
+    PW_ASSERT(deque_it.has_value());
+    return iterator(data() + deque_it->pos_);
+  }
+
+  /// Inserts elements from an iterator range at the specified position.
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param pos The position at which to insert the elements.
+  /// @param first The beginning of the range to insert.
+  /// @param last The end of the range to insert.
+  /// @return Iterator to the first inserted element.
+  template <typename InputIt>
+  iterator insert(const_iterator pos, InputIt first, InputIt last) {
+    auto deque_it =
+        deque_.try_insert_shift_right(ToDequeIterator(pos), first, last);
+    PW_ASSERT(deque_it.has_value());
+    return iterator(data() + deque_it->pos_);
+  }
+
+  /// Inserts elements from an initializer list at the specified position.
+  ///
+  /// Crashes if allocation fails.
+  ///
+  /// @param pos The position at which to insert the elements.
+  /// @param ilist The initializer list to insert.
+  /// @return Iterator to the first inserted element.
+  iterator insert(const_iterator pos, std::initializer_list<T> ilist) {
+    return insert(pos, ilist.begin(), ilist.end());
+  }
+
+  /// Attempts to insert an element at the specified position.
+  ///
+  /// Returns an iterator to the new element on success, or `std::nullopt` if
+  /// allocation fails.
+  ///
+  /// @param pos The position at which to insert the element.
+  /// @param value The value to insert.
+  /// @return Iterator to the inserted element, or `std::nullopt` on failure.
+  [[nodiscard]] std::optional<iterator> try_insert(const_iterator pos,
+                                                   const T& value) {
+    return try_emplace(pos, value);
+  }
+
+  /// Attempts to insert an element at the specified position (move version).
+  ///
+  /// Returns an iterator to the new element on success, or `std::nullopt` if
+  /// allocation fails.
+  ///
+  /// @param pos The position at which to insert the element.
+  /// @param value The value to insert.
+  /// @return Iterator to the inserted element, or `std::nullopt` on failure.
+  [[nodiscard]] std::optional<iterator> try_insert(const_iterator pos,
+                                                   T&& value) {
+    return try_emplace(pos, std::move(value));
+  }
+
+  /// Attempts to insert multiple copies of an element at the specified
+  /// position.
+  ///
+  /// Returns an iterator to the first new element on success, or `std::nullopt`
+  /// if allocation fails.
+  ///
+  /// @param pos The position at which to insert the elements.
+  /// @param count The number of elements to insert.
+  /// @param value The value to insert.
+  /// @return Iterator to the first inserted element, or `std::nullopt` on
+  /// failure.
+  [[nodiscard]] std::optional<iterator> try_insert(const_iterator pos,
+                                                   size_type count,
+                                                   const T& value) {
+    auto deque_it =
+        deque_.try_insert_shift_right(ToDequeIterator(pos), count, value);
+    if (!deque_it.has_value()) {
+      return std::nullopt;
+    }
+    return iterator(data() + deque_it->pos_);
+  }
+
+  /// Attempts to insert elements from an iterator range at the specified
+  /// position.
+  ///
+  /// Returns an iterator to the first new element on success, or `std::nullopt`
+  /// if allocation fails.
+  ///
+  /// @param pos The position at which to insert the elements.
+  /// @param first The beginning of the range to insert.
+  /// @param last The end of the range to insert.
+  /// @return Iterator to the first inserted element, or `std::nullopt` on
+  /// failure.
+  template <typename InputIt>
+  [[nodiscard]] std::optional<iterator> try_insert(const_iterator pos,
+                                                   InputIt first,
+                                                   InputIt last) {
+    auto deque_it =
+        deque_.try_insert_shift_right(ToDequeIterator(pos), first, last);
+    if (!deque_it.has_value()) {
+      return std::nullopt;
+    }
+    return iterator(data() + deque_it->pos_);
+  }
+
+  /// Attempts to insert elements from an initializer list at the specified
+  /// position.
+  ///
+  /// Returns an iterator to the first new element on success, or `std::nullopt`
+  /// if allocation fails.
+  ///
+  /// @param pos The position at which to insert the elements.
+  /// @param ilist The initializer list to insert.
+  /// @return Iterator to the first inserted element, or `std::nullopt` on
+  /// failure.
+  [[nodiscard]] std::optional<iterator> try_insert(
+      const_iterator pos, std::initializer_list<T> ilist) {
+    return try_insert(pos, ilist.begin(), ilist.end());
+  }
+
   // TODO: b/424613355 - Implement insert, emplace
 
   /// Erases the specified element from the vector.
@@ -362,7 +561,7 @@ class DynamicVector {
  private:
   typename DynamicDeque<T, size_type>::const_iterator ToDequeIterator(
       const_iterator it) const {
-    return {&deque_, static_cast<size_type>(it - cbegin())};
+    return {deque_, static_cast<size_type>(it - cbegin())};
   }
 
   // The underlying DynamicDeque instance that provides the storage.

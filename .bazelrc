@@ -20,6 +20,12 @@ import %workspace%/pw_build/pigweed_recommended.bazelrc
 # TODO: https://pwbug.dev/258836641 - Only until bzlmod migration is done.
 common --enable_workspace
 
+# Enable all desired formatters.
+common --//pw_presubmit/py:enable_gn_formatter=True
+common --//pw_presubmit/py:enable_go_formatter=True
+common --//pw_presubmit/py:enable_javascript_formatter=True
+common --//pw_presubmit/py:enable_typescript_formatter=True
+
 # Default build_tag_filters and test_tag_filters
 # ==============================================
 # Skip building any targets tagged do_not_build.
@@ -147,6 +153,12 @@ common:tsan --//pw_toolchain/host_clang:tsan
 # -integration because the test_tag_filters flag does not accumulate.
 test:tsan --test_tag_filters=-integration,-notsan,-do_not_build,-do_not_run_test,-kernel
 
+# msan currently has false positives in Pigweed (see b/234876100).
+common:msan --//pw_toolchain/host_clang:msan
+# TODO: https://github.com/bazelbuild/bazel/issues/7322 - We need to repeat the
+# -integration because the test_tag_filters flag does not accumulate.
+test:msan --test_tag_filters=-integration,-notsan,-do_not_build,-do_not_run_test,-kernel
+
 # Include libFuzzer build configurations.
 import %workspace%/pw_fuzzer/libfuzzer.bazelrc
 
@@ -166,6 +178,18 @@ build:clang-tidy --build_tag_filters=-noclangtidy
 #
 # TODO: https://pwbug.dev/341723612 - What do we do in GN?
 build:clang-tidy --copt=-Wno-pragma-once-outside-header
+
+# Pylint aspect configuration
+build --//pw_build:pylintrc=//:pylintrc
+build:pylint --aspects //pw_build:pw_pylint.bzl%pylint_aspect
+build:pylint --output_groups=report
+build:pylint --build_tag_filters=-nopylint
+
+# mypy aspect configuration
+build:mypy --aspects //pw_build/mypy:mypy.bzl%mypy_aspect
+build:mypy --output_groups=mypy
+# No build_tag_filters needed: the mypy aspect has built-in support for the
+# "nomypy" tag.
 
 # For some platforms i.e. google/oss-fuzz we need to use the system provided
 # rather than the hermetic toolchains. This allows oss-fuzz to override the
@@ -254,3 +278,8 @@ import %workspace%/pw_kernel/kernel.bazelrc
 # options override anything in this file
 # (https://bazel.build/run/bazelrc#imports)
 try-import %workspace%/user.bazelrc
+
+# (Experimental) Configuration to automatically generate compile_commands.json for IDEs.
+# Usage: bazel build --config=ide //your/target/...
+build:ide --aspects=//pw_ide/bazel/compile_commands:defs.bzl%compile_commands_aspect
+build:ide --output_groups=+compile_commands_fragments

@@ -11,7 +11,6 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
-#![no_std]
 
 #[cfg(test)]
 mod tests {
@@ -21,14 +20,12 @@ mod tests {
 
     #[cfg(feature = "arch_arm_cortex_m")]
     use arch_arm_cortex_m::Arch;
-
     #[cfg(feature = "arch_riscv")]
     use arch_riscv::Arch;
-
     use kernel::sync::spinlock::{BareSpinLock, SpinLock};
     use unittest::test;
 
-    type ConcreteBareSpinLock = <Arch as kernel::scheduler::SchedulerContext>::BareSpinLock;
+    type ConcreteBareSpinLock = <Arch as kernel::Arch>::BareSpinLock;
 
     #[test]
     fn bare_try_lock_returns_correct_value() -> unittest::Result<()> {
@@ -46,15 +43,15 @@ mod tests {
 
     #[test]
     fn try_lock_returns_correct_value() -> unittest::Result<()> {
-        let lock = SpinLock::<ConcreteBareSpinLock, _>::new(false);
+        let lock = SpinLock::<Arch, _>::new(false);
 
         {
-            let mut guard = lock.lock();
+            let mut guard = lock.lock(Arch);
             *guard = true;
-            unittest::assert_true!(lock.try_lock().is_none());
+            unittest::assert_true!(lock.try_lock(Arch).is_none());
         }
 
-        let guard = lock.lock();
+        let guard = lock.lock(Arch);
         unittest::assert_true!(*guard);
 
         Ok(())

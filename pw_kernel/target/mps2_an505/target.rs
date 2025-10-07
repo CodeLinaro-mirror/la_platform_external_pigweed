@@ -14,13 +14,11 @@
 #![no_std]
 #![no_main]
 
-use arch_arm_cortex_m::{Arch, ArchThreadState};
-use kernel::InitKernelState;
-use target_common::{declare_target, TargetInterface};
-use {console_backend as _, kernel as _};
-
+use arch_arm_cortex_m::Arch;
 #[cfg(test)]
 use integration_tests as _;
+use target_common::{declare_target, TargetInterface};
+use {console_backend as _, kernel as _};
 
 pub struct Target {}
 
@@ -61,21 +59,19 @@ impl TargetInterface for Target {
 
 declare_target!(Target);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[allow(non_snake_case)]
 pub extern "C" fn pw_assert_HandleFailure() -> ! {
-    use kernel::KernelContext as _;
+    use kernel::Arch as _;
     Arch::panic()
 }
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    Target::console_init();
-
-    static mut INIT_STATE: InitKernelState<ArchThreadState> = InitKernelState::new();
+    kernel::static_init_state!(static mut INIT_STATE: InitKernelState<Arch>);
 
     // SAFETY: `main` is only executed once, so we never generate more than one
     // `&mut` reference to `INIT_STATE`.
     #[allow(static_mut_refs)]
-    kernel::Kernel::main(Arch, unsafe { &mut INIT_STATE });
+    kernel::main(Arch, unsafe { &mut INIT_STATE });
 }

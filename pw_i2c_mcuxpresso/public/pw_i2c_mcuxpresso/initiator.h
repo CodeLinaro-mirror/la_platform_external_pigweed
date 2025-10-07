@@ -35,12 +35,12 @@ class McuxpressoInitiator final : public Initiator {
   };
 
   McuxpressoInitiator(const Config& config,
-                      pw::clock_tree::ClockTree& clock_tree,
                       pw::clock_tree::Element& clock_tree_element)
       : Initiator(Initiator::Feature::kStandard),
         config_(config),
         base_(reinterpret_cast<I2C_Type*>(config_.flexcomm_address)),
-        element_controller_(&clock_tree, &clock_tree_element) {}
+        clock_tree_element_(clock_tree_element) {}
+
   McuxpressoInitiator(const Config& config)
       : Initiator(Initiator::Feature::kStandard),
         config_(config),
@@ -73,7 +73,7 @@ class McuxpressoInitiator final : public Initiator {
   sync::Mutex mutex_;
   Config const config_;
   I2C_Type* const base_;
-  pw::clock_tree::ElementController element_controller_;
+  pw::clock_tree::OptionalElement clock_tree_element_;
   bool enabled_ PW_GUARDED_BY(mutex_);
 
   // Transfer completion status for non-blocking I2C transfer.

@@ -44,14 +44,19 @@ py_library(
         "pw_cli/plugins.py",
         "pw_cli/plural.py",
         "pw_cli/process.py",
-        "pw_cli/push.py",
         "pw_cli/pw_command_plugins.py",
         "pw_cli/requires.py",
+        "pw_cli/shell_completion/__init__.py",
+        "pw_cli/shell_completion/fish/__init__.py",
+        "pw_cli/shell_completion/zsh/__init__.py",
+        "pw_cli/shell_completion/zsh/pw/__init__.py",
+        "pw_cli/shell_completion/zsh/pw_build/__init__.py",
         "pw_cli/status_reporter.py",
         "pw_cli/tool_runner.py",
     ],
     imports = ["."],
     deps = [
+        "//pw_cli_analytics/py:pw_cli_analytics",
         "@pigweed_python_packages//prompt_toolkit",
         "@pigweed_python_packages//psutil",
     ],
@@ -64,6 +69,18 @@ pw_py_binary(
     ],
     deps = [
         ":pw_cli",
+    ],
+)
+
+pw_py_test(
+    name = "collect_files_test",
+    size = "small",
+    srcs = [
+        "collect_files_test.py",
+    ],
+    deps = [
+        ":pw_cli",
+        "@pigweed_python_packages//pyfakefs",
     ],
 )
 
@@ -132,4 +149,16 @@ pw_py_test(
     deps = [
         ":pw_cli",
     ],
+)
+
+pw_py_test(
+    name = "decorators_test",
+    srcs = ["decorators_test.py"],
+    deps = [":pw_cli"],
+)
+
+pw_py_test(
+    name = "process_integration_test",
+    srcs = ["process_integration_test.py"],
+    deps = [":pw_cli"],
 )

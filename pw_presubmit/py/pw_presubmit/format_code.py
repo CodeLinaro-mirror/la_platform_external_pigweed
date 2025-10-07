@@ -22,7 +22,6 @@ code. These tools must be available on the path when this script is invoked!
 import argparse
 import collections
 import difflib
-import json
 import logging
 import os
 from pathlib import Path
@@ -64,23 +63,41 @@ from pw_presubmit.format.bazel import (
     BuildifierFormatter,
     DEFAULT_BAZEL_FILE_PATTERNS,
 )
+from pw_presubmit.format.cmake import DEFAULT_CMAKE_FILE_PATTERNS
 from pw_presubmit.format.core import FormattedDiff, FormatFixStatus
+from pw_presubmit.format.css import DEFAULT_CSS_FILE_PATTERNS
 from pw_presubmit.format import cpp
 from pw_presubmit.format.cpp import ClangFormatFormatter
 from pw_presubmit.format.gn import GnFormatter, DEFAULT_GN_FILE_PATTERNS
+from pw_presubmit.format.go import GofmtFormatter, DEFAULT_GO_FILE_PATTERNS
+from pw_presubmit.format.java import DEFAULT_JAVA_FILE_PATTERNS
+from pw_presubmit.format.javascript import DEFAULT_JAVASCRIPT_FILE_PATTERNS
+from pw_presubmit.format.json import (
+    JsonFormatter,
+    DEFAULT_JSON_FILE_PATTERNS,
+)
+from pw_presubmit.format.markdown import DEFAULT_MARKDOWN_FILE_PATTERNS
 from pw_presubmit.format.owners import (
     OwnersFormatter,
     DEFAULT_OWNERS_FILE_PATTERNS,
 )
+from pw_presubmit.format.prettier import PrettierFormatter
 from pw_presubmit.format.private.cli_support import (
     summarize_findings,
     findings_to_formatted_diffs,
 )
+from pw_presubmit.format.protobuf import DEFAULT_PROTOBUF_FILE_PATTERNS
 from pw_presubmit.format.python import (
     BlackFormatter,
     DEFAULT_PYTHON_FILE_PATTERNS,
 )
-from pw_presubmit.rst_format import reformat_rst
+from pw_presubmit.format.rst import (
+    RstFormatter,
+    DEFAULT_RST_FILE_PATTERNS,
+)
+from pw_presubmit.format.starlark import DEFAULT_STARLARK_FILE_PATTERNS
+from pw_presubmit.format.typescript import DEFAULT_TYPESCRIPT_FILE_PATTERNS
+from pw_presubmit.format.whitespace import TrailingSpaceFormatter
 from pw_presubmit.tools import (
     log_run,
     PresubmitToolRunner,
@@ -178,39 +195,22 @@ def clang_format_fix(ctx: _Context) -> dict[Path, str]:
     return _make_format_fix_error_output_dict(formatter.format_files(ctx.paths))
 
 
-def _typescript_format(*args: Path | str, **kwargs) -> bytes:
-    # TODO: b/323378974 - Better integrate NPM actions with pw_env_setup so
-    # we don't have to manually set `npm_config_cache` every time we run npm.
-    # Force npm cache to live inside the environment directory.
-    npm_env = os.environ.copy()
-    npm_env['npm_config_cache'] = str(
-        Path(npm_env['_PW_ACTUAL_ENVIRONMENT_ROOT']) / 'npm-cache'
-    )
-
-    npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
-    return log_run(
-        [npm, 'exec', 'prettier', *args],
-        stdout=subprocess.PIPE,
-        stdin=subprocess.DEVNULL,
-        check=True,
-        env=npm_env,
-        **kwargs,
-    ).stdout
-
-
 def typescript_format_check(ctx: _Context) -> dict[Path, str]:
     """Checks formatting; returns {path: diff} for files with bad formatting."""
-    return _check_files(
-        ctx.paths,
-        lambda path, _: _typescript_format(path),
-        ctx.dry_run,
+    formatter = PrettierFormatter(
+        tool_runner=PresubmitToolRunner(),
+    )
+    return _make_formatting_diff_dict(
+        formatter.get_formatting_diffs(ctx.paths, ctx.dry_run)
     )
 
 
 def typescript_format_fix(ctx: _Context) -> dict[Path, str]:
     """Fixes formatting for the provided files in place."""
-    print_format_fix(_typescript_format(*ctx.paths, '--', '--write'))
-    return {}
+    formatter = PrettierFormatter(
+        tool_runner=PresubmitToolRunner(),
+    )
+    return _make_format_fix_error_output_dict(formatter.format_files(ctx.paths))
 
 
 def check_gn_format(ctx: _Context) -> dict[Path, str]:
@@ -264,19 +264,19 @@ def fix_owners_format(ctx: _Context) -> dict[Path, str]:
 
 def check_go_format(ctx: _Context) -> dict[Path, str]:
     """Checks formatting; returns {path: diff} for files with bad formatting."""
-    return _check_files(
-        ctx.paths,
-        lambda path, _: log_run(
-            ['gofmt', path], stdout=subprocess.PIPE, check=True
-        ).stdout,
-        ctx.dry_run,
+    formatter = GofmtFormatter(tool_runner=PresubmitToolRunner())
+    return _make_formatting_diff_dict(
+        formatter.get_formatting_diffs(
+            ctx.paths,
+            ctx.dry_run,
+        )
     )
 
 
 def fix_go_format(ctx: _Context) -> dict[Path, str]:
     """Fixes formatting for the provided files in place."""
-    log_run(['gofmt', '-w', *ctx.paths], check=True)
-    return {}
+    formatter = GofmtFormatter(tool_runner=PresubmitToolRunner())
+    return _make_format_fix_error_output_dict(formatter.format_files(ctx.paths))
 
 
 # TODO: b/259595799 - Remove yapf support.
@@ -390,94 +390,54 @@ def fix_py_format(ctx: _Context) -> dict[Path, str]:
     raise ValueError(ctx.format_options.python_formatter)
 
 
-_TRAILING_SPACE = re.compile(rb'[ \t]+$', flags=re.MULTILINE)
-
-
-def _check_trailing_space(paths: Iterable[Path], fix: bool) -> dict[Path, str]:
-    """Checks for and optionally removes trailing whitespace."""
-    errors = {}
-
-    for path in paths:
-        with path.open('rb') as fd:
-            contents = fd.read()
-
-        corrected = _TRAILING_SPACE.sub(b'', contents)
-        if corrected != contents:
-            errors[path] = _diff(path, contents, corrected)
-
-            if fix:
-                with path.open('wb') as fd:
-                    fd.write(corrected)
-
-    return errors
-
-
-def _format_json(contents: bytes) -> bytes:
-    return json.dumps(json.loads(contents), indent=2).encode() + b'\n'
-
-
-def _json_error(exc: json.JSONDecodeError, path: Path) -> str:
-    return f'{path}: {exc.msg} {exc.lineno}:{exc.colno}\n'
-
-
 def check_json_format(ctx: _Context) -> dict[Path, str]:
-    errors = {}
-
-    for path in ctx.paths:
-        orig = path.read_bytes()
-        try:
-            formatted = _format_json(orig)
-        except json.JSONDecodeError as exc:
-            errors[path] = _json_error(exc, path)
-            continue
-
-        if orig != formatted:
-            errors[path] = _diff(path, orig, formatted)
-
-    return errors
+    """Checks formatting; returns {path: diff} for files with bad formatting."""
+    formatter = JsonFormatter(tool_runner=PresubmitToolRunner())
+    return _make_formatting_diff_dict(
+        formatter.get_formatting_diffs(
+            ctx.paths,
+            ctx.dry_run,
+        )
+    )
 
 
 def fix_json_format(ctx: _Context) -> dict[Path, str]:
-    errors = {}
-    for path in ctx.paths:
-        orig = path.read_bytes()
-        try:
-            formatted = _format_json(orig)
-        except json.JSONDecodeError as exc:
-            errors[path] = _json_error(exc, path)
-            continue
-
-        if orig != formatted:
-            path.write_bytes(formatted)
-
-    return errors
+    """Fixes formatting for the provided files in place."""
+    formatter = JsonFormatter(tool_runner=PresubmitToolRunner())
+    return _make_format_fix_error_output_dict(formatter.format_files(ctx.paths))
 
 
 def check_trailing_space(ctx: _Context) -> dict[Path, str]:
-    return _check_trailing_space(ctx.paths, fix=False)
+    formatter = TrailingSpaceFormatter(
+        file_patterns=FileFilter(), tool_runner=PresubmitToolRunner()
+    )
+    return _make_formatting_diff_dict(
+        formatter.get_formatting_diffs(ctx.paths, ctx.dry_run)
+    )
 
 
 def fix_trailing_space(ctx: _Context) -> dict[Path, str]:
-    _check_trailing_space(ctx.paths, fix=True)
-    return {}
+    formatter = TrailingSpaceFormatter(
+        file_patterns=FileFilter(), tool_runner=PresubmitToolRunner()
+    )
+    return _make_format_fix_error_output_dict(formatter.format_files(ctx.paths))
 
 
 def rst_format_check(ctx: _Context) -> dict[Path, str]:
-    errors: dict[Path, str] = {}
-    for path in ctx.paths:
-        result = reformat_rst(
-            path, diff=True, in_place=False, suppress_stdout=True
+    """Checks formatting; returns {path: diff} for files with bad formatting."""
+    formatter = RstFormatter(tool_runner=PresubmitToolRunner())
+    return _make_formatting_diff_dict(
+        formatter.get_formatting_diffs(
+            ctx.paths,
+            ctx.dry_run,
         )
-        if result:
-            errors[path] = ''.join(result)
-    return errors
+    )
 
 
 def rst_format_fix(ctx: _Context) -> dict[Path, str]:
-    errors: dict[Path, str] = {}
-    for path in ctx.paths:
-        reformat_rst(path, diff=True, in_place=True, suppress_stdout=True)
-    return errors
+    """Fixes formatting for the provided files in place."""
+    formatter = RstFormatter(tool_runner=PresubmitToolRunner())
+    return _make_format_fix_error_output_dict(formatter.format_files(ctx.paths))
 
 
 def print_format_fix(stdout: bytes):
@@ -509,28 +469,28 @@ C_FORMAT = CodeFormat(
 
 PROTO_FORMAT: CodeFormat = CodeFormat(
     'Protocol buffer',
-    FileFilter(endswith=['.proto']),
+    DEFAULT_PROTOBUF_FILE_PATTERNS,
     clang_format_check,
     clang_format_fix,
 )
 
 JAVA_FORMAT: CodeFormat = CodeFormat(
     'Java',
-    FileFilter(endswith=['.java']),
+    DEFAULT_JAVA_FILE_PATTERNS,
     clang_format_check,
     clang_format_fix,
 )
 
 JAVASCRIPT_FORMAT: CodeFormat = CodeFormat(
     'JavaScript',
-    FileFilter(endswith=['.js', '.mjs', '.cjs']),
+    DEFAULT_JAVASCRIPT_FILE_PATTERNS,
     typescript_format_check,
     typescript_format_fix,
 )
 
 TYPESCRIPT_FORMAT: CodeFormat = CodeFormat(
     'TypeScript',
-    FileFilter(endswith=['.ts', '.mts', '.cts']),
+    DEFAULT_TYPESCRIPT_FILE_PATTERNS,
     typescript_format_check,
     typescript_format_fix,
 )
@@ -538,13 +498,13 @@ TYPESCRIPT_FORMAT: CodeFormat = CodeFormat(
 # TODO: b/308948504 - Add real code formatting support for CSS
 CSS_FORMAT: CodeFormat = CodeFormat(
     'css',
-    FileFilter(endswith=['.css']),
+    DEFAULT_CSS_FILE_PATTERNS,
     check_trailing_space,
     fix_trailing_space,
 )
 
 GO_FORMAT: CodeFormat = CodeFormat(
-    'Go', FileFilter(endswith=['.go']), check_go_format, fix_go_format
+    'Go', DEFAULT_GO_FILE_PATTERNS, check_go_format, fix_go_format
 )
 
 PYTHON_FORMAT: CodeFormat = CodeFormat(
@@ -567,7 +527,7 @@ BAZEL_FORMAT: CodeFormat = CodeFormat(
 
 COPYBARA_FORMAT: CodeFormat = CodeFormat(
     'Copybara',
-    FileFilter(endswith=['.bara.sky']),
+    DEFAULT_STARLARK_FILE_PATTERNS,
     check_bazel_format,
     fix_bazel_format,
 )
@@ -575,21 +535,21 @@ COPYBARA_FORMAT: CodeFormat = CodeFormat(
 # TODO: b/234881054 - Add real code formatting support for CMake
 CMAKE_FORMAT: CodeFormat = CodeFormat(
     'CMake',
-    FileFilter(endswith=['.cmake'], name=['^CMakeLists.txt$']),
+    DEFAULT_CMAKE_FILE_PATTERNS,
     check_trailing_space,
     fix_trailing_space,
 )
 
 RST_FORMAT: CodeFormat = CodeFormat(
     'reStructuredText',
-    FileFilter(endswith=['.rst']),
+    DEFAULT_RST_FILE_PATTERNS,
     rst_format_check,
     rst_format_fix,
 )
 
 MARKDOWN_FORMAT: CodeFormat = CodeFormat(
     'Markdown',
-    FileFilter(endswith=['.md']),
+    DEFAULT_MARKDOWN_FILE_PATTERNS,
     check_trailing_space,
     fix_trailing_space,
 )
@@ -603,7 +563,7 @@ OWNERS_CODE_FORMAT = CodeFormat(
 
 JSON_FORMAT: CodeFormat = CodeFormat(
     'JSON',
-    FileFilter(endswith=['.json']),
+    DEFAULT_JSON_FILE_PATTERNS,
     check=check_json_format,
     fix=fix_json_format,
 )

@@ -27,8 +27,11 @@ py_library(
 py_library(
     name = "pyserial_wrapper",
     srcs = ["pw_console/pyserial_wrapper.py"],
+    # TODO: b/434772781 - This target's dependencies are not quite correct.
+    tags = ["nomypy"],
     deps = [
         ":event_count_history",
+        "@pigweed_python_packages//pyserial",
     ],
 )
 
@@ -145,6 +148,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -156,6 +160,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -167,6 +172,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//pyyaml",
     ],
 )
 
@@ -178,6 +184,8 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//jinja2",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -190,6 +198,7 @@ pw_py_test(
     deps = [
         ":pw_console",
         "@pigweed_python_packages//parameterized",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -213,6 +222,7 @@ pw_py_test(
     deps = [
         ":pw_console",
         "@pigweed_python_packages//parameterized",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -235,6 +245,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -259,6 +270,7 @@ pw_py_test(
     deps = [
         ":pw_console",
         "@pigweed_python_packages//parameterized",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -270,6 +282,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 

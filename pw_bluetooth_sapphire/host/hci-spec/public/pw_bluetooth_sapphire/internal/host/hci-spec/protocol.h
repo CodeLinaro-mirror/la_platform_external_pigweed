@@ -50,6 +50,9 @@ using EventCode = uint8_t;
 // Data Connection Handle used for ACL and SCO logical link connections.
 using ConnectionHandle = uint16_t;
 
+// Handle used to identify a periodic advertising sync.
+using SyncHandle = uint16_t;
+
 // Handle used to identify an advertising set used in the 5.0 Extended
 // Advertising feature.
 using AdvertisingHandle = uint8_t;
@@ -263,6 +266,11 @@ inline constexpr OpCode kSniffMode = LinkPolicyOpCode(0x0003);
 // ==============================
 // Exit Sniff Mode Command (v1.1)
 inline constexpr OpCode kExitSniffMode = LinkPolicyOpCode(0x0004);
+
+// =========================================
+// Write Default Link Policy Settings (v1.1)
+inline constexpr OpCode kWriteDefaultLinkPolicySettings =
+    LinkPolicyOpCode(0x000F);
 
 // ======= Controller & Baseband Commands =======
 // Core Spec v5.0 Vol 2, Part E, Section 7.3

@@ -143,13 +143,16 @@ warning!
 
 API Reference
 =============
-.. doxygenclass:: pw::multibuf::BasicMultiBuf
+.. doxygengroup:: pw_multibuf
+   :content-only:
    :members:
 
-.. doxygenenum:: pw::multibuf::Property
+.. doxygenenum:: pw::MultiBufProperty
 
-.. doxygenclass:: pw::multibuf::Instance
+.. doxygenclass:: pw::MultiBufObserver
    :members:
 
-.. doxygenclass:: pw::multibuf::Observer
-   :members:
+.. toctree::
+   :hidden:
+
+   code_size
