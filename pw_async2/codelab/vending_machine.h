@@ -13,6 +13,8 @@
 // the License.
 #pragma once
 
+#include "pw_async2/context.h"
+#include "pw_async2/poll.h"
 #include "pw_async2/task.h"
 
 namespace codelab {
