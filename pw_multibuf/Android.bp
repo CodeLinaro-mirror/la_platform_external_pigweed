@@ -20,6 +20,7 @@ filegroup {
     name: "pw_multibuf_src_files",
 }
 
+// LINT.IfChange
 cc_library_static {
     name: "pw_multibuf",
     defaults: [
@@ -101,7 +102,7 @@ cc_library_static {
         "public",
     ],
     srcs: [
-        "multibuf_v2.cc"
+        "generic_multibuf.cc"
     ],
     header_libs: [
         "pw_assert",
@@ -124,5 +125,17 @@ cc_library_static {
         "pw_preprocessor",
         "pw_result",
         "pw_span",
+    ],
+}
+// LINT.ThenChange(BUILD.bazel, BUILD.gn, CMakeLists.txt)
+
+cc_library_headers {
+    name: "pw_multibuf_headers",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    export_include_dirs: [
+        "public",
     ],
 }

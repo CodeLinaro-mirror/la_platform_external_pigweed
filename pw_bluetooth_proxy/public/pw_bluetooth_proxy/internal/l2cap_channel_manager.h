@@ -17,13 +17,19 @@
 #include <atomic>
 #include <optional>
 
+#include "pw_allocator/best_fit.h"
+#include "pw_allocator/synchronized_allocator.h"
 #include "pw_bluetooth_proxy/internal/acl_data_channel.h"
-#include "pw_bluetooth_proxy/internal/h4_storage.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel.h"
+#include "pw_bluetooth_proxy/internal/l2cap_logical_link.h"
 #include "pw_bluetooth_proxy/internal/l2cap_status_tracker.h"
 #include "pw_bluetooth_proxy/internal/locked_l2cap_channel.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
+#include "pw_containers/intrusive_map.h"
 #include "pw_sync/lock_annotations.h"
+
+// This include is not used but a downstream project transitively depends on it.
+#include "pw_containers/flat_map.h"
 
 namespace pw::bluetooth::proxy {
 
@@ -38,7 +44,13 @@ namespace pw::bluetooth::proxy {
 // around channels.
 class L2capChannelManager {
  public:
-  L2capChannelManager(AclDataChannel& acl_data_channel);
+  /// @param[in] allocator - General purpose allocator to use for internal
+  /// packet buffers and objects. If null, an internal allocator and memory pool
+  /// will be used.
+  L2capChannelManager(AclDataChannel& acl_data_channel,
+                      pw::Allocator* allocator);
+
+  ~L2capChannelManager();
 
   // Start proxying L2CAP packets addressed to `channel` arriving from
   // the controller and allow `channel` to send & queue Tx L2CAP packets.
@@ -59,11 +71,10 @@ class L2capChannelManager {
   void DeregisterAndCloseChannels(L2capChannelEvent event)
       PW_LOCKS_EXCLUDED(channels_mutex_);
 
-  // Get an `H4PacketWithH4` backed by a buffer in `H4Storage` able to hold
-  // `size` bytes of data.
+  // Get an `H4PacketWithH4` backed by a buffer able to hold `size` bytes of
+  // data.
   //
-  // Returns PW_STATUS_UNAVAILABLE if all buffers are currently occupied.
-  // Returns PW_STATUS_INVALID_ARGUMENT if `size` is too large for a buffer.
+  // Returns PW_STATUS_UNAVAILABLE if a buffer could not be allocated.
   pw::Result<H4PacketWithH4> GetAclH4Packet(uint16_t size);
 
   // Report that new tx packets have been queued or new tx credits have been
@@ -80,9 +91,6 @@ class L2capChannelManager {
   // Drain channel queues even if no channel explicitly requested it. Should be
   // used for events triggering queue space at the ACL level.
   void ForceDrainChannelQueues() PW_LOCKS_EXCLUDED(channels_mutex_);
-
-  // Returns the size of an H4 buffer reserved for Tx packets.
-  uint16_t GetH4BuffSize() const;
 
   std::optional<LockedL2capChannel> FindChannelByLocalCid(
       uint16_t connection_handle, uint16_t local_cid);
@@ -127,26 +135,38 @@ class L2capChannelManager {
   // channels_mutex_.
   void DeliverPendingEvents();
 
-  // Core Spec v6.0 Vol 4, Part E, Section 7.8.2: "The LE_ACL_Data_Packet_Length
-  // parameter shall be used to determine the maximum size of the L2CAP PDU
-  // fragments that are contained in ACL data packets". A value of 0 means "No
-  // dedicated LE Buffer exists".
+  // Register a logical link with the L2CAP layer.
   //
-  // Return std::nullopt if HCI_LE_Read_Buffer_Size command complete event has
-  // not yet been received.
-  //
-  // TODO: https://pwbug.dev/379339642 - Add tests to confirm this value caps
-  // the size of Tx L2capCoc segments when segmentation is implemented.
-  std::optional<uint16_t> le_acl_data_packet_length() const {
-    return le_acl_data_packet_length_;
-  }
+  // @returns
+  // * @OK: The link was successfully added.
+  // * @ALREADY_EXISTS: The link is already registered.
+  // * @RESOURCE_EXHAUSTED: There is no memory left to allocate state for the
+  // link.
+  Status AddConnection(uint16_t connection_handle, AclTransportType transport);
 
-  void set_le_acl_data_packet_length(uint16_t le_acl_data_packet_length) {
-    le_acl_data_packet_length_ = le_acl_data_packet_length;
+  // Send L2CAP_FLOW_CONTROL_CREDIT_IND to indicate local endpoint `cid` is
+  // capable of receiving a number of additional K-frames (`credits`).
+  //
+  // @returns
+  // * @OK: `L2CAP_FLOW_CONTROL_CREDIT_IND` was sent.
+  // * @UNAVAILABLE: Send could not be queued due to lack of memory in the
+  //   client-provided `multibuf_allocator` (transient error).
+  // * @FAILED_PRECONDITION: Channel is not `State::kRunning`.
+  Status SendFlowControlCreditInd(uint16_t connection_handle,
+                                  uint16_t channel_id,
+                                  uint16_t credits,
+                                  MultiBufAllocator& multibuf_allocator);
+
+  // Returns the max ACL payload size if the Read Buffer Size command complete
+  // event was received.
+  std::optional<uint16_t> MaxDataPacketLengthForTransport(
+      AclTransportType transport) const {
+    return acl_data_channel_.MaxDataPacketLengthForTransport(transport);
   }
 
  private:
-  // Circularly advance `it`, wrapping around to front if `it` reaches the end.
+  // Circularly advance `it`, wrapping around to front if `it` reaches the
+  // end.
   void Advance(IntrusiveForwardList<L2capChannel>::iterator& it)
       PW_EXCLUSIVE_LOCKS_REQUIRED(channels_mutex_);
 
@@ -159,17 +179,25 @@ class L2capChannelManager {
   void DeregisterChannelLocked(L2capChannel& channel)
       PW_EXCLUSIVE_LOCKS_REQUIRED(channels_mutex_);
 
+  void ResetLogicalLinksLocked() PW_EXCLUSIVE_LOCKS_REQUIRED(links_mutex_);
+
   // Reference to the ACL data channel owned by the proxy.
   AclDataChannel& acl_data_channel_;
 
-  // Owns H4 packet buffers.
-  H4Storage h4_storage_;
-
-  std::atomic<std::optional<uint16_t>> le_acl_data_packet_length_{std::nullopt};
+  // TODO: https://pwbug.dev/369849508 - Fully migrate to client-provided
+  // allocator and remove internal allocator.
+  static constexpr uint16_t kH4PoolSize = 13000;
+  std::array<std::byte, kH4PoolSize> storage_region_;
+  pw::allocator::BestFitAllocator<> internal_allocator_{storage_region_};
+  pw::allocator::SynchronizedAllocator<sync::Mutex>
+      synchronized_internal_allocator_{internal_allocator_};
+  // allocator_ is set to client-provided allocator if not null, otherwise it
+  // is synchronized_internal_allocator_.
+  pw::Allocator& allocator_;
 
   // Enforce mutual exclusion of all operations on channels.
-  // This is ACQUIRED_BEFORE AclDataChannel::credit_mutex_ which is annotated on
-  // that member variable.
+  // This is ACQUIRED_BEFORE AclDataChannel::credit_mutex_ which is annotated
+  // on that member variable.
   sync::Mutex channels_mutex_;
 
   // List of registered L2CAP channels.
@@ -195,6 +223,12 @@ class L2capChannelManager {
 
   // Channel connection status tracker and delegate holder.
   L2capStatusTracker status_tracker_;
+
+  // A separate links mutex is required so that the channels owned by the links
+  // can be destroyed without deadlock.
+  sync::Mutex links_mutex_ PW_ACQUIRED_BEFORE(channels_mutex_);
+  IntrusiveMap<uint16_t, internal::L2capLogicalLinkInterface> logical_links_
+      PW_GUARDED_BY(links_mutex_);
 };
 
 }  // namespace pw::bluetooth::proxy

@@ -15,9 +15,10 @@ use core::cmp::min;
 use core::ops::Range;
 use core::ptr::NonNull;
 
+use memory_config::MemoryRegionType;
 use pw_status::{Error, Result};
 
-use crate::{Kernel, MemoryRegionType};
+use crate::Kernel;
 
 // A buffer that resides in a process
 //
@@ -112,5 +113,11 @@ impl SyscallBuffer {
         }
 
         Ok(copy_len)
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        // Safety: Address and size are checked and validated in `new()`.
+        unsafe { core::slice::from_raw_parts(self.addr.as_ptr(), self.size) }
     }
 }

@@ -13,9 +13,10 @@
 # the License.
 
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
-load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("//pw_build:compatibility.bzl", "incompatible_with_mcu", "minimum_cxx_20")
 load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
+load("//pw_unit_test:pw_golden_test.bzl", "pw_golden_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -53,6 +54,20 @@ pw_cc_binary(
     ],
 )
 # count-example-end
+
+pw_cc_test(
+    name = "channel",
+    srcs = ["channel.cc"],
+    target_compatible_with = minimum_cxx_20(),
+    deps = [
+        "//pw_allocator:testing",
+        "//pw_async2:channel",
+        "//pw_async2:coro",
+        "//pw_async2:coro_or_else_task",
+        "//pw_async2:dispatcher",
+        "//pw_containers:vector",
+    ],
+)
 
 pw_cc_test(
     name = "coro_blinky_loop",
@@ -97,6 +112,19 @@ pw_cc_test(
     ],
 )
 
+pw_golden_test(
+    name = "inline_async_queue_with_tasks_golden_test",
+    executable = ":inline_async_queue_with_tasks_test",
+    expected = ":inline_async_queue_with_tasks_golden_test.expected",
+
+    # Only tun the golden test with the light framework, so that the output is
+    # consistent for this golden test.
+    target_compatible_with = select({
+        "//pw_unit_test:backend_is_light": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
 pw_cc_test(
     name = "once_send_recv_test",
     srcs = ["once_send_recv_test.cc"],
@@ -124,6 +152,7 @@ pw_cc_binary(
         "//pw_containers:inline_queue",
         "//pw_log",
         "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:mutex",
     ],
 )
 
@@ -137,14 +166,29 @@ pw_cc_test(
     ],
 )
 
+pw_cc_test(
+    name = "custom_future",
+    srcs = ["custom_future.cc"],
+    deps = [
+        "//pw_assert:check",
+        "//pw_async2:dispatcher",
+        "//pw_async2:pend_func_task",
+        "//pw_digital_io",
+        "//pw_sync:interrupt_spin_lock",
+        "//pw_unit_test",
+    ],
+)
+
 sphinx_docs_library(
     name = "docs",
     srcs = [
         "BUILD.bazel",
         "BUILD.gn",
         "basic.cc",
+        "channel.cc",
         "coro_blinky_loop.cc",
         "count.cc",
+        "custom_future.cc",
         "inline_async_queue_with_coro_test.cc",
         "inline_async_queue_with_tasks_test.cc",
         "interrupt.cc",
@@ -153,3 +197,8 @@ sphinx_docs_library(
     ],
     target_compatible_with = incompatible_with_mcu(),
 )
+
+exports_files([
+    "channel.cc",
+    "custom_future.cc",
+])

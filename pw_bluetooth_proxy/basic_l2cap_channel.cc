@@ -25,7 +25,7 @@ namespace pw::bluetooth::proxy {
 
 pw::Result<BasicL2capChannel> BasicL2capChannel::Create(
     L2capChannelManager& l2cap_channel_manager,
-    multibuf::MultiBufAllocator* rx_multibuf_allocator,
+    MultiBufAllocator* rx_multibuf_allocator,
     uint16_t connection_handle,
     AclTransportType transport,
     uint16_t local_cid,
@@ -54,8 +54,12 @@ pw::Result<BasicL2capChannel> BasicL2capChannel::Create(
 }
 
 Status BasicL2capChannel::DoCheckWriteParameter(
-    pw::multibuf::MultiBuf& payload) {
-  if (!IsOkL2capDataLength(payload.size())) {
+    const FlatConstMultiBuf& payload) {
+  std::optional<uint16_t> max_l2cap_length = MaxL2capPayloadSize();
+  if (!max_l2cap_length) {
+    return Status::FailedPrecondition();
+  }
+  if (payload.size() > max_l2cap_length) {
     PW_LOG_WARN("Payload (%zu bytes) is too large. So will not process.",
                 payload.size());
     return Status::InvalidArgument();
@@ -68,10 +72,9 @@ std::optional<H4PacketWithH4> BasicL2capChannel::GenerateNextTxPacket() {
     return std::nullopt;
   }
 
-  ConstByteSpan payload = GetFrontPayloadSpan();
+  const FlatConstMultiBuf& payload = GetFrontPayload();
 
-  pw::Result<H4PacketWithH4> result =
-      PopulateTxL2capPacket(payload.size_bytes());
+  pw::Result<H4PacketWithH4> result = PopulateTxL2capPacket(payload.size());
   if (!result.ok()) {
     return std::nullopt;
   }
@@ -86,8 +89,7 @@ std::optional<H4PacketWithH4> BasicL2capChannel::GenerateNextTxPacket() {
       acl.payload().BackingStorage().data(), acl.payload().SizeInBytes());
   PW_CHECK(bframe.IsComplete());
 
-  PW_CHECK(TryToCopyToEmbossStruct(bframe.payload(), payload));
-
+  MultiBufAdapter::Copy(bframe.payload(), payload);
   PW_CHECK(acl.Ok());
   PW_CHECK(bframe.Ok());
 
@@ -99,7 +101,7 @@ std::optional<H4PacketWithH4> BasicL2capChannel::GenerateNextTxPacket() {
 
 BasicL2capChannel::BasicL2capChannel(
     L2capChannelManager& l2cap_channel_manager,
-    multibuf::MultiBufAllocator* rx_multibuf_allocator,
+    MultiBufAllocator* rx_multibuf_allocator,
     uint16_t connection_handle,
     AclTransportType transport,
     uint16_t local_cid,
@@ -107,7 +109,7 @@ BasicL2capChannel::BasicL2capChannel(
     OptionalPayloadReceiveCallback&& payload_from_controller_fn,
     OptionalPayloadReceiveCallback&& payload_from_host_fn,
     ChannelEventCallback&& event_fn)
-    : SingleChannelProxy(
+    : ChannelProxy(
           l2cap_channel_manager,
           rx_multibuf_allocator,
           /*connection_handle=*/connection_handle,

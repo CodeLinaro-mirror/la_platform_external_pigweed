@@ -216,12 +216,12 @@ class Detokenizer {
   /// @returns The decoded text if successfully detokenized or if the data is
   /// printable, otherwise returns the data base64-encoded.
   std::string DecodeOptionallyTokenizedData(
-      const span<const std::byte>& optionally_tokenized_data);
+      span<const std::byte> optionally_tokenized_data) const;
 
   const DomainTokenEntriesMap& database() const { return database_; }
 
   span<const TokenizedStringEntry> DatabaseLookup(
-      uint32_t token, std::string_view domain) const;
+      Token token, std::string_view domain) const;
 
  private:
   // 4 passes supports detokenizing two layers of nested messages with tokenized

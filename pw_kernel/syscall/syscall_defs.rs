@@ -213,6 +213,8 @@ pub enum SysCallId {
     // System calls prefixed with 0xF000 are reserved development/debugging use.
     DebugPutc = 0xf000,
     DebugShutdown = 0xf001,
+    DebugLog = 0xf002,
+    DebugNop = 0xf003,
 }
 
 impl From<u16> for SysCallId {
@@ -464,4 +466,6 @@ pub trait SysCallInterface {
     // TODO: Consider adding an feature flagged PowerManager object and move
     // this shutdown call to it.
     fn debug_shutdown(a: u32) -> Result<()>;
+    fn debug_log(buffer: *const u8, buffer_len: usize) -> Result<()>;
+    fn debug_nop() -> Result<()>;
 }

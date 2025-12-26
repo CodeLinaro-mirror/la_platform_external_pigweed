@@ -16,16 +16,15 @@
 
 #include <cstdint>
 
+#include "pw_bluetooth_proxy/channel_proxy.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel.h"
-#include "pw_bluetooth_proxy/single_channel_proxy.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
 
 namespace pw::bluetooth::proxy {
 
 /// `GattNotifyChannel` supports sending GATT characteristic notifications to a
 /// remote peer.
-// TODO: https://pwbug.dev/388082771 - Switch to only inheriting from
-// SingleChannelProxy (which will hold on to underlying L2capChannel).
-class GattNotifyChannel : public SingleChannelProxy {
+class GattNotifyChannel : public ChannelProxy {
  public:
   GattNotifyChannel(const GattNotifyChannel& other) = delete;
   GattNotifyChannel& operator=(const GattNotifyChannel& other) = delete;
@@ -37,7 +36,7 @@ class GattNotifyChannel : public SingleChannelProxy {
   uint16_t attribute_handle() const { return attribute_handle_; }
 
   /// Check if the passed Write parameter is acceptable.
-  Status DoCheckWriteParameter(pw::multibuf::MultiBuf& payload) override;
+  Status DoCheckWriteParameter(const FlatConstMultiBuf& payload) override;
 
  protected:
   static pw::Result<GattNotifyChannel> Create(
@@ -61,9 +60,6 @@ class GattNotifyChannel : public SingleChannelProxy {
  private:
   [[nodiscard]] std::optional<H4PacketWithH4> GenerateNextTxPacket()
       PW_EXCLUSIVE_LOCKS_REQUIRED(l2cap_tx_mutex()) override;
-
-  // TODO: https://pwbug.dev/349602172 - Define ATT CID in pw_bluetooth.
-  static constexpr uint16_t kAttributeProtocolCID = 0x0004;
 
   explicit GattNotifyChannel(L2capChannelManager& l2cap_channel_manager,
                              uint16_t connection_handle,

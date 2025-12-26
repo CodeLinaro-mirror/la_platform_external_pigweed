@@ -27,6 +27,7 @@
 #include "pw_bytes/endian.h"
 #include "pw_elf/reader.h"
 #include "pw_log/log.h"
+#include "pw_preprocessor/compiler.h"
 #include "pw_result/result.h"
 #include "pw_status/try.h"
 #include "pw_tokenizer/base64.h"
@@ -659,7 +660,7 @@ std::string Detokenizer::DetokenizeTextRecursive(std::string_view text,
 }
 
 std::string Detokenizer::DecodeOptionallyTokenizedData(
-    const ConstByteSpan& optionally_tokenized_data) {
+    span<const std::byte> optionally_tokenized_data) const {
   // Try detokenizing as binary using the best result if available, else use
   // the input data as a string.
   const auto result = Detokenize(optionally_tokenized_data);

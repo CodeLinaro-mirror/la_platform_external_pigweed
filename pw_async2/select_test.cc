@@ -19,16 +19,19 @@
 #include "pw_async2/dispatcher.h"
 #include "pw_async2/pendable.h"
 #include "pw_async2/poll.h"
+#include "pw_async2/value_future.h"
 #include "pw_unit_test/framework.h"
 
 namespace {
 
 using ::pw::async2::AllPendablesCompleted;
+using ::pw::async2::BroadcastValueProvider;
 using ::pw::async2::Context;
 using ::pw::async2::Dispatcher;
 using ::pw::async2::PendableFor;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::Select;
 using ::pw::async2::Selector;
 using ::pw::async2::VisitSelectResult;
 using ::pw::async2::Waker;
@@ -101,6 +104,10 @@ template <typename ResultVariant>
 void ExpectAllPendablesCompleted(ResultVariant& result_variant) {
   EXPECT_TRUE(std::holds_alternative<AllPendablesCompleted>(result_variant));
 }
+
+// TODO: b/457508399 - Remove non-future Selector.
+PW_MODIFY_DIAGNOSTICS_PUSH();
+PW_MODIFY_DIAGNOSTIC(ignored, "-Wdeprecated-declarations");
 
 TEST(Selector, OnePendable) {
   Dispatcher dispatcher;
@@ -275,6 +282,57 @@ TEST(Selector, MultiplePendables_OutOfOrderCompletion) {
   ASSERT_TRUE(result_3.IsReady());
   auto& result_3_variant = *result_3;
   ExpectVariantIs<2>(result_3_variant, 57);
+}
+
+PW_MODIFY_DIAGNOSTICS_POP();
+
+TEST(SelectFuture, Pend_OneReady) {
+  Dispatcher dispatcher;
+
+  BroadcastValueProvider<int> int_provider;
+  BroadcastValueProvider<char> char_provider;
+
+  auto future = Select(int_provider.Get(), char_provider.Get());
+
+  EXPECT_EQ(dispatcher.RunPendableUntilStalled(future), Pending());
+
+  char_provider.Resolve('y');
+  auto result = dispatcher.RunPendableUntilStalled(future);
+  ASSERT_TRUE(result.IsReady());
+
+  EXPECT_FALSE(result->has_value<0>());
+  ASSERT_TRUE(result->has_value<1>());
+  EXPECT_EQ(result->value<1>(), 'y');
+
+  EXPECT_TRUE(future.is_complete());
+}
+
+TEST(SelectFuture, Pend_MultipleReady) {
+  Dispatcher dispatcher;
+
+  BroadcastValueProvider<int> int_provider;
+  BroadcastValueProvider<char> char_provider;
+  BroadcastValueProvider<bool> bool_provider;
+
+  auto future =
+      Select(int_provider.Get(), char_provider.Get(), bool_provider.Get());
+
+  EXPECT_EQ(dispatcher.RunPendableUntilStalled(future), Pending());
+
+  char_provider.Resolve('y');
+  bool_provider.Resolve(false);
+
+  auto result = dispatcher.RunPendableUntilStalled(future);
+  ASSERT_TRUE(result.IsReady());
+
+  EXPECT_FALSE(result->has_value<0>());
+  ASSERT_TRUE(result->has_value<1>());
+  ASSERT_TRUE(result->has_value<2>());
+
+  EXPECT_EQ(result->value<1>(), 'y');
+  EXPECT_EQ(result->value<2>(), false);
+
+  EXPECT_TRUE(future.is_complete());
 }
 
 }  // namespace

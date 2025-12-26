@@ -13,4 +13,16 @@
 // the License.
 #pragma once
 
+#include "pw_thread_backend/context.h"
 #include "pw_thread_zephyr/options.h"
+
+namespace pw::thread::backend {
+
+using NativeOptions = ::pw::thread::zephyr::Options;
+
+constexpr NativeOptions GetNativeOptions(NativeContext& context,
+                                         const ThreadAttrs& attributes) {
+  return ::pw::thread::zephyr::GetOptions(context, attributes);
+}
+
+}  // namespace pw::thread::backend

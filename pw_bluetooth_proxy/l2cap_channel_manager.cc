@@ -17,6 +17,7 @@
 #include <mutex>
 #include <optional>
 
+#include "pw_assert/check.h"
 #include "pw_bluetooth_proxy/internal/acl_data_channel.h"
 #include "pw_bluetooth_proxy/internal/logical_transport.h"
 #include "pw_containers/algorithm.h"
@@ -26,10 +27,17 @@
 
 namespace pw::bluetooth::proxy {
 
-L2capChannelManager::L2capChannelManager(AclDataChannel& acl_data_channel)
+L2capChannelManager::L2capChannelManager(AclDataChannel& acl_data_channel,
+                                         pw::Allocator* allocator)
     : acl_data_channel_(acl_data_channel),
+      allocator_(allocator ? *allocator : synchronized_internal_allocator_),
       lrd_channel_(channels_.end()),
       round_robin_terminus_(channels_.end()) {}
+
+L2capChannelManager::~L2capChannelManager() {
+  std::lock_guard lock(links_mutex_);
+  ResetLogicalLinksLocked();
+}
 
 void L2capChannelManager::RegisterChannel(L2capChannel& channel) {
   std::lock_guard lock(channels_mutex_);
@@ -50,10 +58,11 @@ void L2capChannelManager::RegisterChannelLocked(L2capChannel& channel) {
 }
 
 void L2capChannelManager::DeregisterChannelLocked(L2capChannel& channel) {
-  if (&channel == &(*lrd_channel_)) {
+  if (lrd_channel_ != channels_.end() && &channel == &(*lrd_channel_)) {
     Advance(lrd_channel_);
   }
-  if (&channel == &(*round_robin_terminus_)) {
+  if (round_robin_terminus_ != channels_.end() &&
+      &channel == &(*round_robin_terminus_)) {
     Advance(round_robin_terminus_);
   }
 
@@ -82,7 +91,10 @@ void L2capChannelManager::MoveChannelRegistration(L2capChannel& from,
 }
 
 void L2capChannelManager::DeregisterAndCloseChannels(L2capChannelEvent event) {
-  std::lock_guard lock(channels_mutex_);
+  std::lock_guard links_lock(links_mutex_);
+  ResetLogicalLinksLocked();
+
+  std::lock_guard channels_lock(channels_mutex_);
   while (!channels_.empty()) {
     L2capChannel& front = channels_.front();
     channels_.pop_front();
@@ -93,32 +105,31 @@ void L2capChannelManager::DeregisterAndCloseChannels(L2capChannelEvent event) {
 }
 
 pw::Result<H4PacketWithH4> L2capChannelManager::GetAclH4Packet(uint16_t size) {
-  if (size > GetH4BuffSize()) {
-    PW_LOG_ERROR(
-        "Requested packet is too large for H4 buffer. So will not send.");
-    return pw::Status::InvalidArgument();
-  }
-
-  std::optional<span<uint8_t>> h4_buff = h4_storage_.ReserveH4Buff();
-  if (!h4_buff) {
-    PW_LOG_WARN("No H4 buffers available.");
+  // Use Allocate instead of New to avoid tracking the size, which would either
+  // be a breaking change to H4PacketWithH4 or not fit in Function's default
+  // capture size of 1 pointer.
+  void* allocation =
+      allocator_.Allocate(allocator::Layout(size, alignof(uint8_t)));
+  if (allocation == nullptr) {
+    PW_LOG_WARN("Could not allocate H4 buffer of size %hu", size);
     return pw::Status::Unavailable();
   }
+  span<uint8_t> h4_buff(static_cast<uint8_t*>(allocation), size);
 
-  H4PacketWithH4 h4_packet(span(h4_buff->data(), size),
-                           /*release_fn=*/[this](const uint8_t* buffer) {
-                             this->h4_storage_.ReleaseH4Buff(buffer);
-                             // TODO: https://pwbug.dev/421249712 - Only report
-                             // if we were previously out of buffers.
-                             ForceDrainChannelQueues();
-                           });
+  H4PacketWithH4 h4_packet(
+      h4_buff,
+      /*release_fn=*/[this](const uint8_t* buffer) {
+        // This const_cast is needed to avoid changing the
+        // function signature and breaking downstream
+        // users.
+        allocator_.Deallocate(const_cast<uint8_t*>(buffer));
+        // TODO: https://pwbug.dev/421249712 - Only report
+        // if we were previously out of buffers.
+        ForceDrainChannelQueues();
+      });
   h4_packet.SetH4Type(emboss::H4PacketType::ACL_DATA);
 
   return h4_packet;
-}
-
-uint16_t L2capChannelManager::GetH4BuffSize() const {
-  return H4Storage::GetH4BuffSize();
 }
 
 void L2capChannelManager::ForceDrainChannelQueues() {
@@ -328,21 +339,31 @@ void L2capChannelManager::HandleAclDisconnectionComplete(
       "btproxy: L2capChannelManager::HandleAclDisconnectionComplete - "
       "connection_handle: %u",
       connection_handle);
-  for (;;) {
-    IntrusiveForwardList<L2capChannel>::iterator channel_it;
-
-    std::lock_guard lock(channels_mutex_);
-    channel_it = containers::FindIf(
-        channels_, [connection_handle](L2capChannel& channel) {
-          return channel.connection_handle() == connection_handle &&
-                 channel.state() == L2capChannel::State::kRunning;
-        });
-    if (channel_it == channels_.end()) {
-      break;
+  {
+    std::lock_guard links_lock(links_mutex_);
+    auto it = logical_links_.find(connection_handle);
+    if (it != logical_links_.end()) {
+      internal::L2capLogicalLinkInterface* link = &(*it);
+      logical_links_.erase(it);
+      allocator_.Delete(link);
     }
 
-    DeregisterChannelLocked(*channel_it);
-    channel_it->InternalClose();
+    for (;;) {
+      IntrusiveForwardList<L2capChannel>::iterator channel_it;
+
+      std::lock_guard lock(channels_mutex_);
+      channel_it = containers::FindIf(
+          channels_, [connection_handle](L2capChannel& channel) {
+            return channel.connection_handle() == connection_handle &&
+                   channel.state() == L2capChannel::State::kRunning;
+          });
+      if (channel_it == channels_.end()) {
+        break;
+      }
+
+      DeregisterChannelLocked(*channel_it);
+      channel_it->InternalClose();
+    }
   }
 
   status_tracker_.HandleAclDisconnectionComplete(connection_handle);
@@ -367,6 +388,45 @@ void L2capChannelManager::HandleDisconnectionCompleteLocked(
 
 void L2capChannelManager::DeliverPendingEvents() {
   status_tracker_.DeliverPendingEvents();
+}
+
+Status L2capChannelManager::AddConnection(uint16_t connection_handle,
+                                          AclTransportType transport) {
+  std::lock_guard lock(links_mutex_);
+  auto iter = logical_links_.find(connection_handle);
+  if (iter != logical_links_.end()) {
+    return Status::AlreadyExists();
+  }
+
+  internal::L2capLogicalLink* link = allocator_.New<internal::L2capLogicalLink>(
+      connection_handle, transport, *this, acl_data_channel_);
+  if (!link) {
+    return Status::ResourceExhausted();
+  }
+  logical_links_.insert(*link);
+  return OkStatus();
+}
+
+Status L2capChannelManager::SendFlowControlCreditInd(
+    uint16_t connection_handle,
+    uint16_t channel_id,
+    uint16_t credits,
+    MultiBufAllocator& multibuf_allocator) {
+  std::lock_guard lock(links_mutex_);
+  auto iter = logical_links_.find(connection_handle);
+  if (iter == logical_links_.end()) {
+    return Status::NotFound();
+  }
+  return iter->SendFlowControlCreditInd(
+      channel_id, credits, multibuf_allocator);
+}
+
+void L2capChannelManager::ResetLogicalLinksLocked() {
+  for (auto iter = logical_links_.begin(); iter != logical_links_.end();) {
+    internal::L2capLogicalLinkInterface* link = &(*iter);
+    iter = logical_links_.erase(iter);
+    allocator_.Delete(link);
+  }
 }
 
 }  // namespace pw::bluetooth::proxy

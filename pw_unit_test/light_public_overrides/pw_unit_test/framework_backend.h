@@ -271,7 +271,11 @@
 #define ADD_FAILURE()                                                      \
   ::pw::unit_test::internal::ReturnHelper() =                              \
       ::pw::unit_test::internal::Framework::Get().CurrentTestExpectSimple( \
-          "(line is not executed)", "(line was executed)", __LINE__, false)
+          "(line is not executed)",                                        \
+          "(line was executed)",                                           \
+          __FILE__,                                                        \
+          __LINE__,                                                        \
+          false)
 
 /// @def GTEST_FAIL
 ///
@@ -284,7 +288,7 @@
 #define GTEST_SKIP()                                                      \
   return ::pw::unit_test::internal::ReturnHelper() =                      \
              ::pw::unit_test::internal::Framework::Get().CurrentTestSkip( \
-                 __LINE__)
+                 __FILE__, __LINE__)
 
 /// @def FAIL
 /// Generates a fatal failure with a generic message.
@@ -300,7 +304,7 @@
 /// Alias of `SUCCEED`.
 #define GTEST_SUCCEED()                                                \
   ::pw::unit_test::internal::Framework::Get().CurrentTestExpectSimple( \
-      "(success)", "(success)", __LINE__, true)
+      "(success)", "(success)", __FILE__, __LINE__, true)
 
 /// @def SUCCEED
 ///
@@ -557,6 +561,7 @@ class Framework {
                                                   const Rhs& rhs,
                                                   const Epsilon& epsilon,
                                                   const char* expression,
+                                                  const char* file,
                                                   int line) {
     const bool success = expectation(lhs, rhs, epsilon);
     if (!success) {
@@ -568,6 +573,7 @@ class Framework {
                                   " of ",
                                   ConvertForPrint(rhs))
                                   .c_str(),
+                              file,
                               line,
                               success);
     }
@@ -581,6 +587,7 @@ class Framework {
                                        const Rhs& rhs,
                                        const char* expectation_string,
                                        const char* expression,
+                                       const char* file,
                                        int line) {
     const bool success = expectation(lhs, rhs);
     if (!success) {
@@ -592,6 +599,7 @@ class Framework {
                                                           ' ',
                                                           ConvertForPrint(rhs))
               .c_str(),
+          file,
           line,
           success);
     }
@@ -599,12 +607,14 @@ class Framework {
   }
 
   // Skips the current test and dispatches an event for it.
-  ::pw::unit_test::internal::FailureMessageAdapter CurrentTestSkip(int line);
+  ::pw::unit_test::internal::FailureMessageAdapter CurrentTestSkip(
+      const char* file, int line);
 
   // Dispatches an event indicating the result of an expectation.
   ::pw::unit_test::internal::FailureMessageAdapter CurrentTestExpectSimple(
       const char* expression,
       const char* evaluated_expression,
+      const char* file,
       int line,
       bool success);
 
@@ -676,10 +686,11 @@ class TestInfo {
            const char* const file_name,
            void (*run_func)(const TestInfo&))
       : test_case_{
-        .suite_name = test_suite_name,
-        .test_name = test_name,
-        .file_name = file_name,
-       }, run_(run_func) {
+            .suite_name = test_suite_name,
+            .test_name = test_name,
+            .file_name = file_name,
+        },
+        run_(run_func) {
     Framework::Get().RegisterTest(this);
   }
 
@@ -845,6 +856,7 @@ inline int RUN_ALL_TESTS() {
       value,                                                         \
       "is",                                                          \
       #expr " is " #value,                                           \
+      __FILE__,                                                      \
       __LINE__)
 
 #define _PW_TEST_OP(lhs, rhs, op)                                \
@@ -856,6 +868,7 @@ inline int RUN_ALL_TESTS() {
       (rhs),                                                     \
       #op,                                                       \
       #lhs " " #op " " #rhs,                                     \
+      __FILE__,                                                  \
       __LINE__)
 
 #define _PW_TEST_NEAR(lhs, rhs, epsilon)                                      \
@@ -867,6 +880,7 @@ inline int RUN_ALL_TESTS() {
       (rhs),                                                                  \
       (epsilon),                                                              \
       #lhs " within " #epsilon " of " #rhs,                                   \
+      __FILE__,                                                               \
       __LINE__)
 
 #define _PW_TEST_C_STR(lhs, rhs, op)                             \
@@ -884,6 +898,7 @@ inline int RUN_ALL_TESTS() {
       ::pw::unit_test::internal::CStringArg{rhs},                \
       #op,                                                       \
       #lhs " " #op " " #rhs,                                     \
+      __FILE__,                                                  \
       __LINE__)
 
 // Checks that test suite names between TEST and TEST_F declarations are unique.
@@ -898,11 +913,11 @@ inline int RUN_ALL_TESTS() {
 // For some reason GCC8 is unable to ignore -Wredundant-decls here.
 #define _PW_TEST_SUITE_NAMES_MUST_BE_UNIQUE(return_type, test_suite)
 #else  // All other compilers.
-#define _PW_TEST_SUITE_NAMES_MUST_BE_UNIQUE(return_type, test_suite)           \
-  PW_MODIFY_DIAGNOSTICS_PUSH();                                                \
-  PW_MODIFY_DIAGNOSTIC(ignored, "-Wredundant-decls");                          \
-  extern "C" return_type /* use extern "C" to escape namespacing */            \
-      PwUnitTestSuiteNamesMustBeUniqueBetweenTESTandTEST_F_##test_suite(void); \
+#define _PW_TEST_SUITE_NAMES_MUST_BE_UNIQUE(return_type, test_suite)       \
+  PW_MODIFY_DIAGNOSTICS_PUSH();                                            \
+  PW_MODIFY_DIAGNOSTIC(ignored, "-Wredundant-decls");                      \
+  extern "C" return_type /* use extern "C" to escape namespacing */        \
+  PwUnitTestSuiteNamesMustBeUniqueBetweenTESTandTEST_F_##test_suite(void); \
   PW_MODIFY_DIAGNOSTICS_POP()
 #endif  // GCC8 or older.
 

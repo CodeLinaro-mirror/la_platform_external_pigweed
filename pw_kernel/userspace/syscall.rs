@@ -37,7 +37,7 @@ pub fn channel_transact(
         send_data.as_ptr(),
         send_data.len(),
         recv_data.as_mut_ptr(),
-        send_data.len(),
+        recv_data.len(),
         deadline.ticks(),
     )
     .map(|ret| ret.cast_into())
@@ -62,4 +62,14 @@ pub fn debug_putc(c: char) -> Result<u32> {
 #[inline(always)]
 pub fn debug_shutdown(status: Result<()>) -> Result<()> {
     SysCall::debug_shutdown(status.status_code())
+}
+
+#[inline(always)]
+pub fn debug_log(buffer: &[u8]) -> Result<()> {
+    SysCall::debug_log(buffer.as_ptr(), buffer.len())
+}
+
+#[inline(always)]
+pub fn debug_nop() -> Result<()> {
+    SysCall::debug_nop()
 }

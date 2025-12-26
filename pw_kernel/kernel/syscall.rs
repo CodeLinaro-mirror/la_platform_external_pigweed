@@ -13,6 +13,7 @@
 // the License.
 
 use foreign_box::ForeignRc;
+use memory_config::MemoryRegionType;
 use pw_cast::CastInto as _;
 use pw_log::info;
 use pw_status::{Error, Result};
@@ -123,12 +124,12 @@ fn handle_channel_transact<'a, K: Kernel>(kernel: K, mut args: K::SyscallArgs<'a
     let object = lookup_handle(kernel, handle)?;
     let send_buffer = SyscallBuffer::new_in_current_process(
         kernel,
-        crate::MemoryRegionType::ReadOnlyData,
+        MemoryRegionType::ReadOnlyData,
         send_data_addr..(send_data_addr + send_data_len),
     )?;
     let recv_buffer = SyscallBuffer::new_in_current_process(
         kernel,
-        crate::MemoryRegionType::ReadWriteData,
+        MemoryRegionType::ReadWriteData,
         recv_data_addr..(recv_data_addr + recv_data_len),
     )?;
 
@@ -149,7 +150,7 @@ fn handle_channel_read<'a, K: Kernel>(kernel: K, mut args: K::SyscallArgs<'a>) -
     let object = lookup_handle(kernel, handle)?;
     let buffer = SyscallBuffer::new_in_current_process(
         kernel,
-        crate::MemoryRegionType::ReadWriteData,
+        MemoryRegionType::ReadWriteData,
         buffer_addr..(buffer_addr + buffer_len),
     )?;
 
@@ -167,13 +168,25 @@ fn handle_channel_respond<'a, K: Kernel>(kernel: K, mut args: K::SyscallArgs<'a>
     let object = lookup_handle(kernel, handle)?;
     let buffer = SyscallBuffer::new_in_current_process(
         kernel,
-        crate::MemoryRegionType::ReadOnlyData,
+        MemoryRegionType::ReadOnlyData,
         buffer_addr..(buffer_addr + buffer_len),
     )?;
 
     let ret = object.channel_respond(kernel, buffer);
     log_if::debug_if!(SYSCALL_DEBUG, "syscall: channel_respond complete");
     ret.map(|_| 0)
+}
+
+fn handle_debug_log<'a, K: Kernel>(kernel: K, mut args: K::SyscallArgs<'a>) -> Result<u64> {
+    let buffer_addr = args.next_usize()?;
+    let buffer_len = args.next_usize()?;
+    let buffer = SyscallBuffer::new_in_current_process(
+        kernel,
+        MemoryRegionType::ReadOnlyData,
+        buffer_addr..(buffer_addr + buffer_len),
+    )?;
+    let mut console = console::Console::new();
+    console.write_all(buffer.as_slice()).map(|_| 0)
 }
 
 pub fn handle_syscall<'a, K: Kernel>(
@@ -210,8 +223,10 @@ pub fn handle_syscall<'a, K: Kernel>(
             log_if::debug_if!(SYSCALL_DEBUG, "sycall: Shutdown {}", exit_code as u32);
             crate::target::shutdown(exit_code);
         }
+        SysCallId::DebugLog => handle_debug_log(kernel, args),
+        SysCallId::DebugNop => Ok(0),
         _ => {
-            log_if::debug_if!(SYSCALL_DEBUG, "syscall: Unknown id {}", id as usize);
+            log_if::debug_if!(SYSCALL_DEBUG, "syscall: log");
             Err(Error::InvalidArgument)
         }
     };

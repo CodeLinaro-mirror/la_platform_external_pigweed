@@ -16,7 +16,8 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 load("//pw_build:merge_flags.bzl", "flags_from_dict")
 load("//pw_kernel:flags.bzl", "KERNEL_DEVICE_COMMON_FLAGS")
 load("//pw_kernel/target/mps2_an505:defs.bzl", "TARGET_COMPATIBLE_WITH")
-load("//pw_kernel/tooling:system_linker_script.bzl", "system_linker_script")
+
+package(default_visibility = [":__subpackages__"])
 
 platform(
     name = "mps2_an505",
@@ -33,21 +34,19 @@ platform(
             "//pw_kernel/subsys/console:console_backend": "//pw_kernel/subsys/console:console_backend_semihosting",
         },
     ),
-    visibility = [":__subpackages__"],
 )
 
 constraint_value(
     name = "target_mps2_an505",
     constraint_setting = "//pw_kernel/target:target",
-    visibility = [":__subpackages__"],
 )
 
 rust_library(
     name = "entry",
     srcs = ["entry.rs"],
+    edition = "2024",
     tags = ["kernel"],
     target_compatible_with = TARGET_COMPATIBLE_WITH,
-    visibility = [":__subpackages__"],
     deps = [
         "//pw_kernel/arch/arm_cortex_m:arch_arm_cortex_m",
         "//pw_kernel/kernel",
@@ -59,6 +58,7 @@ rust_library(
     name = "config",
     srcs = ["config.rs"],
     crate_name = "kernel_config",
+    edition = "2024",
     tags = ["kernel"],
     target_compatible_with = TARGET_COMPATIBLE_WITH,
     deps = [
@@ -68,14 +68,5 @@ rust_library(
 
 filegroup(
     name = "linker_script_template",
-    srcs = ["system.ld.tmpl"],
-    visibility = [":__subpackages__"],
-)
-
-system_linker_script(
-    name = "linker_script",
-    system_config = "//pw_kernel/target:system_config_file",
-    tags = ["kernel"],
-    template = ":linker_script_template",
-    visibility = [":__subpackages__"],
+    srcs = ["target.ld.tmpl"],
 )

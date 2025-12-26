@@ -128,12 +128,25 @@ class FakeController final : public ControllerTestDoubleBase,
   // Current device low energy scan state.
   struct LEScanState final {
     bool enabled = false;
+
+    // True if Android's vendor extensions batch scanning mechanism is enabled
+    bool batch_scan_enabled = false;
+
+    // Android's vendor extensions batch scanning mechanism returns peers via
+    // fields in a command complete event. Not all peers may fit in a single
+    // command complete event. In such a case, the Host must repeatedly issue
+    // the read batch scan results command to get the next set of peers. This
+    // variable tracks how many of those peers the Host has already read so that
+    // we start the next command complete event with the correct offset.
+    uint8_t batch_scan_num_peers_read = 0;
+
     pw::bluetooth::emboss::LEScanType scan_type =
         pw::bluetooth::emboss::LEScanType::PASSIVE;
     pw::bluetooth::emboss::LEOwnAddressType own_address_type =
         pw::bluetooth::emboss::LEOwnAddressType::PUBLIC;
     pw::bluetooth::emboss::LEScanFilterPolicy filter_policy =
         pw::bluetooth::emboss::LEScanFilterPolicy::BASIC_UNFILTERED;
+
     uint16_t scan_interval = 0;
     uint16_t scan_window = 0;
     bool filter_duplicates = false;
@@ -628,6 +641,21 @@ class FakeController final : public ControllerTestDoubleBase,
 
   // Send a Periodic Advertising Sync Lost event and delete the sync state.
   void LosePeriodicSync(DeviceAddress address, uint8_t advertising_sid);
+
+  enum class ExtendedOperationType : uint8_t {
+    kUnknown,
+    kLegacy,
+    kExtended,
+    kVendor,
+  };
+
+  const ExtendedOperationType& advertising_procedure() const {
+    return advertising_procedure_;
+  }
+
+  const ExtendedOperationType& scan_procedure() const {
+    return scan_procedure_;
+  }
 
  private:
   struct PeriodicAdvertiserListEntry {
@@ -1252,6 +1280,25 @@ class FakeController final : public ControllerTestDoubleBase,
   void OnAndroidLEApcfAdTypeCommand(
       const android_emb::LEApcfAdTypeCommandView& params);
 
+  void OnAndroidLEBatchScanCommand(
+      const PacketView<hci_spec::CommandHeader>& command_packet);
+
+  void OnAndroidLEBatchScanEnableCommand(
+      const android_emb::LEBatchScanEnableCommandView& params);
+
+  void OnAndroidLEBatchScanSetStorageParametersCommand(
+      const android_emb::LEBatchScanSetStorageParametersCommandView& params);
+
+  void OnAndroidLEBatchScanSetScanParametersCommand(
+      const android_emb::LEBatchScanSetScanParametersCommandView& params);
+
+  auto LEBatchScanReadResultNextPacketSize() const;
+  void LEBatchScanFillFullResult(
+      android_emb::LEBatchScanFullResultWriter& full_result,
+      const std::unique_ptr<FakePeer>& peer) const;
+  void OnAndroidLEBatchScanReadResultsCommand(
+      const android_emb::LEBatchScanReadResultsCommandView& params);
+
   // Called when a command with an OGF of hci_spec::kVendorOGF is received.
   void OnVendorCommand(
       const PacketView<hci_spec::CommandHeader>& command_packet);
@@ -1274,18 +1321,13 @@ class FakeController final : public ControllerTestDoubleBase,
     return (bredr_scan_state_ >> BIT_1) & BIT_1;
   }
 
-  enum class AdvertisingProcedure : uint8_t {
-    kUnknown,
-    kLegacy,
-    kExtended,
-  };
-
-  const AdvertisingProcedure& advertising_procedure() const {
-    return advertising_procedure_;
-  }
-
   bool EnableLegacyAdvertising();
   bool EnableExtendedAdvertising();
+  bool EnableVendorAdvertising();
+
+  bool EnableLegacyScanning();
+  bool EnableExtendedScanning();
+  bool EnableVendorBatchScanning();
 
   Settings settings_;
 
@@ -1404,7 +1446,9 @@ class FakeController final : public ControllerTestDoubleBase,
   bool auto_completed_packets_event_enabled_ = true;
   bool auto_disconnection_complete_event_enabled_ = true;
 
-  AdvertisingProcedure advertising_procedure_ = AdvertisingProcedure::kUnknown;
+  ExtendedOperationType advertising_procedure_ =
+      ExtendedOperationType::kUnknown;
+  ExtendedOperationType scan_procedure_ = ExtendedOperationType::kUnknown;
   uint16_t max_advertising_data_length_ = hci_spec::kMaxLEAdvertisingDataLength;
 
   std::unordered_set<PeriodicAdvertiserListEntry,

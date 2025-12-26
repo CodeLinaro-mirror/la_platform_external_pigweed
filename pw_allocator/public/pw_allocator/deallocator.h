@@ -47,7 +47,7 @@ class Deallocator {
   constexpr const Capabilities& capabilities() const { return capabilities_; }
 
   /// Returns whether a given capability is enabled for this object.
-  bool HasCapability(Capability capability) const {
+  constexpr bool HasCapability(Capability capability) const {
     return capabilities_.has(capability);
   }
 
@@ -99,7 +99,12 @@ class Deallocator {
   void Delete(T* ptr) {
     if constexpr (allocator::Hardening::kIncludesDebugChecks) {
       if (auto result = GetRequestedLayout(ptr); result.ok()) {
-        PW_ASSERT(*result == Layout::Of<T>());
+        if constexpr (std::has_virtual_destructor_v<T>) {
+          PW_ASSERT(result->size() >= sizeof(T) &&
+                    result->alignment() >= alignof(T));
+        } else {
+          PW_ASSERT(*result == Layout::Of<T>());
+        }
       }
     }
     DeleteArray<T>(ptr, 1);

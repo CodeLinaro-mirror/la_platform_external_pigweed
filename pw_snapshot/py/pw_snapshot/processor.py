@@ -15,6 +15,7 @@
 
 import argparse
 import functools
+import json
 import logging
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ from pw_log.log_decoder import (
     timestamp_parser_ns_since_boot,
 )
 from pw_log.proto import log_pb2
+from pw_metric.metric_parser import metrics_to_dict
 from pw_snapshot_metadata import metadata
 from pw_snapshot_metadata_proto import snapshot_metadata_pb2
 from pw_snapshot_protos import snapshot_pb2
@@ -138,12 +140,16 @@ def process_snapshot(
         )
         if risc_v_cpu_state:
             output.append(risc_v_cpu_state)
-    else:
+    elif metadata_processor.cpu_arch().startswith("ARM"):
         cortex_m_cpu_state = pw_cpu_exception_cortex_m.process_snapshot(
             serialized_snapshot, symbolizer
         )
         if cortex_m_cpu_state:
             output.append(cortex_m_cpu_state)
+    else:
+        _LOG.warning(
+            "Unhandled CPU architecture %s", metadata_processor.cpu_arch()
+        )
 
     thread_info = thread_analyzer.process_snapshot(
         serialized_snapshot, detokenizer, symbolizer, thread_processing_callback
@@ -158,6 +164,13 @@ def process_snapshot(
 
     if timestamp_info:
         output.append(timestamp_info)
+
+    # Metrics
+    if snapshot.metrics:
+        metrics_dict = metrics_to_dict(snapshot.metrics, detokenizer)
+        output.append("Metrics:")
+        output.append(json.dumps(metrics_dict, indent="  ", sort_keys=True))
+        output.append("")
 
     # Check and emit the number of related snapshots embedded in this snapshot.
     if snapshot.related_snapshots:
@@ -177,8 +190,9 @@ def process_snapshots(
     elf_matcher: ElfMatcher | None = None,
     user_processing_callback: Callable[[bytes], str] | None = None,
     symbolizer_matcher: SymbolizerMatcher | None = None,
-    thread_processing_callback: Callable[[snapshot_pb2.Snapshot, bytes], str]
-    | None = None,
+    thread_processing_callback: (
+        Callable[[snapshot_pb2.Snapshot, bytes], str] | None
+    ) = None,
     process_logs: LogProcessor | None = _default_log_processor,
 ) -> str:
     """Processes a snapshot that may have multiple embedded snapshots."""

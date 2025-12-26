@@ -22,13 +22,14 @@
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
+#include "pw_bluetooth_proxy/channel_proxy.h"
 #include "pw_bluetooth_proxy/h4_packet.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel.h"
+#include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
 #include "pw_bluetooth_proxy/internal/l2cap_signaling_channel.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
-#include "pw_bluetooth_proxy/single_channel_proxy.h"
 #include "pw_log/log.h"
-#include "pw_multibuf/multibuf.h"
 #include "pw_status/status.h"
 
 namespace pw::bluetooth::proxy {
@@ -41,8 +42,7 @@ const float kRxCreditReplenishThreshold = 0.30;
 }  // namespace
 
 L2capCoc::L2capCoc(L2capCoc&& other)
-    : SingleChannelProxy(std::move(static_cast<SingleChannelProxy&>(other))),
-      signaling_channel_(other.signaling_channel_),
+    : ChannelProxy(std::move(static_cast<ChannelProxy&>(other))),
       rx_mtu_(other.rx_mtu_),
       rx_mps_(other.rx_mps_),
       tx_mtu_(other.tx_mtu_),
@@ -72,7 +72,7 @@ L2capCoc::L2capCoc(L2capCoc&& other)
   CheckUnderlyingChannel(this);
 }
 
-Status L2capCoc::DoCheckWriteParameter(pw::multibuf::MultiBuf& payload) {
+Status L2capCoc::DoCheckWriteParameter(const FlatConstMultiBuf& payload) {
   if (payload.size() > tx_mtu_) {
     PW_LOG_ERROR(
         "Payload (%zu bytes) exceeds MTU (%d bytes). So will not process. "
@@ -88,14 +88,13 @@ Status L2capCoc::DoCheckWriteParameter(pw::multibuf::MultiBuf& payload) {
 }
 
 pw::Result<L2capCoc> L2capCoc::Create(
-    pw::multibuf::MultiBufAllocator& rx_multibuf_allocator,
+    MultiBufAllocator& rx_multibuf_allocator,
     L2capChannelManager& l2cap_channel_manager,
-    L2capSignalingChannel* signaling_channel,
     uint16_t connection_handle,
     CocConfig rx_config,
     CocConfig tx_config,
     ChannelEventCallback&& event_fn,
-    Function<void(multibuf::MultiBuf&& payload)>&& receive_fn) {
+    Function<void(FlatConstMultiBuf&& payload)>&& receive_fn) {
   if (!AreValidParameters(/*connection_handle=*/connection_handle,
                           /*local_cid=*/rx_config.cid,
                           /*remote_cid=*/tx_config.cid)) {
@@ -113,7 +112,6 @@ pw::Result<L2capCoc> L2capCoc::Create(
 
   L2capCoc channel(/*rx_multibuf_allocator=*/rx_multibuf_allocator,
                    /*l2cap_channel_manager=*/l2cap_channel_manager,
-                   /*signaling_channel=*/signaling_channel,
                    /*connection_handle=*/connection_handle,
                    /*rx_config=*/rx_config,
                    /*tx_config=*/tx_config,
@@ -125,13 +123,12 @@ pw::Result<L2capCoc> L2capCoc::Create(
 }
 
 pw::Status L2capCoc::ReplenishRxCredits(uint16_t additional_rx_credits) {
-  if (!signaling_channel_) {
-    return Status::FailedPrecondition();
-  }
   PW_CHECK(rx_multibuf_allocator());
   // SendFlowControlCreditInd logs if status is not ok, so no need to log here.
-  return signaling_channel_->SendFlowControlCreditInd(
-      local_cid(), additional_rx_credits, *rx_multibuf_allocator());
+  return channel_manager().SendFlowControlCreditInd(connection_handle(),
+                                                    local_cid(),
+                                                    additional_rx_credits,
+                                                    *rx_multibuf_allocator());
 }
 
 pw::Status L2capCoc::SendAdditionalRxCredits(uint16_t additional_rx_credits) {
@@ -256,8 +253,8 @@ bool L2capCoc::DoHandlePduFromController(pw::span<uint8_t> kframe) {
       return true;
     }
 
-    rx_sdu_ =
-        rx_multibuf_allocator()->AllocateContiguous(rx_sdu_bytes_remaining_);
+    rx_sdu_ = MultiBufAdapter::Create(*rx_multibuf_allocator(),
+                                      rx_sdu_bytes_remaining_);
     if (!rx_sdu_) {
       PW_LOG_ERROR(
           "(CID %#x) Rx MultiBuf allocator out of memory. So stopping channel "
@@ -273,9 +270,9 @@ bool L2capCoc::DoHandlePduFromController(pw::span<uint8_t> kframe) {
   }
 
   // Copy segment into rx_sdu_.
-  StatusWithSize status = rx_sdu_->CopyFrom(/*source=*/kframe_payload,
-                                            /*position=*/rx_sdu_offset_);
-  if (status.IsResourceExhausted()) {
+  size_t copied =
+      MultiBufAdapter::Copy(rx_sdu_.value(), rx_sdu_offset_, kframe_payload);
+  if (copied < kframe_payload.size()) {
     // Core Spec v6.0 Vol 3, Part A, 3.4.3: "If the sum of the payload sizes
     // for the K-frames exceeds the specified SDU length, the receiver shall
     // disconnect the channel."
@@ -286,7 +283,6 @@ bool L2capCoc::DoHandlePduFromController(pw::span<uint8_t> kframe) {
     StopUnderlyingChannelWithEvent(L2capChannelEvent::kRxInvalid);
     return true;
   }
-  PW_CHECK_OK(status);
 
   rx_sdu_bytes_remaining_ -= kframe_payload.size();
   rx_sdu_offset_ += kframe_payload.size();
@@ -294,7 +290,7 @@ bool L2capCoc::DoHandlePduFromController(pw::span<uint8_t> kframe) {
   if (rx_sdu_bytes_remaining_ == 0) {
     // We have a full SDU, so invoke client callback.
     if (receive_fn_) {
-      receive_fn_(std::move(*rx_sdu_));
+      receive_fn_(std::move(MultiBufAdapter::Unwrap(rx_sdu_.value())));
     }
     rx_sdu_ = std::nullopt;
     rx_sdu_offset_ = 0;
@@ -308,30 +304,22 @@ bool L2capCoc::HandlePduFromHost(pw::span<uint8_t>) {
   return false;
 }
 
-void L2capCoc::DoClose() {
-  std::lock_guard lock(rx_mutex_);
-  signaling_channel_ = nullptr;
-}
-
-L2capCoc::L2capCoc(pw::multibuf::MultiBufAllocator& rx_multibuf_allocator,
+L2capCoc::L2capCoc(MultiBufAllocator& rx_multibuf_allocator,
                    L2capChannelManager& l2cap_channel_manager,
-                   L2capSignalingChannel* signaling_channel,
                    uint16_t connection_handle,
                    CocConfig rx_config,
                    CocConfig tx_config,
                    ChannelEventCallback&& event_fn,
-                   Function<void(multibuf::MultiBuf&& payload)>&& receive_fn)
-    : SingleChannelProxy(l2cap_channel_manager,
-                         &rx_multibuf_allocator,
-                         /*connection_handle=*/connection_handle,
-                         /*transport=*/AclTransportType::kLe,
-                         /*local_cid=*/rx_config.cid,
-                         /*remote_cid=*/tx_config.cid,
-                         /*payload_from_controller_fn=*/nullptr,
-                         /*payload_from_host_fn=*/nullptr,
-                         /*event_fn=*/std::move(event_fn)),
-
-      signaling_channel_(signaling_channel),
+                   Function<void(FlatConstMultiBuf&& payload)>&& receive_fn)
+    : ChannelProxy(l2cap_channel_manager,
+                   &rx_multibuf_allocator,
+                   /*connection_handle=*/connection_handle,
+                   /*transport=*/AclTransportType::kLe,
+                   /*local_cid=*/rx_config.cid,
+                   /*remote_cid=*/tx_config.cid,
+                   /*payload_from_controller_fn=*/nullptr,
+                   /*payload_from_host_fn=*/nullptr,
+                   /*event_fn=*/std::move(event_fn)),
       rx_mtu_(rx_config.mtu),
       rx_mps_(rx_config.mps),
       tx_mtu_(tx_config.mtu),
@@ -362,26 +350,28 @@ L2capCoc::~L2capCoc() {
   }
 }
 
-std::optional<uint16_t> L2capCoc::MaxL2capPayloadSize() const {
-  std::optional<uint16_t> max_l2cap_payload_size =
+std::optional<uint16_t> L2capCoc::MaxBasicL2capPayloadSize() const {
+  std::optional<uint16_t> max_basic_l2cap_payload_size =
       L2capChannel::MaxL2capPayloadSize();
-  if (!max_l2cap_payload_size) {
+  if (!max_basic_l2cap_payload_size) {
     return std::nullopt;
   }
-  return std::min(*max_l2cap_payload_size, tx_mps_);
+  return std::min(*max_basic_l2cap_payload_size, tx_mps_);
 }
 
 std::optional<H4PacketWithH4> L2capCoc::GenerateNextTxPacket() {
   std::lock_guard lock(tx_mutex_);
-  constexpr uint8_t kSduLengthFieldSize = 2;
-  std::optional<uint16_t> max_l2cap_payload_size = MaxL2capPayloadSize();
+  constexpr uint8_t kSduLengthFieldSize =
+      emboss::FirstKFrame::MinSizeInBytes() -
+      emboss::BasicL2capHeader::IntrinsicSizeInBytes();
+  std::optional<uint16_t> max_basic_payload_size = MaxBasicL2capPayloadSize();
   if (state() != State::kRunning || PayloadQueueEmpty() || tx_credits_ == 0 ||
-      !max_l2cap_payload_size ||
-      *max_l2cap_payload_size <= kSduLengthFieldSize) {
+      !max_basic_payload_size ||
+      *max_basic_payload_size <= kSduLengthFieldSize) {
     return std::nullopt;
   }
 
-  ConstByteSpan sdu_span = GetFrontPayloadSpan();
+  const FlatConstMultiBuf& sdu = GetFrontPayload();
   // Number of client SDU bytes to be encoded in this segment.
   uint16_t sdu_bytes_in_segment;
   // Size of PDU payload for this L2CAP frame.
@@ -389,14 +379,14 @@ std::optional<H4PacketWithH4> L2capCoc::GenerateNextTxPacket() {
   if (!is_continuing_segment_) {
     // Generating the first (or only) PDU of an SDU.
     size_t sdu_bytes_max_allowable =
-        *max_l2cap_payload_size - kSduLengthFieldSize;
-    sdu_bytes_in_segment = std::min(sdu_span.size(), sdu_bytes_max_allowable);
+        *max_basic_payload_size - kSduLengthFieldSize;
+    sdu_bytes_in_segment = std::min(sdu.size(), sdu_bytes_max_allowable);
     pdu_data_size = sdu_bytes_in_segment + kSduLengthFieldSize;
   } else {
     // Generating a continuing PDU in an SDU.
-    size_t sdu_bytes_max_allowable = *max_l2cap_payload_size;
+    size_t sdu_bytes_max_allowable = *max_basic_payload_size;
     sdu_bytes_in_segment =
-        std::min(sdu_span.size() - tx_sdu_offset_, sdu_bytes_max_allowable);
+        std::min(sdu.size() - tx_sdu_offset_, sdu_bytes_max_allowable);
     pdu_data_size = sdu_bytes_in_segment;
   }
 
@@ -417,25 +407,28 @@ std::optional<H4PacketWithH4> L2capCoc::GenerateNextTxPacket() {
             acl->payload().BackingStorage().data(),
             acl->payload().SizeInBytes());
     PW_CHECK(first_kframe_writer.ok());
-    first_kframe_writer->sdu_length().Write(sdu_span.size());
+    first_kframe_writer->sdu_length().Write(sdu.size());
     PW_CHECK(first_kframe_writer->Ok());
-    PW_CHECK(TryToCopyToEmbossStruct(
-        /*emboss_dest=*/first_kframe_writer->payload(),
-        /*src=*/sdu_span.subspan(tx_sdu_offset_, sdu_bytes_in_segment)));
+
+    MultiBufAdapter::Copy(first_kframe_writer->payload(),
+                          sdu,
+                          tx_sdu_offset_,
+                          sdu_bytes_in_segment);
   } else {
     Result<emboss::SubsequentKFrameWriter> subsequent_kframe_writer =
         MakeEmbossWriter<emboss::SubsequentKFrameWriter>(
             acl->payload().BackingStorage().data(),
             acl->payload().SizeInBytes());
     PW_CHECK(subsequent_kframe_writer.ok());
-    PW_CHECK(TryToCopyToEmbossStruct(
-        /*emboss_dest=*/subsequent_kframe_writer->payload(),
-        /*src=*/sdu_span.subspan(tx_sdu_offset_, sdu_bytes_in_segment)));
+    MultiBufAdapter::Copy(subsequent_kframe_writer->payload(),
+                          sdu,
+                          tx_sdu_offset_,
+                          sdu_bytes_in_segment);
   }
 
   tx_sdu_offset_ += sdu_bytes_in_segment;
 
-  if (tx_sdu_offset_ == sdu_span.size()) {
+  if (tx_sdu_offset_ == sdu.size()) {
     // This segment was the final (or only) PDU of the SDU payload. So all
     // content has been copied from the front payload so it can be released.
     PopFrontPayload();

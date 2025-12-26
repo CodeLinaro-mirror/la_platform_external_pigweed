@@ -15,13 +15,17 @@
 #include "pw_async2/join.h"
 
 #include "pw_async2/dispatcher.h"
+#include "pw_async2/value_future.h"
+#include "pw_compilation_testing/negative_compilation.h"
 #include "pw_unit_test/framework.h"
 
 namespace {
 
+using ::pw::async2::BroadcastValueProvider;
 using ::pw::async2::Context;
 using ::pw::async2::Dispatcher;
 using ::pw::async2::Join;
+using ::pw::async2::Joiner;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
 using ::pw::async2::Waker;
@@ -89,14 +93,18 @@ struct StructWithPendMethod {
   PendableController* controller_;
 };
 
-TEST(Join, PendDelegatesToPendables) {
+// TODO: b/457508399 - Remove non-future Joiner.
+PW_MODIFY_DIAGNOSTICS_PUSH();
+PW_MODIFY_DIAGNOSTIC(ignored, "-Wdeprecated-declarations");
+
+TEST(Joiner, PendDelegatesToPendables) {
   Dispatcher dispatcher;
 
   PendableController controller_1;
   PendableController controller_2;
   StructWithPendMethod pendable_1(1, controller_1);
   StructWithPendMethod pendable_2(2, controller_2);
-  Join join(std::move(pendable_1), std::move(pendable_2));
+  Joiner join(std::move(pendable_1), std::move(pendable_2));
 
   EXPECT_EQ(dispatcher.RunPendableUntilStalled(join), Pending());
   controller_2.allow_completion_ = true;
@@ -113,7 +121,7 @@ TEST(Join, PendDelegatesToPendables) {
   EXPECT_EQ(v2.move_count_, 1);
 }
 
-TEST(Join, BindsDirectly) {
+TEST(Joiner, BindsDirectly) {
   Dispatcher dispatcher;
   PendableController controller_1;
   controller_1.allow_completion_ = true;
@@ -121,13 +129,44 @@ TEST(Join, BindsDirectly) {
   controller_2.allow_completion_ = true;
   StructWithPendMethod pendable_1(1, controller_1);
   StructWithPendMethod pendable_2(2, controller_2);
-  Join join(std::move(pendable_1), std::move(pendable_2));
+  Joiner join(std::move(pendable_1), std::move(pendable_2));
 
-  auto&& [v1, v2] = dispatcher.RunPendableToCompletion(join);
+  auto result = dispatcher.RunPendableUntilStalled(join);
+  ASSERT_TRUE(result.IsReady());
+  auto&& [v1, v2] = result.value();
   EXPECT_EQ(v1.result_, 1);
   EXPECT_EQ(v2.result_, 2);
   EXPECT_EQ(v1.move_count_, 1);
   EXPECT_EQ(v2.move_count_, 1);
 }
+
+PW_MODIFY_DIAGNOSTICS_POP();
+
+TEST(JoinFuture, ReturnsReadyWhenAllPendablesAreReady) {
+  Dispatcher dispatcher;
+
+  BroadcastValueProvider<int> int_provider;
+  BroadcastValueProvider<char> char_provider;
+
+  auto future = Join(int_provider.Get(), char_provider.Get());
+  EXPECT_EQ(dispatcher.RunPendableUntilStalled(future), Pending());
+  int_provider.Resolve(43);
+  EXPECT_EQ(dispatcher.RunPendableUntilStalled(future), Pending());
+  char_provider.Resolve('d');
+  auto&& result = dispatcher.RunPendableUntilStalled(future);
+  ASSERT_TRUE(result.IsReady());
+  auto&& [i, c] = *result;
+  EXPECT_EQ(i, 43);
+  EXPECT_EQ(c, 'd');
+  EXPECT_TRUE(future.is_complete());
+}
+
+#if PW_NC_TEST(ArgumentsToJoinMustBeFutures)
+PW_NC_EXPECT("All arguments to Join must be Future types");
+void ShouldAssert() {
+  auto not_a_future = []() -> int { return 42; };
+  auto future = ::pw::async2::Join(not_a_future());
+}
+#endif  // PW_NC_TEST
 
 }  // namespace
