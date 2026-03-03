@@ -24,9 +24,15 @@
 
 namespace pw::allocator::internal {
 
-ControlBlock* ControlBlock::Create(Allocator* allocator,
-                                   Layout layout,
-                                   size_t size) {
+const ControlBlockHandle& ControlBlockHandle::GetInstance_DO_NOT_USE() {
+  static const ControlBlockHandle kControlBlockHandle;
+  return kControlBlockHandle;
+}
+
+ControlBlock* ControlBlock::Create(const ControlBlockHandle&,
+                                   Allocator* allocator,
+                                   Layout layout) {
+  size_t size = layout.size();
   layout = layout.Extend(AlignUp(sizeof(ControlBlock), layout.alignment()));
   void* ptr = allocator->Allocate(layout);
   if (ptr == nullptr) {
@@ -38,7 +44,8 @@ ControlBlock* ControlBlock::Create(Allocator* allocator,
   return new (ptr) ControlBlock(allocator, data, size, true);
 }
 
-ControlBlock* ControlBlock::Create(Deallocator* deallocator,
+ControlBlock* ControlBlock::Create(const ControlBlockHandle&,
+                                   Deallocator* deallocator,
                                    void* data,
                                    size_t size) {
   if (!deallocator->HasCapability(

@@ -17,7 +17,7 @@ use pw_status::{Error, Result};
 use time::Instant;
 
 use crate::Kernel;
-use crate::object::{KernelObject, ObjectBase, Signals, SyscallBuffer};
+use crate::object::{KernelObject, ObjectBase, Signals, SyscallBuffer, WaitReturn};
 use crate::sync::mutex::Mutex;
 
 struct Transaction<K: Kernel> {
@@ -41,12 +41,16 @@ impl<K: Kernel> ChannelHandlerObject<K> {
 }
 
 impl<K: Kernel> KernelObject<K> for ChannelHandlerObject<K> {
+    fn base(&self) -> Option<&ObjectBase<K>> {
+        Some(&self.base)
+    }
+
     fn object_wait(
         &self,
         kernel: K,
         signal_mask: Signals,
         deadline: Instant<<K>::Clock>,
-    ) -> Result<Signals> {
+    ) -> Result<WaitReturn> {
         self.base.wait_until(kernel, signal_mask, deadline)
     }
 
@@ -75,8 +79,13 @@ impl<K: Kernel> KernelObject<K> for ChannelHandlerObject<K> {
         response_buffer.copy_into(0, &mut transaction.recv_buffer)?;
 
         transaction.recv_buffer.truncate(response_buffer.size());
-        self.base.state.lock(kernel).active_signals -= Signals::READABLE | Signals::WRITEABLE;
-        transaction.initiator.base.signal(kernel, Signals::READABLE);
+        self.base.signal(kernel, |signals| {
+            signals - (Signals::READABLE | Signals::WRITEABLE)
+        });
+        transaction
+            .initiator
+            .base
+            .signal(kernel, |_| Signals::READABLE);
         Ok(())
     }
 }
@@ -97,12 +106,16 @@ impl<K: Kernel> ChannelInitiatorObject<K> {
 }
 
 impl<K: Kernel> KernelObject<K> for ChannelInitiatorObject<K> {
+    fn base(&self) -> Option<&ObjectBase<K>> {
+        Some(&self.base)
+    }
+
     fn object_wait(
         &self,
         kernel: K,
         signal_mask: Signals,
         deadline: Instant<<K>::Clock>,
-    ) -> Result<Signals> {
+    ) -> Result<WaitReturn> {
         self.base.wait_until(kernel, signal_mask, deadline)
     }
 
@@ -137,18 +150,29 @@ impl<K: Kernel> KernelObject<K> for ChannelInitiatorObject<K> {
 
         // Clear Readable, Writable, and Error signals  on our side before
         // signaling the handler.
-        self.base.state.lock(kernel).active_signals -=
-            Signals::READABLE | Signals::WRITEABLE | Signals::ERROR;
+        self.base.signal(kernel, |signals| {
+            signals - (Signals::READABLE | Signals::WRITEABLE | Signals::ERROR)
+        });
 
-        self.handler.base.signal(kernel, Signals::READABLE);
+        self.handler.base.signal(kernel, |_| Signals::READABLE);
 
-        self.object_wait(kernel, Signals::READABLE | Signals::ERROR, deadline)?;
+        // Result processing is deferred until the object is in a coherent state.
+        let wait_result = self.object_wait(kernel, Signals::READABLE | Signals::ERROR, deadline);
 
         // TODO: konkers - Rationalize signal behavior with syscall_defs.rs.
-        self.base.state.lock(kernel).active_signals |= Signals::WRITEABLE;
+        self.base
+            .signal(kernel, |signals| signals | Signals::WRITEABLE);
 
         let mut active_transaction = self.handler.active_transaction.lock();
-        let recv_bytes = match &*active_transaction {
+
+        // All success and error paths reset `active_transaction` to `None`.
+        let transaction = active_transaction.take();
+
+        // Process wait_result while active_transaction is locked so that errors
+        // both set the writeable signal as well haveing active_transaction reset.
+        wait_result?;
+
+        let recv_bytes = match transaction {
             // The handler has stored the number of response bytes by updating.
             // the recv_buffer length.
             Some(transaction) => transaction.recv_buffer.size(),
@@ -156,7 +180,6 @@ impl<K: Kernel> KernelObject<K> for ChannelInitiatorObject<K> {
             // Transaction was dropped.
             None => return Err(Error::Unavailable),
         };
-        *active_transaction = None;
 
         Ok(recv_bytes)
     }

@@ -60,7 +60,7 @@ from prompt_toolkit import prompt
 from pw_build.build_recipe import BuildRecipe, create_build_recipes
 from pw_build.project_builder import (
     ProjectBuilder,
-    execute_command_no_logging,
+    execute_command_pure,
     execute_command_with_logging,
     ASCII_CHARSET,
     EMOJI_CHARSET,
@@ -224,7 +224,7 @@ class PigweedBuildWatcher(FileSystemEventHandler, DebouncedFunction):
             _LOG.info('Change detected: %s', self.matching_path)
 
         num_builds = len(self.project_builder)
-        _LOG.info('Starting build with %d directories', num_builds)
+        _LOG.info('Starting build with %d recipes', num_builds)
 
         if self.project_builder.default_logfile:
             _LOG.info(
@@ -315,7 +315,7 @@ class PigweedBuildWatcher(FileSystemEventHandler, DebouncedFunction):
                 command, env, recipe, logger=_LOG
             )
 
-        return execute_command_no_logging(command, env, recipe)
+        return execute_command_pure(command, env, recipe)
 
     def _execute_command_watch_app(
         self,
@@ -503,6 +503,7 @@ def watch_setup(  # pylint: disable=too-many-locals
     debug_logging: bool = False,
     source_path: Path | None = None,
     default_build_system: str | None = None,
+    dry_run: bool = False,
     # pylint: enable=unused-argument
     # pylint: disable=too-many-arguments
 ) -> tuple[PigweedBuildWatcher, list[Path]]:
@@ -717,6 +718,7 @@ def main() -> int:
         log_level=logging.DEBUG if args.debug_logging else logging.INFO,
         abort_callback=_recipe_abort,
         source_path=args.source_path,
+        dry_run=args.dry_run,
     )
 
     event_handler, exclude_list = watch_setup(project_builder, **vars(args))

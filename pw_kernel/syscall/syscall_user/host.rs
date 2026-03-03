@@ -12,13 +12,28 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 use pw_status::Result;
-use syscall_defs::{Signals, SysCallInterface};
+use syscall_defs::{Signals, SysCallInterface, WaitReturn};
 
 pub struct SysCall {}
 
 impl SysCallInterface for SysCall {
     #[inline(always)]
-    fn object_wait(_: u32, _: u32, _: u64) -> Result<Signals> {
+    fn object_wait(_: u32, _: u32, _: u64) -> Result<WaitReturn> {
+        Err(pw_status::Error::Unimplemented)
+    }
+
+    #[inline(always)]
+    fn wait_group_add(
+        _wait_group: u32,
+        _object: u32,
+        _signal_mask: Signals,
+        _user_data: usize,
+    ) -> Result<()> {
+        Err(pw_status::Error::Unimplemented)
+    }
+
+    #[inline(always)]
+    fn wait_group_remove(_wait_group: u32, _object: u32) -> Result<()> {
         Err(pw_status::Error::Unimplemented)
     }
 

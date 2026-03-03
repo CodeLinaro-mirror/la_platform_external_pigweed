@@ -19,6 +19,11 @@ rust_toolchain(
     binary_ext = "",
     cargo = "{toolchain_repo}//:bin/cargo",
     clippy_driver = "{toolchain_repo}//:bin/clippy-driver",
+    debug_info = {{
+      "dbg": "2",
+      "fastbuild": "2",
+      "opt": "2",
+    }},
     dylib_ext = "{dylib_ext}",
     exec_compatible_with = {exec_compatible_with},
     exec_triple = "{exec_triple}",
@@ -28,6 +33,7 @@ rust_toolchain(
       "opt": "s",
     }},
     rust_doc = "{toolchain_repo}//:bin/rustdoc",
+    {default_edition_setting}
     rust_std = select({{
         "@pigweed//pw_toolchain/rust:stdlibs_none": "{toolchain_repo}//:rust_libs_none",
         "@pigweed//pw_toolchain/rust:stdlibs_core_only": "{toolchain_repo}//:rust_libs_core_only",
@@ -39,6 +45,11 @@ rust_toolchain(
     rustc_lib = "{toolchain_repo}//:rustc_lib",
     staticlib_ext = ".a",
     stdlib_linkflags = [],
+    strip_level = {{
+      "dbg": "none",
+      "fastbuild": "none",
+      "opt": "none",
+    }},
     target_compatible_with = {target_compatible_with},
     target_triple = "{target_triple}",
     extra_rustc_flags = {extra_rustc_flags},
@@ -58,7 +69,12 @@ def rust_toolchain_no_prebuilt_template(
         dylib_ext,
         exec_compatible_with,
         target_compatible_with,
-        extra_rustc_flags):
+        extra_rustc_flags,
+        default_edition = None):
+    default_edition_setting = ""
+    if default_edition:
+        default_edition_setting = 'default_edition = "{}",'.format(default_edition)
+
     return _rust_toolchain_no_prebuilt_template.format(
         name = name,
         exec_triple = exec_triple,
@@ -68,6 +84,7 @@ def rust_toolchain_no_prebuilt_template(
         exec_compatible_with = json.encode(exec_compatible_with),
         target_compatible_with = json.encode(target_compatible_with),
         extra_rustc_flags = json.encode(extra_rustc_flags),
+        default_edition_setting = default_edition_setting,
     )
 
 _rust_toolchain_template = """\
@@ -76,6 +93,11 @@ rust_toolchain(
     binary_ext = "",
     cargo = "{toolchain_repo}//:bin/cargo",
     clippy_driver = "{toolchain_repo}//:bin/clippy-driver",
+    debug_info = {{
+      "dbg": "2",
+      "fastbuild": "2",
+      "opt": "2",
+    }},
     dylib_ext = "{dylib_ext}",
     exec_compatible_with = {exec_compatible_with},
     exec_triple = "{exec_triple}",
@@ -85,11 +107,17 @@ rust_toolchain(
       "opt": "s",
     }},
     rust_doc = "{toolchain_repo}//:bin/rustdoc",
+    {default_edition_setting}
     rust_std = "{target_repo}//:rust_std",
     rustc = "{toolchain_repo}//:bin/rustc",
     rustc_lib = "{toolchain_repo}//:rustc_lib",
     staticlib_ext = ".a",
     stdlib_linkflags = [],
+    strip_level = {{
+      "dbg": "none",
+      "fastbuild": "none",
+      "opt": "none",
+    }},
     target_compatible_with = {target_compatible_with},
     target_triple = "{target_triple}",
     extra_rustc_flags = {extra_rustc_flags},
@@ -110,7 +138,12 @@ def rust_toolchain_template(
         dylib_ext,
         exec_compatible_with,
         target_compatible_with,
-        extra_rustc_flags):
+        extra_rustc_flags,
+        default_edition = None):
+    default_edition_setting = ""
+    if default_edition:
+        default_edition_setting = 'default_edition = "{}",'.format(default_edition)
+
     return _rust_toolchain_template.format(
         name = name,
         exec_triple = exec_triple,
@@ -121,6 +154,7 @@ def rust_toolchain_template(
         exec_compatible_with = json.encode(exec_compatible_with),
         target_compatible_with = json.encode(target_compatible_with),
         extra_rustc_flags = json.encode(extra_rustc_flags),
+        default_edition_setting = default_edition_setting,
     )
 
 _toolchain_template = """\
