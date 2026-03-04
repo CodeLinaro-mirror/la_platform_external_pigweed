@@ -138,6 +138,11 @@ def add_project_builder_option_arguments(
             'enabled. Default: 0 meaning run all in parallel.'
         ),
     )
+    build_options_group.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Print build commands without running them.',
+    )
 
     logfile_group = parser.add_argument_group(title='Log File Options')
     logfile_group.add_argument(

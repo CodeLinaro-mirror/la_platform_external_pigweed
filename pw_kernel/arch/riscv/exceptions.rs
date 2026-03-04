@@ -14,7 +14,7 @@
 
 #[cfg(feature = "exceptions_reload_pmp")]
 use kernel::Kernel;
-use kernel::syscall::{SyscallArgs, raw_handle_syscall};
+use kernel::syscall::{SyscallArgs, handle_syscall};
 use kernel_config::{ExceptionMode, KernelConfig, RiscVKernelConfigInterface};
 use log_if::debug_if;
 #[cfg(feature = "exceptions_reload_pmp")]
@@ -29,10 +29,15 @@ pub(crate) use riscv_macro::user_space_exception as exception;
 
 #[cfg(feature = "exceptions_reload_pmp")]
 use crate::MemoryConfig;
+#[cfg(not(feature = "veer_pic"))]
+use crate::plic as pic;
 use crate::regs::{
-    Cause, Exception, Interrupt, MCause, MCauseVal, MStatus, MtVal, MtVec, MtVecMode,
+    Cause, Exception, Interrupt, MCause, MCauseVal, MStatus, MStatusVal, MtVal, MtVec, MtVecMode,
+    PrivilegeLevel,
 };
-use crate::{plic, timer};
+use crate::timer;
+#[cfg(feature = "veer_pic")]
+use crate::veer_pic as pic;
 
 const LOG_EXCEPTIONS: bool = false;
 
@@ -127,15 +132,9 @@ fn handle_ecall(frame: &mut TrapFrame) {
     #[expect(clippy::cast_possible_truncation)]
     let id = frame.t0 as u16;
     let args = RiscVSyscallArgs::new(frame);
-    let ret_val = raw_handle_syscall(super::Arch, id, args);
-
-    // Explicit truncation is assumed when packing a u64 into two u32 (usize)
-    // registers.
-    #[expect(clippy::cast_possible_truncation)]
-    {
-        frame.a0 = ret_val.cast_unsigned() as usize;
-        frame.a1 = (ret_val.cast_unsigned() >> 32) as usize;
-    }
+    let ret_val = handle_syscall(super::Arch, id, args);
+    frame.a0 = ret_val.value[0];
+    frame.a1 = ret_val.value[1];
 
     // ECALL exceptions do not "retire the instruction" requiring the advancing
     // of the PC past the ECALL instruction.  ECALLs are encoded as 4 byte
@@ -145,6 +144,10 @@ fn handle_ecall(frame: &mut TrapFrame) {
     // "...memory address computations done by the hardware ignore overflow
     // and instead wrap around modulo 2^XLEN"
     frame.epc = frame.epc.wrapping_add(4);
+}
+
+fn is_exception_from_kernel(frame: &TrapFrame) -> bool {
+    MStatusVal(frame.status).mpp() != PrivilegeLevel::User
 }
 
 fn exception_handler(exception: Exception, mepc: usize, frame: &mut TrapFrame) {
@@ -163,14 +166,16 @@ fn exception_handler(exception: Exception, mepc: usize, frame: &mut TrapFrame) {
         }
         Exception::Breakpoint => {
             dump_exception_frame(frame);
-            #[allow(clippy::empty_loop)]
-            loop {}
+            kernel::scheduler::handle_terminal_exception(
+                super::Arch,
+                is_exception_from_kernel(frame),
+            );
         }
         _ => {
             dump_exception_frame(frame);
-            pw_assert::panic!(
-                "Unhandled exception: exception_number={:#010x}",
-                exception as usize
+            kernel::scheduler::handle_terminal_exception(
+                super::Arch,
+                is_exception_from_kernel(frame),
             );
         }
     };
@@ -192,7 +197,7 @@ unsafe fn interrupt_handler(interrupt: Interrupt, mepc: usize, frame: &TrapFrame
             timer::mtimer_tick();
         }
         Interrupt::MachineExternal => {
-            plic::interrupt();
+            pic::interrupt();
         }
         _ => {
             pw_assert::panic!(
