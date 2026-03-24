@@ -30,12 +30,10 @@ cc_library {
     header_libs: [
         "fuchsia_sdk_lib_stdcompat",
         "pw_assert",
-        "pw_multibuf_headers",
     ],
     export_header_lib_headers: [
         "fuchsia_sdk_lib_stdcompat",
         "pw_assert",
-        "pw_multibuf_headers",
     ],
     export_static_lib_headers: [
         "pw_bytes",
@@ -51,6 +49,7 @@ cc_library {
     srcs: [
         "allocator.cc",
         "allocator_as_pool.cc",
+        "block/basic.cc",
         "block/contiguous.cc",
         "block/poisonable.cc",
         "block_allocator.cc",

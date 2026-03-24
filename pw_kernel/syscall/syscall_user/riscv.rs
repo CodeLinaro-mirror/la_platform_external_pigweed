@@ -15,7 +15,7 @@
 use core::arch::naked_asm;
 
 use pw_status::Result;
-use syscall_defs::{Signals, SysCallId, SysCallInterface, SysCallReturnValue};
+use syscall_defs::{Signals, SysCallId, SysCallInterface, SysCallReturnValue, WaitReturn};
 
 pub struct SysCall {}
 
@@ -35,6 +35,16 @@ macro_rules! syscall_veneer {
 }
 
 syscall_veneer!(ObjectWait, object_wait(handle: u32, signals: u32, deadline: u64));
+syscall_veneer!(WaitGroupAdd, wait_group_add(
+     wait_group: u32,
+     object: u32,
+     signal_mask: Signals,
+     user_data: usize,
+));
+syscall_veneer!(WaitGroupRemove, wait_group_remove(
+     wait_group: u32,
+     object: u32,
+));
 syscall_veneer!(ChannelTransact, channel_transact(
     object_handle: u32, // a0
     send_data: *const u8, // a1
@@ -59,8 +69,26 @@ syscall_veneer!(DebugTriggerInterrupt, debug_trigger_interrupt(irq: u32));
 
 impl SysCallInterface for SysCall {
     #[inline(always)]
-    fn object_wait(handle: u32, signals: u32, deadline: u64) -> Result<Signals> {
-        SysCallReturnValue(unsafe { object_wait(handle, signals, deadline) }).to_result_signals()
+    fn object_wait(handle: u32, signals: u32, deadline: u64) -> Result<WaitReturn> {
+        SysCallReturnValue::from(unsafe { object_wait(handle, signals, deadline) }).into()
+    }
+
+    #[inline(always)]
+    fn wait_group_add(
+        wait_group: u32,
+        object: u32,
+        signal_mask: Signals,
+        user_data: usize,
+    ) -> Result<()> {
+        SysCallReturnValue::from(unsafe {
+            wait_group_add(wait_group, object, signal_mask, user_data)
+        })
+        .into()
+    }
+
+    #[inline(always)]
+    fn wait_group_remove(wait_group: u32, object: u32) -> Result<()> {
+        SysCallReturnValue::from(unsafe { wait_group_remove(wait_group, object) }).into()
     }
 
     #[inline(always)]
@@ -72,10 +100,10 @@ impl SysCallInterface for SysCall {
         recv_len: usize,
         deadline: u64,
     ) -> Result<u32> {
-        SysCallReturnValue(unsafe {
+        SysCallReturnValue::from(unsafe {
             channel_transact(handle, send_data, send_len, recv_data, recv_len, deadline)
         })
-        .to_result_u32()
+        .into()
     }
 
     #[inline(always)]
@@ -85,42 +113,41 @@ impl SysCallInterface for SysCall {
         buffer: *mut u8,
         buffer_len: usize,
     ) -> Result<u32> {
-        SysCallReturnValue(unsafe { channel_read(handle, offset, buffer, buffer_len) })
-            .to_result_u32()
+        SysCallReturnValue::from(unsafe { channel_read(handle, offset, buffer, buffer_len) }).into()
     }
 
     #[inline(always)]
     unsafe fn channel_respond(handle: u32, buffer: *const u8, buffer_len: usize) -> Result<()> {
-        SysCallReturnValue(unsafe { channel_respond(handle, buffer, buffer_len) }).to_result_unit()
+        SysCallReturnValue::from(unsafe { channel_respond(handle, buffer, buffer_len) }).into()
     }
 
     #[inline(always)]
     fn interrupt_ack(handle: u32, signal_mask: Signals) -> Result<()> {
-        SysCallReturnValue(unsafe { interrupt_ack(handle, signal_mask) }).to_result_unit()
+        SysCallReturnValue::from(unsafe { interrupt_ack(handle, signal_mask) }).into()
     }
 
     #[inline(always)]
     fn debug_putc(a: u32) -> Result<u32> {
-        SysCallReturnValue(unsafe { putc(a) }).to_result_u32()
+        SysCallReturnValue::from(unsafe { putc(a) }).into()
     }
 
     #[inline(always)]
     fn debug_shutdown(a: u32) -> Result<()> {
-        SysCallReturnValue(unsafe { shutdown(a) }).to_result_unit()
+        SysCallReturnValue::from(unsafe { shutdown(a) }).into()
     }
 
     #[inline(always)]
     unsafe fn debug_log(buffer: *const u8, buffer_len: usize) -> Result<()> {
-        SysCallReturnValue(unsafe { log(buffer, buffer_len) }).to_result_unit()
+        SysCallReturnValue::from(unsafe { log(buffer, buffer_len) }).into()
     }
 
     #[inline(always)]
     fn debug_nop() -> Result<()> {
-        SysCallReturnValue(unsafe { nop() }).to_result_unit()
+        SysCallReturnValue::from(unsafe { nop() }).into()
     }
 
     #[inline(always)]
     fn debug_trigger_interrupt(irq: u32) -> Result<()> {
-        SysCallReturnValue(unsafe { debug_trigger_interrupt(irq) }).to_result_unit()
+        SysCallReturnValue::from(unsafe { debug_trigger_interrupt(irq) }).into()
     }
 }
