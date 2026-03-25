@@ -22,10 +22,9 @@
 #include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_data.emb.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
 #include "pw_containers/algorithm.h"  // IWYU pragma: keep
 #include "pw_log/log.h"
-#include "pw_multibuf/multibuf.h"
-#include "pw_span/cast.h"
 #include "pw_status/status.h"
 
 namespace pw::bluetooth::proxy {
@@ -472,8 +471,8 @@ bool AclDataChannel::HandleAclData(Direction direction,
   }
 
   if (result.recombined_buffer.has_value()) {
-    auto contiguous = result.recombined_buffer->ContiguousSpan().value();
-    pw::span<uint8_t> h4_span = span_cast<uint8_t>(contiguous);
+    pw::span<uint8_t> h4_span =
+        MultiBufAdapter::AsSpan(result.recombined_buffer.value());
     // Send onward to its final destination.
     switch (direction) {
       case Direction::kFromController: {

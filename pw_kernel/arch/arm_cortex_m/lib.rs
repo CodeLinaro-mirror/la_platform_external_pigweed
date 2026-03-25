@@ -24,7 +24,6 @@ mod nvic;
 mod protection;
 mod regs;
 mod spinlock;
-#[cfg(feature = "user_space")]
 mod syscall;
 mod threads;
 mod timer;
@@ -43,7 +42,6 @@ impl Kernel for Arch {
     fn get_state(self) -> &'static KernelState<Arch> {
         static STATE: KernelState<Arch> =
             KernelState::new(kernel::ArchState::new(nvic::Nvic::new()));
-        kernel::annotate_kernel_state!(STATE);
         &STATE
     }
 }

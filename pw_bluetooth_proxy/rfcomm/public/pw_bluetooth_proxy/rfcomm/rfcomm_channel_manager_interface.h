@@ -19,7 +19,6 @@
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/rfcomm/rfcomm_common.h"
 #include "pw_bluetooth_proxy/rfcomm/rfcomm_config.h"
-#include "pw_multibuf/allocator.h"
 #include "pw_result/result.h"
 
 namespace pw::bluetooth::proxy::rfcomm {
@@ -54,7 +53,7 @@ class RfcommChannel {
   /// @retval `NOT_FOUND` if the channel was not found or closed.
   /// @retval `UNAVAILABLE` if the transmit queue is full. In this case, the
   ///     unwritten payload is returned to the caller.
-  StatusWithMultiBuf Write(multibuf::MultiBuf&& payload);
+  StatusWithMultiBuf Write(FlatConstMultiBuf&& payload);
 
   /// Allow comparison for testing.
   bool operator==(const RfcommChannel& other) const {
@@ -123,7 +122,7 @@ class RfcommChannelManagerInterface {
   /// @retval `RESOURCE_EXHAUSTED` if the system is out of resources to open a
   ///     new channel.
   Result<RfcommChannel> AcquireRfcommChannel(
-      multibuf::MultiBufAllocator& multibuf_allocator,
+      MultiBufAllocator& multibuf_allocator,
       ConnectionHandle connection_handle,
       uint8_t channel_number,
       RfcommDirection direction,
@@ -160,7 +159,7 @@ class RfcommChannelManagerInterface {
   StatusWithMultiBuf Write(ConnectionHandle connection_handle,
                            uint8_t channel_number,
                            RfcommDirection direction,
-                           multibuf::MultiBuf&& payload) {
+                           FlatConstMultiBuf&& payload) {
     return DoWrite(
         connection_handle, channel_number, direction, std::move(payload));
   }
@@ -184,7 +183,7 @@ class RfcommChannelManagerInterface {
 
  private:
   virtual Result<RfcommChannel> DoAcquireRfcommChannel(
-      multibuf::MultiBufAllocator& multibuf_allocator,
+      MultiBufAllocator& multibuf_allocator,
       ConnectionHandle connection_handle,
       uint8_t channel_number,
       RfcommDirection direction,
@@ -197,7 +196,7 @@ class RfcommChannelManagerInterface {
   virtual StatusWithMultiBuf DoWrite(ConnectionHandle connection_handle,
                                      uint8_t channel_number,
                                      RfcommDirection direction,
-                                     multibuf::MultiBuf&& payload) = 0;
+                                     FlatConstMultiBuf&& payload) = 0;
 
   virtual Status DoReleaseRfcommChannel(ConnectionHandle connection_handle,
                                         uint8_t channel_number,

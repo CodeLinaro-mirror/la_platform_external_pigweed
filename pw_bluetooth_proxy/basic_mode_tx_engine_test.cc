@@ -36,15 +36,18 @@ class BasicModeTxEngineTest : public ::testing::Test,
  public:
   void SetUp() override {
     // Queue 2 packets
-    std::optional<multibuf::MultiBuf> buffer_0 =
-        multibuf_allocator_.AllocateContiguous(kPayload0.size());
-    PW_CHECK(buffer_0->CopyFrom(kPayload0).ok());
-    payload_queue_.emplace(std::move(*buffer_0));
+    MultiBufAllocator& allocator = packet_allocator_context_.GetAllocator();
+    std::optional<FlatMultiBufInstance> buffer_0 =
+        MultiBufAdapter::Create(allocator, kPayload0.size());
+    MultiBufAdapter::Copy(buffer_0.value(), /*dst_offset=*/0, kPayload0);
+    payload_queue_.emplace(
+        std::move(MultiBufAdapter::Unwrap(buffer_0.value())));
 
-    std::optional<multibuf::MultiBuf> buffer_1 =
-        multibuf_allocator_.AllocateContiguous(kPayload1.size());
-    PW_CHECK(buffer_1->CopyFrom(kPayload1).ok());
-    payload_queue_.emplace(std::move(*buffer_1));
+    std::optional<FlatMultiBufInstance> buffer_1 =
+        MultiBufAdapter::Create(allocator, kPayload1.size());
+    MultiBufAdapter::Copy(buffer_1.value(), /*dst_offset=*/0, kPayload1);
+    payload_queue_.emplace(
+        std::move(MultiBufAdapter::Unwrap(buffer_1.value())));
 
     max_payload_size_ = 20;
     engine_.emplace(kConnectionHandle, kRemoteCid, *this);
@@ -54,8 +57,8 @@ class BasicModeTxEngineTest : public ::testing::Test,
 
   BasicModeTxEngine& engine() { return engine_.value(); }
 
-  multibuf::MultiBufAllocator& multibuf_allocator() {
-    return multibuf_allocator_;
+  MultiBufAllocator& multibuf_allocator() {
+    return packet_allocator_context_.GetAllocator();
   }
 
   void set_max_payload_size(std::optional<uint16_t> max_payload_size) {
@@ -68,9 +71,9 @@ class BasicModeTxEngineTest : public ::testing::Test,
     return max_payload_size_;
   }
 
-  const multibuf::MultiBuf& FrontPayload() {
+  const FlatConstMultiBuf& FrontPayload() {
     PW_CHECK(!payload_queue_.empty());
-    return payload_queue_.front();
+    return MultiBufAdapter::Unwrap(payload_queue_.front());
   }
 
   void PopFrontPayload() {
@@ -91,16 +94,10 @@ class BasicModeTxEngineTest : public ::testing::Test,
 
  private:
   pw::allocator::test::AllocatorForTest<500> allocator_;
-
-  // Use libc allocator so msan can detect use after frees.
-  std::array<std::byte, 500> packet_buffer_{};
-  pw::multibuf::SimpleAllocator multibuf_allocator_{
-      /*data_area=*/packet_buffer_,
-      /*metadata_alloc=*/allocator::GetLibCAllocator()};
-
+  MultiBufAllocatorContext<500> packet_allocator_context_;
   std::optional<BasicModeTxEngine> engine_;
   std::optional<uint16_t> max_payload_size_;
-  InlineQueue<multibuf::MultiBuf, 2> payload_queue_;
+  InlineQueue<FlatConstMultiBufInstance, 2> payload_queue_;
 };
 
 TEST_F(BasicModeTxEngineTest, GenerateNextPacket) {
@@ -167,32 +164,38 @@ TEST_F(BasicModeTxEngineTest, AddCredits) {
 }
 
 TEST_F(BasicModeTxEngineTest, CheckWriteParameterNoSizeYet) {
-  std::optional<multibuf::MultiBuf> buffer =
-      multibuf_allocator().AllocateContiguous(1);
+  std::optional<FlatMultiBufInstance> buffer =
+      MultiBufAdapter::Create(multibuf_allocator(), 1);
   ASSERT_TRUE(buffer.has_value());
+  const FlatConstMultiBuf& write_param =
+      MultiBufAdapter::Unwrap(buffer.value());
 
   set_max_payload_size(std::nullopt);
-  Status status = engine().CheckWriteParameter(*buffer);
+  Status status = engine().CheckWriteParameter(write_param);
   EXPECT_EQ(status, Status::FailedPrecondition());
 }
 
 TEST_F(BasicModeTxEngineTest, CheckWriteParameterPayloadTooLarge) {
-  std::optional<multibuf::MultiBuf> buffer =
-      multibuf_allocator().AllocateContiguous(20);
+  std::optional<FlatMultiBufInstance> buffer =
+      MultiBufAdapter::Create(multibuf_allocator(), 20);
   ASSERT_TRUE(buffer.has_value());
+  const FlatConstMultiBuf& write_param =
+      MultiBufAdapter::Unwrap(buffer.value());
 
   set_max_payload_size(19);
-  Status status = engine().CheckWriteParameter(*buffer);
+  Status status = engine().CheckWriteParameter(write_param);
   EXPECT_EQ(status, Status::InvalidArgument());
 }
 
 TEST_F(BasicModeTxEngineTest, CheckWriteParameterOk) {
-  std::optional<multibuf::MultiBuf> buffer =
-      multibuf_allocator().AllocateContiguous(20);
+  std::optional<FlatMultiBufInstance> buffer =
+      MultiBufAdapter::Create(multibuf_allocator(), 20);
   ASSERT_TRUE(buffer.has_value());
+  const FlatConstMultiBuf& write_param =
+      MultiBufAdapter::Unwrap(buffer.value());
 
   set_max_payload_size(20);
-  Status status = engine().CheckWriteParameter(*buffer);
+  Status status = engine().CheckWriteParameter(write_param);
   PW_TEST_ASSERT_OK(status);
 }
 

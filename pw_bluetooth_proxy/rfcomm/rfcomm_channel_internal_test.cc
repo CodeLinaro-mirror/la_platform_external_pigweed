@@ -24,8 +24,15 @@
 #include "pw_bytes/span.h"
 #include "pw_containers/vector.h"
 #include "pw_multibuf/multibuf.h"
-#include "pw_multibuf/simple_allocator.h"
 #include "pw_unit_test/framework.h"
+
+#if PW_MULTIBUF_VERSION == 1
+#include "pw_multibuf/simple_allocator.h"
+#else
+#include "pw_allocator/synchronized_allocator.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
+#include "pw_sync/mutex.h"
+#endif  // PW_MULTIBUF_VERSION
 
 namespace pw::bluetooth::proxy::rfcomm::internal {
 namespace testing {
@@ -44,7 +51,7 @@ class MockChannelProxy : public ChannelProxy {
   void set_next_write_status(Status status) { next_write_status_ = status; }
 
  private:
-  StatusWithMultiBuf DoWrite(multibuf::MultiBuf&& payload) override {
+  StatusWithMultiBuf DoWrite(FlatConstMultiBuf&& payload) override {
     if (!next_write_status_.ok()) {
       Status status_to_return = next_write_status_;
       next_write_status_ = OkStatus();  // Reset for next call
@@ -52,10 +59,7 @@ class MockChannelProxy : public ChannelProxy {
     }
     pw::Vector<uint8_t, kMaxTestPacketSize> data;
     data.resize(payload.size());
-    auto bytes_copied = payload.CopyTo(as_writable_bytes(span(data)));
-    if (!bytes_copied.ok()) {
-      return {bytes_copied.status()};
-    }
+    MultiBufAdapter::Copy(as_writable_bytes(span(data)), payload, 0);
     written_payloads_.push_back(std::move(data));
     return {OkStatus()};
   }
@@ -132,10 +136,10 @@ class RfcommChannelTest : public ::testing::Test {
             kDefaultRxConfig,
             kDefaultTxConfig,
             kRfcommCrc,
-            [this](multibuf::MultiBuf&& pdu) {
+            [this](FlatMultiBuf&& pdu) {
               last_received_pdu_.resize(pdu.size());
-              std::ignore =
-                  pdu.CopyTo(as_writable_bytes(span(last_received_pdu_)));
+              MultiBufAdapter::Copy(
+                  as_writable_bytes(span(last_received_pdu_)), pdu, 0);
             },
             [this](RfcommEvent event) { last_event_ = event; }) {}
 
@@ -150,12 +154,18 @@ class RfcommChannelTest : public ::testing::Test {
       pw::checksum::Crc8(0x07, 0xFF, true, true, 0xff);
 
   static constexpr size_t kDataSize = 2048;
-
+#if PW_MULTIBUF_VERSION == 1
   std::array<std::byte, kDataSize> buffer_{};
   multibuf::SimpleAllocator multibuf_allocator_{
       /*data_area=*/buffer_,
       /*metadata_alloc=*/allocator::GetLibCAllocator()};
-
+#else
+  allocator::test::AllocatorForTest<kDataSize> data_alloc_;
+  allocator::SynchronizedAllocator<sync::Mutex> synced_{data_alloc_};
+  MultiBufAllocator multibuf_allocator_{
+      /*data_alloc=*/synced_,
+      /*metadata_alloc=*/allocator::GetLibCAllocator()};
+#endif
   testing::MockL2capChannelManager l2cap_manager_;
   RfcommManager rfcomm_manager_;
   testing::MockChannelProxy l2cap_channel_for_test_;
@@ -166,11 +176,14 @@ class RfcommChannelTest : public ::testing::Test {
 
 TEST_F(RfcommChannelTest, WriteSinglePacket) {
   const pw::Vector<uint8_t, 3> payload = {0, 0, 0};
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf)).status, OkStatus());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, as_bytes(span(payload)));
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      OkStatus());
 
   ASSERT_EQ(l2cap_channel_for_test_.written_payloads().size(), 1u);
   const span<const uint8_t> written_payload =
@@ -213,11 +226,14 @@ TEST_F(RfcommChannelTest, WriteSinglePacket) {
 TEST_F(RfcommChannelTest, WriteFragmentedPacket) {
   pw::Vector<uint8_t, kDefaultTxConfig.max_frame_size + 1> payload;
   payload.resize(payload.capacity());
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf)).status, OkStatus());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, as_bytes(span(payload)));
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      OkStatus());
 
   // Two packets should be sent.
   ASSERT_EQ(l2cap_channel_for_test_.written_payloads().size(), 2u);
@@ -272,9 +288,10 @@ TEST_F(RfcommChannelTest, WriteLongPacket) {
       kDefaultRxConfig,
       kTxConfig,
       kRfcommCrc,
-      [this](multibuf::MultiBuf&& pdu) {
+      [this](FlatMultiBuf&& pdu) {
         last_received_pdu_.resize(pdu.size());
-        std::ignore = pdu.CopyTo(as_writable_bytes(span(last_received_pdu_)));
+        MultiBufAdapter::Copy(
+            as_writable_bytes(span(last_received_pdu_)), pdu, 0);
       },
       [this](RfcommEvent event) { last_event_ = event; });
 
@@ -283,11 +300,14 @@ TEST_F(RfcommChannelTest, WriteLongPacket) {
                  1>
       payload;
   payload.resize(payload.capacity());
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel.Write(std::move(mbuf)).status, OkStatus());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, as_bytes(span(payload)));
+  EXPECT_EQ(
+      channel.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      OkStatus());
   ASSERT_FALSE(l2cap_channel_for_test_.written_payloads().empty());
   ASSERT_EQ(l2cap_channel_for_test_.written_payloads().size(), 1u);
   const span<const uint8_t> written_payload =
@@ -335,21 +355,27 @@ TEST_F(RfcommChannelTest, WriteNoCredits) {
        ++i) {
     constexpr uint8_t kPayloadData[] = {0x01};
     const ConstByteSpan payload = as_bytes(span(kPayloadData));
-    auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-    ASSERT_TRUE(mbuf_result.has_value());
-    multibuf::MultiBuf& mbuf = mbuf_result.value();
-    ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-    EXPECT_EQ(channel_.Write(std::move(mbuf)).status, OkStatus());
+    auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+    ASSERT_TRUE(mbuf.has_value());
+    FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+    MultiBufAdapter::Copy(flat_mbuf_instance, 0, payload);
+    EXPECT_EQ(
+        channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+            .status,
+        OkStatus());
   }
 
   // Ensure that we can't send any more packets.
   constexpr uint8_t kPayloadData[] = {0x01};
   const ConstByteSpan payload = as_bytes(span(kPayloadData));
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf)).status, Status::Unavailable());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, payload);
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      Status::Unavailable());
 }
 
 TEST_F(RfcommChannelTest, HandlePduWithCreditsAndVerify) {
@@ -359,21 +385,27 @@ TEST_F(RfcommChannelTest, HandlePduWithCreditsAndVerify) {
        ++i) {
     constexpr uint8_t kPayloadData[] = {0x01};
     const ConstByteSpan payload = as_bytes(span(kPayloadData));
-    auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-    ASSERT_TRUE(mbuf_result.has_value());
-    multibuf::MultiBuf& mbuf = mbuf_result.value();
-    ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-    EXPECT_EQ(channel_.Write(std::move(mbuf)).status, OkStatus());
+    auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+    ASSERT_TRUE(mbuf.has_value());
+    FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+    MultiBufAdapter::Copy(flat_mbuf_instance, 0, payload);
+    EXPECT_EQ(
+        channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+            .status,
+        OkStatus());
   }
 
   // Ensure that we can't send any more packets.
   constexpr uint8_t kPayloadData[] = {0x01};
   const ConstByteSpan payload = as_bytes(span(kPayloadData));
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf)).status, Status::Unavailable());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, payload);
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      Status::Unavailable());
 
   // Receive a PDU with credits.
   const uint8_t credits = 5;
@@ -384,22 +416,27 @@ TEST_F(RfcommChannelTest, HandlePduWithCreditsAndVerify) {
   for (int i = 0; i < credits; ++i) {
     constexpr uint8_t kPayloadData1[] = {0x01};
     const ConstByteSpan payload1 = as_bytes(span(kPayloadData1));
-    auto mbuf1_result = multibuf_allocator_.AllocateContiguous(payload1.size());
-    ASSERT_TRUE(mbuf1_result.has_value());
-    multibuf::MultiBuf& mbuf1 = mbuf1_result.value();
-    ASSERT_EQ(mbuf1.CopyFrom(as_bytes(span(payload1))).status(),
-              pw::OkStatus());
-    EXPECT_EQ(channel_.Write(std::move(mbuf1)).status, OkStatus());
+    auto mbuf1 = MultiBufAdapter::Create(multibuf_allocator_, payload1.size());
+    ASSERT_TRUE(mbuf1.has_value());
+    FlatMultiBufInstance& flat_mbuf_instance1 = mbuf1.value();
+    MultiBufAdapter::Copy(flat_mbuf_instance1, 0, payload1);
+    EXPECT_EQ(
+        channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance1)))
+            .status,
+        OkStatus());
   }
 
   // Ensure that we can't send any more packets since the credits are exhausted.
   constexpr uint8_t kPayloadData1[] = {0x01};
   const ConstByteSpan payload1 = as_bytes(span(kPayloadData1));
-  auto mbuf1_result = multibuf_allocator_.AllocateContiguous(payload1.size());
-  ASSERT_TRUE(mbuf1_result.has_value());
-  multibuf::MultiBuf& mbuf1 = mbuf1_result.value();
-  ASSERT_EQ(mbuf1.CopyFrom(as_bytes(span(payload1))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf1)).status, Status::Unavailable());
+  auto mbuf1 = MultiBufAdapter::Create(multibuf_allocator_, payload1.size());
+  ASSERT_TRUE(mbuf1.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance1 = mbuf1.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance1, 0, payload1);
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance1)))
+          .status,
+      Status::Unavailable());
 }
 
 TEST_F(RfcommChannelTest, AutoSendCredits) {
@@ -443,11 +480,14 @@ TEST_F(RfcommChannelTest, Close) {
   // Write should fail on a closed channel.
   constexpr uint8_t kPayloadData[] = {0x01, 0x02, 0x03};
   const ConstByteSpan payload = as_bytes(span(kPayloadData));
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf)).status, Status::NotFound());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, payload);
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      Status::NotFound());
 }
 
 TEST_F(RfcommChannelTest, WriteSinglePacketAsNonInitiator) {
@@ -461,18 +501,22 @@ TEST_F(RfcommChannelTest, WriteSinglePacketAsNonInitiator) {
       kDefaultRxConfig,
       kDefaultTxConfig,
       kRfcommCrc,
-      [this](multibuf::MultiBuf&& pdu) {
+      [this](FlatMultiBuf&& pdu) {
         last_received_pdu_.resize(pdu.size());
-        std::ignore = pdu.CopyTo(as_writable_bytes(span(last_received_pdu_)));
+        MultiBufAdapter::Copy(
+            as_writable_bytes(span(last_received_pdu_)), pdu, 0);
       },
       [this](RfcommEvent event) { last_event_ = event; });
 
   const pw::Vector<uint8_t, 3> payload = {0, 0, 0};
-  auto mbuf_result = multibuf_allocator_.AllocateContiguous(payload.size());
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf& mbuf = mbuf_result.value();
-  ASSERT_EQ(mbuf.CopyFrom(as_bytes(span(payload))).status(), pw::OkStatus());
-  EXPECT_EQ(channel.Write(std::move(mbuf)).status, OkStatus());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
+  ASSERT_TRUE(mbuf.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance = mbuf.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance, 0, as_bytes(span(payload)));
+  EXPECT_EQ(
+      channel.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance)))
+          .status,
+      OkStatus());
 
   ASSERT_EQ(l2cap_channel_for_test_.written_payloads().size(), 1u);
   const span<const uint8_t> written_payload =
@@ -525,22 +569,28 @@ TEST_F(RfcommChannelTest, WriteResumesAfterL2capChannelBecomesAvailable) {
   l2cap_channel_for_test_.set_next_write_status(Status::Unavailable());
 
   const pw::Vector<uint8_t, 2> payload1 = {0xAA, 0xBB};
-  auto mbuf1_result = multibuf_allocator_.AllocateContiguous(payload1.size());
-  ASSERT_TRUE(mbuf1_result.has_value());
-  multibuf::MultiBuf mbuf1 = std::move(*mbuf1_result);
-  ASSERT_EQ(mbuf1.CopyFrom(as_bytes(span(payload1))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf1)).status, OkStatus());
+  auto mbuf1 = MultiBufAdapter::Create(multibuf_allocator_, payload1.size());
+  ASSERT_TRUE(mbuf1.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance1 = mbuf1.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance1, 0, as_bytes(span(payload1)));
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance1)))
+          .status,
+      OkStatus());
 
   // The packet should not have been sent.
   EXPECT_TRUE(l2cap_channel_for_test_.written_payloads().empty());
 
   // Now, try writing a second packet. The L2CAP channel is now available.
   const pw::Vector<uint8_t, 2> payload2 = {0xCC, 0xDD};
-  auto mbuf2_result = multibuf_allocator_.AllocateContiguous(payload2.size());
-  ASSERT_TRUE(mbuf2_result.has_value());
-  multibuf::MultiBuf mbuf2 = std::move(*mbuf2_result);
-  ASSERT_EQ(mbuf2.CopyFrom(as_bytes(span(payload2))).status(), pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(mbuf2)).status, OkStatus());
+  auto mbuf2 = MultiBufAdapter::Create(multibuf_allocator_, payload2.size());
+  ASSERT_TRUE(mbuf2.has_value());
+  FlatMultiBufInstance& flat_mbuf_instance2 = mbuf2.value();
+  MultiBufAdapter::Copy(flat_mbuf_instance2, 0, as_bytes(span(payload2)));
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(flat_mbuf_instance2)))
+          .status,
+      OkStatus());
 
   // Both packets should have been sent now.
   ASSERT_EQ(l2cap_channel_for_test_.written_payloads().size(), 2u);
@@ -572,12 +622,14 @@ TEST_F(RfcommChannelTest, CreditFrameIsPrioritized) {
   // 1. Exhaust all credits.
   for (int i = 0; i < kDefaultTxConfig.initial_credits; ++i) {
     const pw::Vector<uint8_t, 1> kTestData = {static_cast<uint8_t>(i)};
-    auto mbuf_result = multibuf_allocator_.AllocateContiguous(kTestData.size());
+    auto mbuf_result =
+        MultiBufAdapter::Create(multibuf_allocator_, kTestData.size());
     ASSERT_TRUE(mbuf_result.has_value());
-    multibuf::MultiBuf new_buffer = std::move(mbuf_result.value());
-    ASSERT_EQ(new_buffer.CopyFrom(as_bytes(span(kTestData))).status(),
-              pw::OkStatus());
-    EXPECT_EQ(channel_.Write(std::move(new_buffer)).status, OkStatus());
+    FlatMultiBufInstance new_buffer = std::move(mbuf_result.value());
+    MultiBufAdapter::Copy(*mbuf_result, 0, as_bytes(span(kTestData)));
+    EXPECT_EQ(
+        channel_.Write(std::move(MultiBufAdapter::Unwrap(new_buffer))).status,
+        OkStatus());
   }
   EXPECT_EQ(l2cap_channel_for_test_.written_payloads().size(),
             static_cast<size_t>(kDefaultTxConfig.initial_credits));
@@ -585,12 +637,13 @@ TEST_F(RfcommChannelTest, CreditFrameIsPrioritized) {
   // 2. Queue a data packet. It won't be sent due to lack of credits.
   const pw::Vector<uint8_t, 1> kPendingData = {0x42};
   auto mbuf_result =
-      multibuf_allocator_.AllocateContiguous(kPendingData.size());
+      MultiBufAdapter::Create(multibuf_allocator_, kPendingData.size());
   ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf new_buffer1 = std::move(mbuf_result.value());
-  ASSERT_EQ(new_buffer1.CopyFrom(as_bytes(span(kPendingData))).status(),
-            pw::OkStatus());
-  EXPECT_EQ(channel_.Write(std::move(new_buffer1)).status, OkStatus());
+  FlatMultiBufInstance new_buffer1 = std::move(mbuf_result.value());
+  MultiBufAdapter::Copy(*mbuf_result, 0, as_bytes(span(kPendingData)));
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(new_buffer1))).status,
+      OkStatus());
   // No new packet sent.
   EXPECT_EQ(l2cap_channel_for_test_.written_payloads().size(),
             static_cast<size_t>(kDefaultTxConfig.initial_credits));
@@ -650,9 +703,10 @@ TEST_F(RfcommChannelTest, ReceivePacketWithNoCreditsDoesNotUnderflow) {
       kRxConfig,
       kDefaultTxConfig,
       kRfcommCrc,
-      [this](multibuf::MultiBuf&& pdu) {
+      [this](FlatMultiBuf&& pdu) {
         last_received_pdu_.resize(pdu.size());
-        std::ignore = pdu.CopyTo(as_writable_bytes(span(last_received_pdu_)));
+        MultiBufAdapter::Copy(
+            as_writable_bytes(span(last_received_pdu_)), pdu, 0);
       },
       [this](RfcommEvent event) { last_event_ = event; });
 
@@ -679,15 +733,19 @@ TEST_F(RfcommChannelTest, TxCreditsOverflow) {
   // Write more packets (255[uint8_t max] + 10 [tx queue size]) to trigger
   // the Unavailable status.
   for (int i = 0; i < 255 + 10; ++i) {
-    auto mbuf = multibuf_allocator_.AllocateContiguous(payload.size());
+    auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
     ASSERT_TRUE(mbuf.has_value());
-    EXPECT_EQ(channel_.Write(std::move(*mbuf)).status, OkStatus());
+    EXPECT_EQ(
+        channel_.Write(std::move(MultiBufAdapter::Unwrap(mbuf.value()))).status,
+        OkStatus());
   }
   // The channel should return status unavailable since the queue is full and no
   // TX credits are available.
-  auto mbuf = multibuf_allocator_.AllocateContiguous(payload.size());
+  auto mbuf = MultiBufAdapter::Create(multibuf_allocator_, payload.size());
   ASSERT_TRUE(mbuf.has_value());
-  EXPECT_EQ(channel_.Write(std::move(*mbuf)).status, Status::Unavailable());
+  EXPECT_EQ(
+      channel_.Write(std::move(MultiBufAdapter::Unwrap(mbuf.value()))).status,
+      Status::Unavailable());
 }
 
 }  // namespace pw::bluetooth::proxy::rfcomm::internal

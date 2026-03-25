@@ -23,13 +23,12 @@
 #include "pw_bluetooth/l2cap_frames.emb.h"
 #include "pw_containers/algorithm.h"
 #include "pw_log/log.h"
-#include "pw_span/cast.h"
 
 namespace pw::bluetooth::proxy::gatt {
 
 void Client::Delegate::HandleNotification(ConnectionHandle connection_handle,
                                           AttributeHandle value_handle,
-                                          multibuf::MultiBuf&& value) {
+                                          FlatConstMultiBuf&& value) {
   DoHandleNotification(connection_handle, value_handle, std::move(value));
 }
 
@@ -90,7 +89,7 @@ Status Client::CancelInterceptNotification(AttributeHandle value_handle) {
 void Server::Delegate::HandleWriteWithoutResponse(
     ConnectionHandle connection_handle,
     AttributeHandle value_handle,
-    multibuf::MultiBuf&& value) {
+    FlatConstMultiBuf&& value) {
   DoHandleWriteWithoutResponse(
       connection_handle, value_handle, std::move(value));
 }
@@ -157,7 +156,7 @@ Status Server::RemoveCharacteristic(CharacteristicInfo characteristic) {
 }
 
 StatusWithMultiBuf Server::SendNotification(AttributeHandle value_handle,
-                                            multibuf::MultiBuf&& value) {
+                                            FlatConstMultiBuf&& value) {
   if (gatt_ == nullptr) {
     return {.status = Status::FailedPrecondition(), .buf = std::move(value)};
   }
@@ -167,7 +166,7 @@ StatusWithMultiBuf Server::SendNotification(AttributeHandle value_handle,
 
 Gatt::Gatt(L2capChannelManagerInterface& l2cap,
            Allocator& allocator,
-           multibuf::MultiBufAllocator& multibuf_allocator)
+           MultiBufAllocator& multibuf_allocator)
     : l2cap_(l2cap),
       allocator_(allocator),
       multibuf_allocator_(multibuf_allocator) {}
@@ -587,7 +586,7 @@ void Gatt::ResetConnections() {
 StatusWithMultiBuf Gatt::SendNotification(internal::ServerId server_id,
                                           ConnectionHandle connection_handle,
                                           AttributeHandle value_handle,
-                                          multibuf::MultiBuf&& value) {
+                                          FlatConstMultiBuf&& value) {
   std::lock_guard lock(mutex_);
 
   auto conn_iter = connections_.find(cpp23::to_underlying(connection_handle));
@@ -614,15 +613,14 @@ StatusWithMultiBuf Gatt::SendNotification(internal::ServerId server_id,
 
   const size_t packet_size =
       emboss::AttHandleValueNtf::MinSizeInBytes() + value.size();
-  std::optional<multibuf::MultiBuf> multibuf_result =
-      multibuf_allocator_.AllocateContiguous(packet_size);
+  std::optional<FlatMultiBufInstance> multibuf_result =
+      MultiBufAdapter::Create(multibuf_allocator_, packet_size);
   if (!multibuf_result.has_value()) {
     PW_LOG_WARN("Failed to allocate buffer for TX GATT notification");
     return {Status::ResourceExhausted(), std::move(value)};
   }
-  multibuf::MultiBuf multibuf = std::move(*multibuf_result);
-  span<uint8_t> multibuf_span =
-      span_cast<uint8_t>(multibuf.ContiguousSpan().value());
+  FlatMultiBufInstance multibuf = std::move(multibuf_result.value());
+  span<uint8_t> multibuf_span = MultiBufAdapter::AsSpan(multibuf);
 
   Result<emboss::AttHandleValueNtfWriter> writer =
       MakeEmbossWriter<emboss::AttHandleValueNtfWriter>(value.size(),
@@ -630,14 +628,11 @@ StatusWithMultiBuf Gatt::SendNotification(internal::ServerId server_id,
   PW_CHECK(writer.ok());
   writer->attribute_opcode().Write(emboss::AttOpcode::ATT_HANDLE_VALUE_NTF);
   writer->attribute_handle().Write(cpp23::to_underlying(value_handle));
+  PW_CHECK(TryToCopyToEmbossStruct(writer->attribute_value(),
+                                   MultiBufAdapter::AsSpan(value)));
 
-  span<uint8_t> attribute_bytes(
-      writer->attribute_value().BackingStorage().data(),
-      writer->attribute_value().SizeInBytes());
-  PW_CHECK_OK(value.CopyTo(as_writable_bytes(attribute_bytes)));
-
-  StatusWithMultiBuf write_result =
-      conn_iter->att_channel->Write(std::move(multibuf));
+  StatusWithMultiBuf write_result = conn_iter->att_channel->Write(
+      std::move(MultiBufAdapter::Unwrap(multibuf)));
   if (!write_result.status.ok()) {
     return {write_result.status, std::move(value)};
   }
@@ -708,8 +703,8 @@ bool Gatt::OnAttHandleValueNtfFromController(
     auto client_iter = conn_iter->clients.find(cpp23::to_underlying(client_id));
     PW_CHECK(client_iter != conn_iter->clients.end());
 
-    std::optional<multibuf::MultiBuf> buffer =
-        multibuf_allocator_.AllocateContiguous(attribute_size);
+    std::optional<FlatMultiBufInstance> buffer =
+        MultiBufAdapter::Create(multibuf_allocator_, attribute_size);
     if (!buffer.has_value()) {
       PW_LOG_WARN("Failed to allocate multibuf for attribute value");
       return true;
@@ -718,12 +713,16 @@ bool Gatt::OnAttHandleValueNtfFromController(
     pw::span<const uint8_t> backing_storage(
         view->attribute_value().BackingStorage().data(),
         view->attribute_value().SizeInBytes());
-    auto bytes_copied = buffer->CopyFrom(as_bytes(backing_storage));
-    PW_CHECK(bytes_copied.ok());
-    PW_CHECK_UINT_EQ(bytes_copied.size(), attribute_size);
+    size_t bytes_copied = MultiBufAdapter::Copy(
+        /*dst=*/buffer.value(),
+        /*dst_offset=*/0,
+        /*src=*/as_bytes(backing_storage));
+    PW_CHECK_UINT_EQ(bytes_copied, attribute_size);
 
     client_iter->delegate.HandleNotification(
-        ConnectionHandle{conn_iter->key()}, att_handle, std::move(*buffer));
+        ConnectionHandle{conn_iter->key()},
+        att_handle,
+        std::move(MultiBufAdapter::Unwrap(buffer.value())));
   }
 
   return intercepted;
@@ -762,8 +761,8 @@ bool Gatt::OnAttWriteCmdFromController(ConstByteSpan payload,
       conn_iter->servers.find(cpp23::to_underlying(char_iter->server_id));
   PW_CHECK(server_iter != conn_iter->servers.end());
 
-  std::optional<multibuf::MultiBuf> buffer =
-      multibuf_allocator_.AllocateContiguous(attribute_size);
+  std::optional<FlatMultiBufInstance> buffer =
+      MultiBufAdapter::Create(multibuf_allocator_, attribute_size);
   if (!buffer.has_value()) {
     PW_LOG_WARN("Failed to allocate multibuf for attribute value");
     return true;
@@ -772,12 +771,16 @@ bool Gatt::OnAttWriteCmdFromController(ConstByteSpan payload,
   pw::span<const uint8_t> backing_storage(
       view->attribute_value().BackingStorage().data(),
       view->attribute_value().SizeInBytes());
-  auto bytes_copied = buffer->CopyFrom(as_bytes(backing_storage));
-  PW_CHECK(bytes_copied.ok());
-  PW_CHECK_UINT_EQ(bytes_copied.size(), attribute_size);
+  size_t bytes_copied = MultiBufAdapter::Copy(
+      /*dst=*/buffer.value(),
+      /*dst_offset=*/0,
+      /*src=*/as_bytes(backing_storage));
+  PW_CHECK_UINT_EQ(bytes_copied, attribute_size);
 
   server_iter->delegate.HandleWriteWithoutResponse(
-      ConnectionHandle{conn_iter->key()}, att_handle, std::move(*buffer));
+      ConnectionHandle{conn_iter->key()},
+      att_handle,
+      std::move(MultiBufAdapter::Unwrap(buffer.value())));
 
   // The command was intercepted.
   return true;

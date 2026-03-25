@@ -50,8 +50,11 @@ class AATreeIterator {
     return *this;
   }
 
-  constexpr T& operator*() const { return *(downcast()); }
-  constexpr T* operator->() const { return downcast(); }
+  constexpr const T& operator*() const { return *(downcast()); }
+  constexpr T& operator*() { return *(downcast()); }
+
+  constexpr const T* operator->() const { return downcast(); }
+  constexpr T* operator->() { return downcast(); }
 
   template <typename T2,
             typename = std::enable_if_t<

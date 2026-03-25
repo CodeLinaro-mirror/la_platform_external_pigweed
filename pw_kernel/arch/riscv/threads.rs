@@ -22,13 +22,10 @@ use kernel::scheduler::thread::Stack;
 use kernel::scheduler::{self, SchedulerState, ThreadLocalState};
 use kernel::sync::spinlock::SpinLockGuard;
 use log_if::debug_if;
-#[cfg(feature = "user_space")]
 use pw_status::Result;
 
 use crate::protection::MemoryConfig;
-use crate::regs::MStatusVal;
-#[cfg(feature = "user_space")]
-use crate::regs::PrivilegeLevel;
+use crate::regs::{MStatusVal, PrivilegeLevel};
 use crate::spinlock::BareSpinLock;
 
 const LOG_CONTEXT_SWITCH: bool = false;
@@ -61,31 +58,6 @@ pub struct ArchThreadState {
     local: ThreadLocalState<crate::Arch>,
 }
 
-#[cfg(feature = "user_space")]
-extern "C" fn prepare_userspace_thread(memory_config: *const MemoryConfig) {
-    // Break the scheduler lock.
-    // Safety: This is called on thread start, which is one of the allowed
-    // scenarios for breaking the lock. The scheduler lock was held by the
-    // previous thread/scheduler and we need to release it so this thread
-    // can use it (or anything it calls).
-    unsafe {
-        kernel::scheduler::break_scheduler_lock(crate::Arch);
-    }
-
-    // Enable interrupts per contract in `ThreadState::initialize_user_frame`.
-    <crate::Arch as Arch>::InterruptController::enable_interrupts();
-
-    // If we need to reload the PMP to for exceptions, this also means we
-    // do not perform the PMP load in the context switch function.  We
-    // defer it instead to the trampoline function.  Stash the pointers
-    // we'll need to make the call in the trampoline.
-    if cfg!(feature = "exceptions_reload_pmp") {
-        unsafe {
-            (*memory_config).write();
-        }
-    }
-}
-
 impl ArchThreadState {
     #[inline(never)]
     fn initialize_frame(
@@ -114,13 +86,14 @@ impl ArchThreadState {
             (*frame).s3 = s3;
             (*frame).s5 = initial_sp;
             (*frame).s6 = initial_mstatus.0;
-            #[cfg(feature = "user_space")]
-            {
+            if cfg!(feature = "exceptions_reload_pmp") {
+                // If we need to reload the PMP to for exceptions, this also means we
+                // do not perform the PMP load in the context switch function.  We
+                // defer it instead to the trampoline function.  Stash the pointers
+                // we'll need to make the call in the trampoline.
                 (*frame).s7 = self.memory_config as usize;
-                (*frame).s8 = prepare_userspace_thread as *const () as usize;
-            }
-            #[cfg(not(feature = "user_space"))]
-            {
+                (*frame).s8 = memory_config_write as *const () as usize;
+            } else {
                 (*frame).s7 = 0;
                 (*frame).s8 = 0;
             }
@@ -142,8 +115,7 @@ impl Arch for super::Arch {
     type AtomicBool = crate::disable_interrupts_atomic::AtomicBool;
     #[cfg(feature = "disable_interrupts_atomic")]
     type AtomicUsize = crate::disable_interrupts_atomic::AtomicUsize;
-    #[cfg(feature = "user_space")]
-    type SyscallArgs<'a> = crate::syscall::RiscVSyscallArgs<'a>;
+    type SyscallArgs<'a> = crate::exceptions::RiscVSyscallArgs<'a>;
     type InterruptController = crate::InterruptController;
 
     #[inline(never)]
@@ -241,7 +213,6 @@ impl kernel::scheduler::thread::ThreadState for ArchThreadState {
     };
 
     #[inline(never)]
-    #[allow(unused_variables)]
     unsafe fn initialize_kernel_frame(
         &mut self,
         kernel_stack: Stack,
@@ -249,10 +220,7 @@ impl kernel::scheduler::thread::ThreadState for ArchThreadState {
         initial_function: extern "C" fn(usize, usize, usize),
         args: (usize, usize, usize),
     ) {
-        #[cfg(feature = "user_space")]
-        {
-            self.memory_config = memory_config;
-        }
+        self.memory_config = memory_config;
         self.initialize_frame(
             kernel_stack,
             asm_trampoline,
@@ -335,6 +303,12 @@ extern "C" fn riscv_context_switch(
     )
 }
 
+unsafe extern "C" fn memory_config_write(memory_config: *const MemoryConfig) {
+    unsafe {
+        (*memory_config).write();
+    }
+}
+
 // Since the context switch frame does not contain the function arg registers,
 // pass the initial function and arguments via two of the saved s registers.
 #[unsafe(no_mangle)]
@@ -343,7 +317,7 @@ extern "C" fn asm_user_trampoline() {
     naked_asm!(
         "
                 // If we have a stashed memory config pointer in s7,
-                // then perform the call memory_config_write(memory_config)
+                // then perorm the call memory_config_write(memory_config)
                 // via the stashed function address in s8.
                 beqz    s7, 1f
                 mv      a0, s7
@@ -401,24 +375,17 @@ extern "C" fn trampoline(
 ) {
     debug_if!(
         LOG_THREAD_CREATE,
-        "riscv trampoline: initial function {:#x} arg0 {:#x} arg1 {:#x} arg2 {:#x}",
+        "riscv trampoline: initial function {:#x} arg0 {:#x} arg1 {:#x} arg2 {:#}",
         initial_function as usize,
         arg0 as usize,
         arg1 as usize,
         arg2 as usize,
     );
 
-    // Break the scheduler lock.
-    // Safety: This is called on thread start, which is one of the allowed
-    // scenarios for breaking the lock. The scheduler lock was held by the
-    // previous thread/scheduler and we need to release it so this thread
-    // can use it (or anything it calls).
-    unsafe {
-        kernel::scheduler::break_scheduler_lock(crate::Arch);
-    }
-
-    // Enable interrupts per contract in `ThreadState::initialize_kernel_frame`.
+    // Enable interrupts
     <crate::Arch as Arch>::InterruptController::enable_interrupts();
+
+    // TODO: figure out how to drop the scheduler lock here?
 
     // Call the actual initial function of the thread.
     initial_function(arg0, arg1, arg2);

@@ -649,9 +649,7 @@
         "googletest",
         "asan_fuzztest",
         "rpc_callback",
-        "grpc",
-        "build_rp2040_tests",
-        "build_rp2350_tests"
+        "grpc"
       ]
     },
     {

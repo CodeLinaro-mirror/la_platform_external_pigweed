@@ -11,20 +11,9 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""Rules to expose active tools from C/C++ toolchains."""
 
-"""Rules for creating runnable accessors to toolchain tools.
-
-This module provides the `pw_cc_tool_for_action` rule, which locates a tool by
-its *action name* (e.g. `objdump-disassemble`). This is the preferred way to
-access toolchain binaries as it ensures the tool used matches the one Bazel uses
-during the build.
-"""
-
-load(
-    "@bazel_tools//tools/cpp:toolchain_utils.bzl",
-    "find_cpp_toolchain",
-    "use_cpp_toolchain",
-)
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 
 # This is easy to misuse. Don't expose publicly for now.
@@ -32,72 +21,38 @@ visibility("private")
 
 def _pw_cc_tool_for_action_impl(ctx):
     cc_toolchain = find_cpp_toolchain(ctx)
+
     feature_configuration = cc_common.configure_features(
-        cc_toolchain = cc_toolchain,
         ctx = ctx,
+        cc_toolchain = cc_toolchain,
         requested_features = ctx.features,
         unsupported_features = ctx.disabled_features,
     )
 
-    action_name = ctx.attr.action_name
-
-    # Check if the action is actually supported by the current toolchain.
-    if not cc_common.action_is_enabled(
-        action_name = action_name,
-        feature_configuration = feature_configuration,
-    ):
-        # If the action is not supported, generate a script that fails with a
-        # helpful error message when run. This allows the target to exist (so
-        # builds and queries don't break) but fail if someone tries to use it.
-        fail_script = ctx.actions.declare_file(ctx.label.name)
-        ctx.actions.write(
-            content = (
-                'echo "Error: The active toolchain does not support the ' +
-                "'{action}' action.\"\n" +
-                'echo "This usually means the toolchain is missing this tool ' +
-                '(e.g. llvm-cov) or does not have it mapped to this action."\n' +
-                "exit 1\n"
-            ).format(action = action_name),
-            is_executable = True,
-            output = fail_script,
-        )
-        return [DefaultInfo(executable = fail_script)]
-
     tool_path = cc_common.get_tool_for_action(
-        action_name = action_name,
         feature_configuration = feature_configuration,
+        action_name = ctx.attr.action_name,
     )
-
-    all_files = cc_toolchain.all_files.to_list()
     tool_file = None
-
-    # Find the File object matching the path returned by get_tool_for_action.
-    for file in all_files:
+    for file in cc_toolchain.all_files.to_list():
         if file.path == tool_path:
             tool_file = file
-            break
-
     if not tool_file:
-        fail("Could not find tool for action: %s (path: %s)" % (
-            action_name,
-            tool_path,
-        ))
-
-    script = ctx.actions.declare_file(ctx.label.name)
+        fail("Failed to find", tool_path, "in cc_toolchain.all_files")
+    executable_tool_file = ctx.actions.declare_file(tool_file.basename)
     ctx.actions.symlink(
-        is_executable = True,
-        output = script,
+        output = executable_tool_file,
         target_file = tool_file,
+        is_executable = True,
     )
-
     return DefaultInfo(
-        executable = script,
+        executable = executable_tool_file,
         files = depset(
-            direct = [script, tool_file],
+            direct = [executable_tool_file],
             transitive = [cc_toolchain.all_files],
         ),
         runfiles = ctx.runfiles(
-            files = [script, tool_file],
+            files = [executable_tool_file],
             transitive_files = cc_toolchain.all_files,
         ),
     )
@@ -107,8 +62,7 @@ pw_cc_tool_for_action = rule(
     attrs = {
         "action_name": attr.string(mandatory = True),
     },
-    doc = """Exposes the C/C++ toolchain tool for the specified action as a
-runnable binary.
+    doc = """Exposes the C/C++ toolchain tool for the specified action as a runnable binary.
 
 This is intended exclusively to create `bazel run`-able targets for interactive
 or debugging purposes.
@@ -125,6 +79,6 @@ These interactions are less catastrophic when only a single execution platform
 is registered, but still confusing.
 """,
     executable = True,
-    fragments = ["cpp"],
     toolchains = use_cpp_toolchain(),
+    fragments = ["cpp"],
 )

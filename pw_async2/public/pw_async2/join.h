@@ -23,10 +23,9 @@ namespace pw::async2 {
 template <typename... Futures>
 class JoinFuture {
  public:
-  using value_type = std::tuple<FutureValue<Futures>...>;
+  using value_type = std::tuple<FutureValue<Futures>&&...>;
 
-  constexpr JoinFuture()
-      : outputs_(Poll<typename Futures::value_type>(Pending())...) {}
+  constexpr JoinFuture() : outputs_{} {}
 
   [[nodiscard]] bool is_pendable() const { return state_.is_pendable(); }
 
@@ -49,7 +48,7 @@ class JoinFuture {
 
   static constexpr auto kTupleIndexSequence =
       std::make_index_sequence<sizeof...(Futures)>();
-  using TupleOfOutputValues = std::tuple<FutureValue<Futures>...>;
+  using TupleOfOutputRvalues = std::tuple<FutureValue<Futures>&&...>;
 
   template <typename... Fs>
   friend constexpr auto Join(Fs&&...);
@@ -80,9 +79,9 @@ class JoinFuture {
 
   /// Takes the results of all futures at indices ``Is...`.
   template <size_t... Is>
-  Poll<TupleOfOutputValues> TakeOutputs(std::index_sequence<Is...>) {
-    return Poll<TupleOfOutputValues>(
-        std::tuple<FutureValue<Futures>...>(TakeOutput<Is>()...));
+  Poll<TupleOfOutputRvalues> TakeOutputs(std::index_sequence<Is...>) {
+    return Poll<TupleOfOutputRvalues>(
+        std::forward_as_tuple<FutureValue<Futures>...>(TakeOutput<Is>()...));
   }
 
   /// Takes the result of the future at index ``kTupleIndex``.

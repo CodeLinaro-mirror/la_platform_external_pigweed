@@ -26,8 +26,6 @@ class BasicDispatcher final : public RunnableDispatcher {
  public:
   BasicDispatcher() = default;
 
-  ~BasicDispatcher() override { Terminate(); }
-
  private:
   void DoWake() override { notify_.release(); }
 

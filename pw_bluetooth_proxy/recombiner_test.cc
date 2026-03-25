@@ -190,7 +190,8 @@ TEST_F(RecombinerTest, WriteThenTake) {
   // We are no longer recombining.
   EXPECT_FALSE(recombiner.IsActive());
 
-  multibuf::MultiBuf mbuf = Recombiner::TakeBuf(locked_channel, kDirection);
+  MultiBufInstance mbuf_inst = Recombiner::TakeBuf(locked_channel, kDirection);
+  MultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   ASSERT_FALSE(mbuf.empty());
 
   ByteSpan bytes = *(mbuf.Chunks().begin());
@@ -339,7 +340,8 @@ TEST_F(RecombinerTest, CanClaimExtraHeader) {
   // We are no longer recombining.
   EXPECT_FALSE(recombiner.IsActive());
 
-  multibuf::MultiBuf mbuf = Recombiner::TakeBuf(locked_channel, kDirection);
+  MultiBufInstance mbuf_inst = Recombiner::TakeBuf(locked_channel, kDirection);
+  MultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   ASSERT_FALSE(mbuf.empty());
 
   ByteSpan bytes = *(mbuf.Chunks().begin());
@@ -352,7 +354,7 @@ TEST_F(RecombinerTest, CanClaimExtraHeader) {
       span.begin(), span.end(), kExpectedData.begin(), kExpectedData.end()));
 
   // Verify that the extra header is there by claiming it.
-  PW_CHECK(mbuf.ClaimPrefix(kExtraHeaderSize));
+  MultiBufAdapter::Claim(mbuf, kExtraHeaderSize);
   EXPECT_EQ(mbuf.size(), kExpectedData.size() + kExtraHeaderSize);
 }
 

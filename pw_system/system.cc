@@ -21,6 +21,7 @@
 #include "pw_allocator/best_fit.h"
 #include "pw_allocator/synchronized_allocator.h"
 #include "pw_assert/check.h"
+#include "pw_async2/allocate_task.h"
 #include "pw_async2/basic_dispatcher.h"
 #include "pw_async2/func_task.h"
 #include "pw_log/log.h"
@@ -69,8 +70,13 @@ internal::PacketIO& InitializePacketIoGlobal(
 // be moved to `pw::system::AsyncCore`.
 template <typename Func>
 [[nodiscard]] bool PostTaskFunction(Func&& func) {
-  return System().dispatcher().Post(System().allocator(),
-                                    std::forward<Func>(func)) != nullptr;
+  async2::Task* task = async2::AllocateTask<async2::FuncTask<Func>>(
+      System().allocator(), std::forward<Func>(func));
+  if (task == nullptr) {
+    return false;
+  }
+  System().dispatcher().Post(*task);
+  return true;
 }
 
 template <typename Func>

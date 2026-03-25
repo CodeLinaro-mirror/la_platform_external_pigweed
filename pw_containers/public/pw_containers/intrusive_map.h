@@ -18,9 +18,6 @@
 
 namespace pw {
 
-template <typename Key, typename Value>
-class DynamicMap;
-
 /// @module{pw_containers}
 
 /// @defgroup pw_containers_maps Maps
@@ -95,6 +92,16 @@ class IntrusiveMap {
   using const_pointer = const value_type*;
 
  public:
+  class iterator : public containers::internal::AATreeIterator<T> {
+   public:
+    constexpr iterator() = default;
+
+   private:
+    friend IntrusiveMap;
+    constexpr explicit iterator(GenericIterator iter)
+        : containers::internal::AATreeIterator<T>(iter) {}
+  };
+
   class const_iterator
       : public containers::internal::AATreeIterator<std::add_const_t<T>> {
    public:
@@ -104,22 +111,6 @@ class IntrusiveMap {
     friend IntrusiveMap;
     constexpr explicit const_iterator(GenericIterator iter)
         : containers::internal::AATreeIterator<std::add_const_t<T>>(iter) {}
-  };
-
-  class iterator : public containers::internal::AATreeIterator<T> {
-   public:
-    constexpr iterator() = default;
-
-   private:
-    friend IntrusiveMap;
-    template <typename, typename>
-    friend class DynamicMap;
-
-    constexpr explicit iterator(GenericIterator iter)
-        : containers::internal::AATreeIterator<T>(iter) {}
-
-    constexpr explicit iterator(const_iterator other)
-        : containers::internal::AATreeIterator<T>(other) {}
   };
 
   using reverse_iterator = std::reverse_iterator<iterator>;

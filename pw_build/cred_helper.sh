@@ -14,20 +14,13 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-if [[ "$1" != "get" ]]; then
-    echo "Must call via 'cred_helper get'."
+if [[ "${$1}" != "get" ]]; then
+    echo "Must call via 'cred_helper get'".
     exit 1
 fi
 
-if ! ACCESS_TOKEN=$(gcloud auth print-access-token); then
-    echo "Error: Failed to retrieve access token for user: $(whoami)" >&2
-    exit 1
-fi
-
-cat <<EOF
-{
-  "headers": {
-    "Authorization": ["Bearer ${ACCESS_TOKEN}"]
-  }
-}
-EOF
+echo '{'
+echo '  "headers": {'
+echo '    "Authorization": ["Bearer '$(gcloud auth print-access-token)'"]'
+echo '  }'
+echo '}'

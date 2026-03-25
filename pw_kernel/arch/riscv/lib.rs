@@ -24,8 +24,6 @@ mod plic;
 mod protection;
 pub mod regs;
 mod spinlock;
-#[cfg(feature = "user_space")]
-mod syscall;
 mod threads;
 mod timer;
 #[cfg(feature = "veer_pic")]

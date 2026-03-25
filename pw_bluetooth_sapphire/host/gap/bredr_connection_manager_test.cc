@@ -5069,9 +5069,8 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
 
   auto connection_matcher =
       NodeMatches(AllOf(NameMatches("connection_0x1"),
-                        PropertyList(UnorderedElementsAre(
-                            StringIs("peer_id", peer->identifier().ToString()),
-                            IntIs("@time", 0)))));
+                        PropertyList(ElementsAre(StringIs(
+                            "peer_id", peer->identifier().ToString())))));
 
   auto connections_matcher =
       AllOf(NodeMatches(NameMatches("connections")),
@@ -5139,8 +5138,7 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
                 AllOf(NameMatches("0"),
                       PropertyList(UnorderedElementsAre(
                           StringIs("peer_id", peer->identifier().ToString()),
-                          StringIs("reason", "api request"),
-                          IntIs("connected_@time", 0),
+                          UintIs("duration_s", 1u),
                           IntIs("@time", 1'000'000'000))))))));
 
   auto conn_mgr_after_disconnect_matcher = AllOf(

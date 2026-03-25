@@ -20,7 +20,6 @@
 #include "pw_assert/check.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
 #include "pw_log/log.h"
-#include "pw_span/cast.h"
 
 namespace pw::bluetooth::proxy::internal {
 
@@ -267,31 +266,19 @@ L2capLogicalLink::HandleAclData(Direction direction,
 
     pw::Status recomb_status =
         recombiner.RecombineFragment(channel, acl_payload);
-
     if (!recomb_status.ok()) {
-      if (recomb_status == Status::ResourceExhausted()) {
-        PW_LOG_ERROR(
-            "Memory exhausted when attempting to recombine packet %s for "
-            "channel "
-            "%#x on connection %#x. Dropping entire PDU.",
-            DirectionToString(direction),
-            local_cid,
-            handle);
-      } else {
-        // Given that RecombinationActive is checked above, the only other way
-        // this should fail is if the fragment is larger than expected, which
-        // can only happen on a continuing fragment, because the first fragment
-        // starts recombination above.
-        PW_DCHECK(!is_first);
+      // Given that RecombinationActive is checked above, the only way this
+      // should fail is if the fragment is larger than expected, which can
+      // only happen on a continuing fragment, because the first fragment
+      // starts recombination above.
+      PW_DCHECK(!is_first);
 
-        PW_LOG_ERROR(
-            "Received continuation packet %s for channel %#x on connection "
-            "%#x over specified PDU length. Dropping entire PDU.",
-            DirectionToString(direction),
-            local_cid,
-            handle);
-      }
-
+      PW_LOG_ERROR(
+          "Received continuation packet %s for channel %#x on connection "
+          "%#x over specified PDU length. Dropping entire PDU.",
+          DirectionToString(direction),
+          local_cid,
+          handle);
       recombiner.EndRecombination(channel);
       // We own the channel; drop.
       return {.handled = true, .recombined_buffer = std::nullopt};
@@ -325,7 +312,7 @@ L2capLogicalLink::HandleAclData(Direction direction,
 
   // If recombining, will be set with the recombined PDU. And must be held
   // as long as `send_l2cap_pdu` is accessed.
-  std::optional<multibuf::MultiBuf> recombined_mbuf;
+  std::optional<MultiBufInstance> recombined_mbuf;
 
   // PDU we will actually send (will be set from first packet or from
   // recombination).
@@ -374,9 +361,9 @@ L2capLogicalLink::HandleAclData(Direction direction,
     }
 
     // Store the recombined multibuf.
-    recombined_mbuf = Recombiner::TakeBuf(channel, direction);
-    send_l2cap_pdu =
-        span_cast<uint8_t>(recombined_mbuf->ContiguousSpan().value());
+    MultiBufInstance mbuf = Recombiner::TakeBuf(channel, direction);
+    send_l2cap_pdu = MultiBufAdapter::AsSpan(mbuf);
+    recombined_mbuf = std::move(mbuf);
 
   }  // is_first else
 
@@ -405,9 +392,9 @@ L2capLogicalLink::HandleAclData(Direction direction,
     // populate them, and pass that H4 packet on to the host.
 
     // Take back the extra header we reserved when starting the recombine.
-    PW_CHECK(recombined_mbuf->ClaimPrefix(kH4AclHeaderSize));
-    pw::span<uint8_t> h4_span =
-        span_cast<uint8_t>(recombined_mbuf->ContiguousSpan().value());
+    MultiBuf& mbuf = MultiBufAdapter::Unwrap(recombined_mbuf.value());
+    MultiBufAdapter::Claim(mbuf, kH4AclHeaderSize);
+    pw::span<uint8_t> h4_span = MultiBufAdapter::AsSpan(mbuf);
 
     std::optional<uint16_t> max_acl_packet_length =
         channel_manager_.MaxDataPacketLengthForTransport(transport_);

@@ -158,7 +158,6 @@ cc_library(
     implementation_deps = ["//pw_assert:check"],
     includes = ["public"],
     deps = [
-        ":emboss_hci",
         ":emboss_snoop",
         ":emboss_util",
         "//pw_bluetooth_proxy",
@@ -169,10 +168,8 @@ cc_library(
         "//pw_result",
         "//pw_span",
         "//pw_stream",
-        "//pw_string",
         "//pw_sync:mutex",
         "//pw_sync:virtual_basic_lockable",
-        "//pw_trace",
     ],
 )
 

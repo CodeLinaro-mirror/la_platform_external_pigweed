@@ -15,7 +15,6 @@
 #pragma once
 
 #include <optional>
-#include <variant>
 
 #include "pw_allocator/allocator.h"
 #include "pw_async2/channel.h"

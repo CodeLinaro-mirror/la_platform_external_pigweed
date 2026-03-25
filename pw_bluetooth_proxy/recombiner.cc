@@ -87,8 +87,8 @@ pw::Status Recombiner::RecombineFragment(
 }
 
 // static
-multibuf::MultiBuf Recombiner::TakeBuf(
-    std::optional<LockedL2capChannel>& channel, Direction direction) {
+MultiBufInstance Recombiner::TakeBuf(std::optional<LockedL2capChannel>& channel,
+                                     Direction direction) {
   PW_CHECK(channel.has_value());
   PW_CHECK(channel->channel().HasRecombinationBuf(direction));
   return channel->channel().TakeRecombinationBuf(direction);

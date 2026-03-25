@@ -87,12 +87,6 @@ class FakeChannel : public Channel {
     flush_timeout_succeeds_ = succeed;
   }
 
-  using FlushTimeoutCallback = fit::function<void(
-      pw::chrono::SystemClock::duration, hci::ResultCallback<>)>;
-  void set_flush_timeout_callback(FlushTimeoutCallback cb) {
-    flush_timeout_cb_ = std::move(cb);
-  }
-
   // StartA2dpOffload() and StopA2dpOffload() fail with given |error_code|.
   void set_a2dp_offload_fails(HostError error_code) {
     a2dp_offload_error_ = error_code;
@@ -141,7 +135,6 @@ class FakeChannel : public Channel {
 
   bool acl_priority_fails_;
   bool flush_timeout_succeeds_ = true;
-  FlushTimeoutCallback flush_timeout_cb_;
 
   A2dpOffloadStatus audio_offloading_status_ = A2dpOffloadStatus::kStopped;
 

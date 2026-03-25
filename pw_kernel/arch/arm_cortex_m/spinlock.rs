@@ -92,7 +92,7 @@ impl BareSpinLock {
     // Must be called with interrupts disabled.
     #[inline]
     unsafe fn unlock(&self) {
-        unsafe { self.is_locked.get().write_volatile(false) };
+        unsafe { *self.is_locked.get() = false };
     }
 }
 
@@ -112,12 +112,12 @@ impl kernel::sync::spinlock::BareSpinLock for BareSpinLock {
         let guard = InterruptGuard::new();
         // Safety: exclusive access to `is_locked` guaranteed because interrupts
         // are off.
-        if unsafe { self.is_locked.get().read_volatile() } {
+        if unsafe { *self.is_locked.get() } {
             return None;
         }
 
         unsafe {
-            self.is_locked.get().write_volatile(true);
+            *self.is_locked.get() = true;
         }
 
         Some(CortexMSpinLockGuard {
@@ -134,28 +134,18 @@ impl kernel::sync::spinlock::BareSpinLock for BareSpinLock {
 
         // For the uniprocessor version of the spinlock, there is no need to spin.
 
-        if unsafe { self.is_locked.get().read_volatile() } {
-            pw_assert::panic!("recursively locked spinlock");
-        }
+        // TODO - konkers: add debug panic on recursively locked UP spinlock
+        // if unsafe { *self.is_locked.get() } {
+        //     panic!("recursively locked spinlock");
+        // }
 
         unsafe {
-            self.is_locked.get().write_volatile(true);
+            *self.is_locked.get() = true;
         }
 
         CortexMSpinLockGuard {
             guard: ManuallyDrop::new(guard),
             lock: self,
         }
-    }
-
-    /// Unconditionally break the lock.
-    ///
-    /// Do not call directly.
-    ///
-    /// # Safety
-    /// See [`kernel::sync::spinlock::SpinLock::break_lock()`] for use and
-    /// safety information.
-    unsafe fn break_lock(&self) {
-        unsafe { self.is_locked.get().write_volatile(false) };
     }
 }

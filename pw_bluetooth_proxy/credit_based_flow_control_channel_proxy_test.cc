@@ -102,7 +102,7 @@ class CreditBasedFlowControlChannelProxyTest : public ProxyHostTest {
 
   Result<UniquePtr<ChannelProxy>> CreateChannel() {
     MultiBufReceiveFunction from_controller_fn =
-        [this](multibuf::MultiBuf&& payload) {
+        [this](FlatConstMultiBuf&& payload) {
           ++payloads_from_controller_count_;
           EXPECT_TRUE(std::equal(payload.begin(),
                                  payload.end(),
@@ -198,7 +198,8 @@ TEST_F(CreditBasedFlowControlChannelProxyTest, WriteSuccess) {
   UniquePtr<ChannelProxy> channel = std::move(channel_result.value());
 
   std::array<uint8_t, 3> payload = kExpectedPayload;
-  multibuf::MultiBuf mbuf = MultiBufFromSpan(span(payload));
+  FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(span(payload));
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(channel->IsWriteAvailable());
   PW_TEST_EXPECT_OK(channel->Write(std::move(mbuf)).status);
   RunDispatcher();
@@ -220,7 +221,8 @@ TEST_F(CreditBasedFlowControlChannelProxyTest,
   Status write_status = OkStatus();
   while (write_status.ok()) {
     std::array<uint8_t, 3> payload = kExpectedPayload;
-    multibuf::MultiBuf mbuf = MultiBufFromSpan(span(payload));
+    FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(span(payload));
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     write_status = channel->Write(std::move(mbuf)).status;
     RunDispatcher();
   }
@@ -264,7 +266,7 @@ TEST_F(CreditBasedFlowControlChannelProxyTest, InvalidConnectionHandle) {
           ConnectionHandle{1337},
           rx_config,
           tx_config,
-          [](multibuf::MultiBuf&&) {},
+          [](FlatConstMultiBuf&&) {},
           [](L2capChannelEvent) {});
   EXPECT_EQ(channel_result.status(), Status::InvalidArgument());
 }
@@ -292,7 +294,8 @@ TEST_F(CreditBasedFlowControlChannelProxyTest,
 
   std::array<uint8_t, kMaxAclPacketLength> payload = {};
   payload.fill(0xFF);
-  multibuf::MultiBuf mbuf = MultiBufFromSpan(span(payload));
+  FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(span(payload));
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(channel->IsWriteAvailable());
   EXPECT_EQ(channel->Write(std::move(mbuf)).status, Status::InvalidArgument());
   RunDispatcher();

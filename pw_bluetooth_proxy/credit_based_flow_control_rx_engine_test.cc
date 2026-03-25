@@ -17,7 +17,6 @@
 
 #include "pw_allocator/testing.h"
 #include "pw_bluetooth_proxy_private/test_utils.h"
-#include "pw_span/cast.h"
 #include "pw_sync/mutex.h"
 #include "pw_unit_test/framework.h"
 
@@ -42,8 +41,9 @@ class CreditBasedFlowControlRxEngineTest : public ::testing::Test {
       return OkStatus();
     };
 
-    engine_.emplace(
-        config, multibuf_allocator_, std::move(replenish_rx_credits_fn));
+    engine_.emplace(config,
+                    packet_allocator_context_.GetAllocator(),
+                    std::move(replenish_rx_credits_fn));
   }
 
   void TearDown() override { engine_.reset(); }
@@ -52,19 +52,13 @@ class CreditBasedFlowControlRxEngineTest : public ::testing::Test {
 
   uint16_t replenished_credits() const { return replenished_credits_; }
 
-  multibuf::MultiBufAllocator& multibuf_allocator() {
-    return multibuf_allocator_;
+  MultiBufAllocator& multibuf_allocator() {
+    return packet_allocator_context_.GetAllocator();
   }
 
  private:
   uint16_t replenished_credits_ = 0;
-
-  // Use libc allocators so msan can detect use after frees.
-  std::array<std::byte, kAllocatorSize> packet_buffer_{};
-  pw::multibuf::SimpleAllocator multibuf_allocator_{
-      /*data_area=*/packet_buffer_,
-      /*metadata_alloc=*/allocator::GetLibCAllocator()};
-
+  MultiBufAllocatorContext<kAllocatorSize> packet_allocator_context_;
   std::optional<CreditBasedFlowControlRxEngine> engine_;
 };
 
@@ -100,11 +94,11 @@ TEST_F(CreditBasedFlowControlRxEngineTest,
 
   RxEngine::HandlePduFromControllerReturnValue result_1 =
       engine().HandlePduFromController(pdu_1);
-  ASSERT_TRUE(std::holds_alternative<multibuf::MultiBuf>(result_1));
+  ASSERT_TRUE(std::holds_alternative<FlatMultiBufInstance>(result_1));
   EXPECT_EQ(replenished_credits(), 2u);
 
-  auto contiguous = std::get<multibuf::MultiBuf>(result_1).ContiguousSpan();
-  pw::span<uint8_t> sdu_0 = span_cast<uint8_t>(*contiguous);
+  pw::span<uint8_t> sdu_0 =
+      MultiBufAdapter::AsSpan(std::get<FlatMultiBufInstance>(result_1));
   EXPECT_TRUE(std::equal(
       sdu_0.begin(), sdu_0.end(), kExpectedSdu0.begin(), kExpectedSdu0.end()));
 
@@ -123,9 +117,9 @@ TEST_F(CreditBasedFlowControlRxEngineTest,
 
   RxEngine::HandlePduFromControllerReturnValue result_2 =
       engine().HandlePduFromController(pdu_2);
-  ASSERT_TRUE(std::holds_alternative<multibuf::MultiBuf>(result_2));
-  contiguous = std::get<multibuf::MultiBuf>(result_2).ContiguousSpan();
-  pw::span<uint8_t> sdu_1 = span_cast<uint8_t>(*contiguous);
+  ASSERT_TRUE(std::holds_alternative<FlatMultiBufInstance>(result_2));
+  pw::span<uint8_t> sdu_1 =
+      MultiBufAdapter::AsSpan(std::get<FlatMultiBufInstance>(result_2));
   EXPECT_TRUE(std::equal(
       sdu_1.begin(), sdu_1.end(), kExpectedSdu1.begin(), kExpectedSdu1.end()));
 
@@ -216,8 +210,8 @@ TEST_F(CreditBasedFlowControlRxEngineTest, BufferTooSmallForKFrame) {
 }
 
 TEST_F(CreditBasedFlowControlRxEngineTest, OutOfMemory) {
-  std::optional<multibuf::MultiBuf> large_buffer =
-      multibuf_allocator().AllocateContiguous(kAllocatorSize);
+  std::optional<FlatMultiBufInstance> large_buffer =
+      MultiBufAdapter::Create(multibuf_allocator(), kAllocatorSize);
   ASSERT_TRUE(large_buffer);
   std::array<uint8_t, 8> pdu = {// L2cap K-Frame:
                                 0x04,
@@ -253,7 +247,7 @@ TEST_F(CreditBasedFlowControlRxEngineTest, AddCredits) {
 
   RxEngine::HandlePduFromControllerReturnValue result_0 =
       engine().HandlePduFromController(pdu_0);
-  ASSERT_TRUE(std::holds_alternative<multibuf::MultiBuf>(result_0));
+  ASSERT_TRUE(std::holds_alternative<FlatMultiBufInstance>(result_0));
   EXPECT_EQ(replenished_credits(), 0u);
 
   std::array<uint8_t, 9> pdu_1 = {// L2cap K-Frame:
@@ -269,7 +263,7 @@ TEST_F(CreditBasedFlowControlRxEngineTest, AddCredits) {
                                   0x09};
   RxEngine::HandlePduFromControllerReturnValue result_1 =
       engine().HandlePduFromController(pdu_1);
-  ASSERT_TRUE(std::holds_alternative<multibuf::MultiBuf>(result_1));
+  ASSERT_TRUE(std::holds_alternative<FlatMultiBufInstance>(result_1));
   // The threshold should not be exceeded
   EXPECT_EQ(replenished_credits(), 0u);
 
@@ -286,7 +280,7 @@ TEST_F(CreditBasedFlowControlRxEngineTest, AddCredits) {
                                   0x08};
   RxEngine::HandlePduFromControllerReturnValue result_2 =
       engine().HandlePduFromController(pdu_2);
-  ASSERT_TRUE(std::holds_alternative<multibuf::MultiBuf>(result_2));
+  ASSERT_TRUE(std::holds_alternative<FlatMultiBufInstance>(result_2));
   // The threshold should be exceeded
   EXPECT_EQ(replenished_credits(), 3u);
 }

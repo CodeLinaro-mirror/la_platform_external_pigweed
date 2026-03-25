@@ -55,7 +55,7 @@ class RfcommManager final : public RfcommChannelManagerInterface {
 
   // RfcommChannelManagerInterface overrides:
   Result<RfcommChannel> DoAcquireRfcommChannel(
-      multibuf::MultiBufAllocator& multibuf_allocator,
+      MultiBufAllocator& multibuf_allocator,
       ConnectionHandle connection_handle,
       uint8_t channel_number,
       RfcommDirection direction,
@@ -68,7 +68,7 @@ class RfcommManager final : public RfcommChannelManagerInterface {
   StatusWithMultiBuf DoWrite(ConnectionHandle connection_handle,
                              uint8_t channel_number,
                              RfcommDirection direction,
-                             multibuf::MultiBuf&& payload) override;
+                             FlatConstMultiBuf&& payload) override;
 
   Status DoReleaseRfcommChannel(ConnectionHandle connection_handle,
                                 uint8_t channel_number,
@@ -95,8 +95,8 @@ class RfcommManager final : public RfcommChannelManagerInterface {
 
   // Handles an RFCOMM PDU received from the controller. If the PDU is not
   // handled, it is returned to the caller to be forwarded to the host.
-  std::optional<multibuf::MultiBuf> HandlePduFromController(
-      multibuf::MultiBuf&& pdu,
+  std::optional<FlatConstMultiBufInstance> HandlePduFromController(
+      FlatMultiBuf&& pdu,
       ConnectionHandle connection_handle,
       uint16_t local_cid,
       uint16_t remote_cid);

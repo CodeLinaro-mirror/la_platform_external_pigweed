@@ -15,13 +15,12 @@
 #include "pw_bluetooth_proxy/rfcomm/rfcomm_manager.h"
 
 #include "pw_allocator/allocator.h"
-#include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/rfcomm/rfcomm_common.h"
 #include "pw_containers/vector.h"
 #include "pw_log/log.h"
-#include "pw_multibuf/multibuf.h"
 
 namespace pw::bluetooth::proxy::rfcomm {
 
@@ -44,7 +43,7 @@ RfcommManager::~RfcommManager() {
 }
 
 Result<RfcommChannel> RfcommManager::DoAcquireRfcommChannel(
-    multibuf::MultiBufAllocator& rx_multibuf_allocator,
+    MultiBufAllocator& rx_multibuf_allocator,
     ConnectionHandle connection_handle,
     uint8_t channel_number,
     RfcommDirection direction,
@@ -59,10 +58,11 @@ Result<RfcommChannel> RfcommManager::DoAcquireRfcommChannel(
   // channel proxy.
   if (it == connections_.end()) {
     OptionalBufferReceiveFunction from_controller_fn =
-        [this](multibuf::MultiBuf&& payload,
-               ConnectionHandle handle,
-               uint16_t local_cid,
-               uint16_t remote_cid) -> std::optional<multibuf::MultiBuf> {
+        [this](
+            FlatMultiBuf&& payload,
+            ConnectionHandle handle,
+            uint16_t local_cid,
+            uint16_t remote_cid) -> std::optional<FlatConstMultiBufInstance> {
       return HandlePduFromController(
           std::move(payload), handle, local_cid, remote_cid);
     };
@@ -138,7 +138,7 @@ Result<RfcommChannel> RfcommManager::DoAcquireRfcommChannel(
 StatusWithMultiBuf RfcommManager::DoWrite(ConnectionHandle connection_handle,
                                           uint8_t channel_number,
                                           RfcommDirection direction,
-                                          multibuf::MultiBuf&& payload) {
+                                          FlatConstMultiBuf&& payload) {
   std::lock_guard lock(connections_mutex_);
   auto it = connections_.find(connection_handle);
   if (it == connections_.end()) {
@@ -282,8 +282,8 @@ Result<emboss::RfcommFrameView> RfcommManager::ParseRfcommFrame(
   return frame_view;
 }
 
-std::optional<multibuf::MultiBuf> RfcommManager::HandlePduFromController(
-    multibuf::MultiBuf&& pdu,
+std::optional<FlatConstMultiBufInstance> RfcommManager::HandlePduFromController(
+    FlatMultiBuf&& pdu,
     ConnectionHandle connection_handle,
     uint16_t local_cid,
     uint16_t remote_cid) {
@@ -303,12 +303,7 @@ std::optional<multibuf::MultiBuf> RfcommManager::HandlePduFromController(
 
     auto& conn_state = *it;
 
-    auto pdu_span = pdu.ContiguousSpan();
-    PW_CHECK(pdu_span.has_value(),
-             "Received fragmented L2CAP PDU for handle %hu, which is not yet "
-             "supported",
-             static_cast<uint16_t>(connection_handle));
-    ConstByteSpan pdu_bytes = pdu.ContiguousSpan().value();
+    ConstByteSpan pdu_bytes = as_bytes(MultiBufAdapter::AsSpan(pdu));
 
     auto parsed_frame_result = ParseRfcommFrame(pdu_bytes);
     if (!parsed_frame_result.ok()) {

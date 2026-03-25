@@ -36,7 +36,7 @@ constexpr size_t H4SizeForL2capData(uint16_t data_length) {
 }  // namespace
 
 Result<H4PacketWithH4> BasicModeTxEngine::GenerateNextPacket(
-    const multibuf::MultiBuf& payload, bool& keep_payload) {
+    const FlatConstMultiBuf& payload, bool& keep_payload) {
   keep_payload = true;
   const uint16_t data_length = payload.size();
 
@@ -63,11 +63,7 @@ Result<H4PacketWithH4> BasicModeTxEngine::GenerateNextPacket(
   bframe.channel_id().Write(remote_cid_);
   PW_CHECK(bframe.IsComplete());
 
-  auto bframe_payload = bframe.payload();
-  span<uint8_t> backing_storage(bframe_payload.BackingStorage().data(),
-                                bframe_payload.SizeInBytes());
-  auto bytes_copied = payload.CopyTo(as_writable_bytes(backing_storage));
-  PW_CHECK_UINT_EQ(bytes_copied.size(), backing_storage.size());
+  MultiBufAdapter::Copy(bframe.payload(), payload);
   PW_CHECK(acl.Ok());
   PW_CHECK(bframe.Ok());
 
@@ -77,7 +73,7 @@ Result<H4PacketWithH4> BasicModeTxEngine::GenerateNextPacket(
 }
 
 Status BasicModeTxEngine::CheckWriteParameter(
-    const multibuf::MultiBuf& payload) {
+    const FlatConstMultiBuf& payload) {
   std::optional<uint16_t> max_l2cap_length = delegate_.MaxL2capPayloadSize();
   if (!max_l2cap_length) {
     return Status::FailedPrecondition();

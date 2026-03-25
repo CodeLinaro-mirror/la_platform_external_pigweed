@@ -42,7 +42,7 @@ class TestLogFilter(unittest.TestCase):
                 'raw string',
                 SearchMatcher.STRING,
                 'f(x)',
-                r'f\(x\)',
+                'f\(x\)',
                 re.IGNORECASE,
             ),
             (

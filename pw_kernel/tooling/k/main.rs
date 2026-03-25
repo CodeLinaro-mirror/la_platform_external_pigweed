@@ -15,7 +15,6 @@
 use anyhow::Result;
 mod image_info;
 mod stacks;
-mod trace;
 
 use std::path::{Path, PathBuf};
 
@@ -40,14 +39,6 @@ enum Commands {
     /// Print stack usage information from a running target
     #[command(name = "stacks")]
     Stacks {
-        #[arg(required = true)]
-        path: PathBuf,
-        #[arg(long, default_value = "localhost:1234")]
-        gdb: String,
-    },
-    /// Download a trace from a running target
-    #[command(name = "trace")]
-    Trace {
         #[arg(required = true)]
         path: PathBuf,
         #[arg(long, default_value = "localhost:1234")]
@@ -90,17 +81,6 @@ fn print_image_info(path: &Path) -> Result<()> {
         println!("  {:<30} 0x{:08x}", process.name, process.id);
     }
 
-    println!();
-    println!("Trace Buffers:");
-    println!("  {:<30} {:<12} {:<10}", "Name", "Address", "Size");
-    println!("  {:-<30} {:-<12} {:-<10}", "", "", "");
-    for buffer in info.trace_buffers {
-        println!(
-            "  {:<30} 0x{:08x}   0x{:x}",
-            buffer.name, buffer.addr, buffer.size
-        );
-    }
-
     Ok(())
 }
 
@@ -115,7 +95,6 @@ async fn main() -> Result<()> {
         Commands::Stacks { path, gdb } => {
             stacks::run(path, gdb).await?;
         }
-        Commands::Trace { path, gdb } => trace::run(path, gdb).await?,
     }
 
     Ok(())

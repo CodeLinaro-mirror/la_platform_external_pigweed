@@ -17,7 +17,6 @@
 
 #include <utility>
 
-#include "pw_allocator/allocator.h"
 #include "pw_bluetooth_sapphire/internal/host/common/byte_buffer.h"
 #include "pw_bytes/span.h"
 #include "pw_multibuf/v2/multibuf.h"
@@ -157,22 +156,20 @@ class DynamicPacket {
 
  protected:
   // Construct the buffer to hold |packet_size| bytes (payload + header).
-  explicit DynamicPacket(size_t packet_size, pw::Allocator& allocator)
-      : buffer_(packet_size, allocator) {}
+  explicit DynamicPacket(size_t packet_size) : buffer_(packet_size) {}
 
-  explicit DynamicPacket(pw::multibuf::v2::MultiBuf::Instance&& buf,
-                         pw::Allocator& allocator) {
+  explicit DynamicPacket(pw::multibuf::v2::MultiBuf::Instance&& buf) {
     pw::multibuf::v2::MultiBuf::Instance moved_buf = std::move(buf);
     const size_t size = moved_buf->size();
     if (size == 0) {
-      buffer_ = DynamicByteBuffer(0, allocator);
+      buffer_ = DynamicByteBuffer(0);
       return;
     }
     if (moved_buf->NumFragments() == 1 &&
         moved_buf->IsReleasable(moved_buf->begin())) {
       buffer_ = DynamicByteBuffer(size, moved_buf->Release(moved_buf->begin()));
     } else {
-      buffer_ = DynamicByteBuffer(size, allocator);
+      buffer_ = DynamicByteBuffer(size);
       moved_buf->CopyTo(
           pw::ByteSpan(reinterpret_cast<std::byte*>(buffer_.mutable_data()),
                        buffer_.size()));

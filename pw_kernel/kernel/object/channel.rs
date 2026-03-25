@@ -62,7 +62,7 @@ impl<K: Kernel> KernelObject<K> for ChannelHandlerObject<K> {
     ) -> Result<usize> {
         let active_transaction = self.active_transaction.lock();
         let Some(ref transaction) = *active_transaction else {
-            return Err(Error::Unavailable);
+            return Err(Error::FailedPrecondition);
         };
 
         transaction.send_buffer.copy_into(offset, &mut read_buffer)
@@ -71,7 +71,7 @@ impl<K: Kernel> KernelObject<K> for ChannelHandlerObject<K> {
     fn channel_respond(&self, kernel: K, response_buffer: SyscallBuffer) -> Result<()> {
         let mut active_transaction = self.active_transaction.lock();
         let Some(ref mut transaction) = *active_transaction else {
-            return Err(Error::Unavailable);
+            return Err(Error::FailedPrecondition);
         };
         if response_buffer.size() > transaction.recv_buffer.size() {
             return Err(Error::OutOfRange);
@@ -126,51 +126,6 @@ impl<K: Kernel> KernelObject<K> for ChannelInitiatorObject<K> {
         recv_buffer: SyscallBuffer,
         deadline: Instant<K::Clock>,
     ) -> Result<usize> {
-        self.start_transaction(kernel, send_buffer, recv_buffer)?;
-
-        // Result processing is deferred until the object is in a coherent state.
-        let wait_result = self.object_wait(kernel, Signals::READABLE, deadline);
-
-        // Always clean up the transaction state regardless of wait_result.
-        let transaction_result = self.finish_transaction(kernel);
-
-        wait_result?;
-
-        transaction_result
-    }
-
-    fn channel_async_transact(
-        &self,
-        kernel: K,
-        send_buffer: SyscallBuffer,
-        recv_buffer: SyscallBuffer,
-    ) -> Result<()> {
-        self.start_transaction(kernel, send_buffer, recv_buffer)
-    }
-
-    fn channel_async_transact_complete(&self, kernel: K) -> Result<usize> {
-        let active_signals = self.base.state.lock(kernel).active_signals;
-        if active_signals.contains(Signals::READABLE) {
-            // Transaction completed successfully.
-            self.finish_transaction(kernel)
-        } else {
-            // Transaction is still pending (or doesn't exist).
-            Err(Error::Unavailable)
-        }
-    }
-
-    fn channel_async_cancel(&self, kernel: K) -> Result<()> {
-        self.finish_transaction(kernel).map(|_| ())
-    }
-}
-
-impl<K: Kernel> ChannelInitiatorObject<K> {
-    fn start_transaction(
-        &self,
-        kernel: K,
-        send_buffer: SyscallBuffer,
-        recv_buffer: SyscallBuffer,
-    ) -> Result<()> {
         // TODO: konkers - When the kernel has dynamic memory mapping APIs either:
         // * these checks will have to be differed til the time of memcpy.
         // * a region locking mechanism will need to be built
@@ -193,41 +148,39 @@ impl<K: Kernel> ChannelInitiatorObject<K> {
 
         drop(active_transaction);
 
-        // Clear Readable and Writable signals on our side before
+        // Clear Readable, Writable, and Error signals  on our side before
         // signaling the handler.
         self.base.signal(kernel, |signals| {
-            signals - (Signals::READABLE | Signals::WRITEABLE)
+            signals - (Signals::READABLE | Signals::WRITEABLE | Signals::ERROR)
         });
 
         self.handler.base.signal(kernel, |_| Signals::READABLE);
 
-        Ok(())
-    }
+        // Result processing is deferred until the object is in a coherent state.
+        let wait_result = self.object_wait(kernel, Signals::READABLE | Signals::ERROR, deadline);
 
-    fn finish_transaction(&self, kernel: K) -> Result<usize> {
         // TODO: konkers - Rationalize signal behavior with syscall_defs.rs.
-        // Go back to the writable state now that the transaction is finished.
-        self.base.signal(kernel, |signals| {
-            (signals | Signals::WRITEABLE) - Signals::READABLE
-        });
-
-        // Also reset the handler signals.
-        self.handler.base.signal(kernel, |signals| {
-            signals - (Signals::READABLE | Signals::WRITEABLE)
-        });
+        self.base
+            .signal(kernel, |signals| signals | Signals::WRITEABLE);
 
         let mut active_transaction = self.handler.active_transaction.lock();
 
         // All success and error paths reset `active_transaction` to `None`.
         let transaction = active_transaction.take();
 
-        match transaction {
+        // Process wait_result while active_transaction is locked so that errors
+        // both set the writeable signal as well haveing active_transaction reset.
+        wait_result?;
+
+        let recv_bytes = match transaction {
             // The handler has stored the number of response bytes by updating.
             // the recv_buffer length.
-            Some(transaction) => Ok(transaction.recv_buffer.size()),
+            Some(transaction) => transaction.recv_buffer.size(),
 
             // Transaction was dropped.
-            None => Err(Error::Unavailable),
-        }
+            None => return Err(Error::Unavailable),
+        };
+
+        Ok(recv_bytes)
     }
 }

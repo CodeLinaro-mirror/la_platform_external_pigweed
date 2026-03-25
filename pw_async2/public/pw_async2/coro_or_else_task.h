@@ -13,28 +13,22 @@
 // the License.
 #pragma once
 
-#include <optional>
-
-#include "pw_async2/context.h"
 #include "pw_async2/coro.h"
-#include "pw_async2/fallible_coro_task.h"
+#include "pw_async2/dispatcher.h"
 #include "pw_function/function.h"
 
 namespace pw::async2 {
 
 /// @submodule{pw_async2,coroutines}
 
-/// @deprecated Use `FallibleCoroTask` instead.
-class [[deprecated("Use CoroTask or FallibleCoroTask instead")]]
-CoroOrElseTask final : public Task {
+/// A ``Task`` that delegates to a provided ``Coro<Status>>`` and executes
+/// an ``or_else`` handler function on failure.
+class CoroOrElseTask final : public Task {
  public:
   /// Create a new ``Task`` which runs ``coro``, invoking ``or_else`` on
   /// any non-OK status.
   CoroOrElseTask(Coro<Status>&& coro, pw::Function<void(Status)>&& or_else)
-      : coro_task_(std::in_place,
-                   std::move(coro),
-                   [this] { or_else_(Status::Internal()); }),
-        or_else_(std::move(or_else)) {}
+      : coro_(std::move(coro)), or_else_(std::move(or_else)) {}
 
   ~CoroOrElseTask() override { Deregister(); }
 
@@ -43,8 +37,7 @@ CoroOrElseTask final : public Task {
   /// The task must not be `Post`ed when `coro` is changed.
   void SetCoro(Coro<Status>&& coro) {
     PW_ASSERT(!IsRegistered());
-    coro_task_.emplace(std::move(coro),
-                       [this] { or_else_(Status::Internal()); });
+    coro_ = std::move(coro);
   }
 
   /// *Non-atomically* sets `or_else`.
@@ -56,9 +49,18 @@ CoroOrElseTask final : public Task {
   }
 
  private:
-  Poll<> DoPend(Context& cx) final { return coro_task_->Pend(cx); }
+  Poll<> DoPend(Context& cx) final {
+    Poll<Status> result = coro_.Pend(cx);
+    if (result.IsPending()) {
+      return Pending();
+    }
+    if (!result->ok()) {
+      or_else_(*result);
+    }
+    return Ready();
+  }
 
-  std::optional<FallibleCoroTask<Status>> coro_task_;
+  Coro<Status> coro_;
   pw::Function<void(Status)> or_else_;
 };
 

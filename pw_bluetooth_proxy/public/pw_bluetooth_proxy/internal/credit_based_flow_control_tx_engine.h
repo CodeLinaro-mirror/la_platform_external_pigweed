@@ -35,9 +35,9 @@ class CreditBasedFlowControlTxEngine final : public TxEngine {
 
   // TxEngine overrides:
 
-  Result<H4PacketWithH4> GenerateNextPacket(const multibuf::MultiBuf& sdu,
+  Result<H4PacketWithH4> GenerateNextPacket(const FlatConstMultiBuf& sdu,
                                             bool& keep_payload) override;
-  Status CheckWriteParameter(const multibuf::MultiBuf& payload) override;
+  Status CheckWriteParameter(const FlatConstMultiBuf& payload) override;
   Result<bool> AddCredits(uint16_t credits) override;
   HandlePduFromHostReturnValue HandlePduFromHost(
       pw::span<uint8_t> frame) override;

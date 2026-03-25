@@ -42,7 +42,6 @@
 #include <type_traits>
 #include <utility>
 
-#include "pw_containers/internal/optional_data.h"
 #include "pw_preprocessor/compiler.h"
 #include "pw_result/internal/result_internal.h"
 #include "pw_status/status.h"
@@ -137,16 +136,15 @@ class [[nodiscard]] Result;
 ///  }
 /// @endcode
 template <typename T>
-class Result
-    : private containers::internal::OptionalData<T, pw_Status, PW_STATUS_OK>,
-      private containers::internal::CopyCtorBase<T>,
-      private containers::internal::MoveCtorBase<T>,
-      private containers::internal::CopyAssignBase<T>,
-      private containers::internal::MoveAssignBase<T> {
+class Result : private internal_result::StatusOrData<T>,
+               private internal_result::CopyCtorBase<T>,
+               private internal_result::MoveCtorBase<T>,
+               private internal_result::CopyAssignBase<T>,
+               private internal_result::MoveAssignBase<T> {
   template <typename U>
   friend class Result;
 
-  using Base = containers::internal::OptionalData<T, pw_Status, PW_STATUS_OK>;
+  using Base = internal_result::StatusOrData<T>;
 
  public:
   /// This instance data provides a generic `value_type` member for use within
@@ -310,8 +308,7 @@ class Result
               std::negation<internal_result::
                                 HasConversionOperatorToResult<T, U&&>>>::value,
           int> = 0>
-  constexpr Result(U&& v)
-      : Base(static_cast<Status>(std::forward<U>(v)).code()) {}
+  constexpr Result(U&& v) : Base(std::forward<U>(v)) {}
 
   template <
       typename U = Status,
@@ -325,8 +322,7 @@ class Result
               std::negation<internal_result::
                                 HasConversionOperatorToResult<T, U&&>>>::value,
           int> = 0>
-  constexpr explicit Result(U&& v)
-      : Base(static_cast<Status>(std::forward<U>(v)).code()) {}
+  constexpr explicit Result(U&& v) : Base(std::forward<U>(v)) {}
 
   template <
       typename U = Status,
@@ -341,7 +337,7 @@ class Result
                                 HasConversionOperatorToResult<T, U&&>>>::value,
           int> = 0>
   constexpr Result& operator=(U&& v) {
-    this->AssignState(static_cast<Status>(std::forward<U>(v)).code());
+    this->AssignStatus(std::forward<U>(v));
     return *this;
   }
 
@@ -448,9 +444,7 @@ class Result
   ///      // Handle error
   ///   }
   /// @endcode
-  [[nodiscard]] constexpr bool ok() const {
-    return this->state_ == OkStatus().code();
-  }
+  [[nodiscard]] constexpr bool ok() const { return this->status_.ok(); }
 
   /// @returns The current `pw::Status` code contained within the `Result<T>`.
   /// If `pw::Result<T>` contains a `T`, then this function returns @OK.
@@ -544,7 +538,7 @@ class Result
       this->MakeValue(std::forward<Args>(args)...);
     } else {
       this->MakeValue(std::forward<Args>(args)...);
-      this->state_ = OkStatus().code();
+      this->status_ = OkStatus();
     }
     return this->data_;
   }
@@ -561,7 +555,7 @@ class Result
       this->MakeValue(ilist, std::forward<Args>(args)...);
     } else {
       this->MakeValue(ilist, std::forward<Args>(args)...);
-      this->state_ = OkStatus().code();
+      this->status_ = OkStatus();
     }
     return this->data_;
   }
@@ -772,7 +766,7 @@ constexpr bool operator!=(const Result<T>& lhs, const Result<T>& rhs) {
 //------------------------------------------------------------------------------
 
 template <typename T>
-constexpr Result<T>::Result() : Base(Status::Unknown().code()) {}
+constexpr Result<T>::Result() : Base(Status::Unknown()) {}
 
 template <typename T>
 template <typename U>
@@ -780,7 +774,7 @@ constexpr inline void Result<T>::Assign(const Result<U>& other) {
   if (other.ok()) {
     this->Assign(*other);
   } else {
-    this->AssignState(other.status().code());
+    this->AssignStatus(other.status());
   }
 }
 
@@ -790,7 +784,7 @@ constexpr inline void Result<T>::Assign(Result<U>&& other) {
   if (other.ok()) {
     this->Assign(*std::move(other));
   } else {
-    this->AssignState(std::move(other).status().code());
+    this->AssignStatus(std::move(other).status());
   }
 }
 template <typename T>
@@ -807,66 +801,66 @@ constexpr Result<T>::Result(std::in_place_t,
 
 template <typename T>
 constexpr Status Result<T>::status() const {
-  return this->state_;
+  return this->status_;
 }
 
 template <typename T>
 constexpr const T& Result<T>::value() const& {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return this->data_;
 }
 
 template <typename T>
 constexpr T& Result<T>::value() & {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return this->data_;
 }
 
 template <typename T>
 constexpr const T&& Result<T>::value() const&& {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return std::move(this->data_);
 }
 
 template <typename T>
 constexpr T&& Result<T>::value() && {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return std::move(this->data_);
 }
 
 template <typename T>
 constexpr const T& Result<T>::operator*() const& {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return this->data_;
 }
 
 template <typename T>
 constexpr T& Result<T>::operator*() & {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return this->data_;
 }
 
 template <typename T>
 constexpr const T&& Result<T>::operator*() const&& {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return std::move(this->data_);
 }
 
 template <typename T>
 constexpr T&& Result<T>::operator*() && {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return std::move(this->data_);
 }
 
 template <typename T>
 constexpr const T* Result<T>::operator->() const {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return &this->data_;
 }
 
 template <typename T>
 constexpr T* Result<T>::operator->() {
-  PW_ASSERT(ok());
+  PW_ASSERT(this->status_.ok());
   return &this->data_;
 }
 

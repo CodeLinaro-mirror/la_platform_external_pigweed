@@ -34,14 +34,13 @@
 #include "pw_bluetooth_proxy/direction.h"
 #include "pw_bluetooth_proxy/h4_packet.h"
 #include "pw_bluetooth_proxy/internal/logical_transport.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
 #include "pw_bluetooth_proxy_private/test_utils.h"
 #include "pw_containers/flat_map.h"
 #include "pw_function/function.h"
 #include "pw_log/log.h"
-#include "pw_multibuf/from_span.h"
-#include "pw_multibuf/multibuf.h"
 #include "pw_span/span.h"
 #include "pw_status/status.h"
 #include "pw_sync/mutex.h"
@@ -957,7 +956,8 @@ TEST_F(NumberOfCompletedPacketsTest, TwoOfThreeSentPacketsComplete) {
   {
     GattNotifyChannel channel = BuildGattNotifyChannel(
         proxy, {.handle = capture.connection_handles[0]});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 2);
@@ -970,7 +970,8 @@ TEST_F(NumberOfCompletedPacketsTest, TwoOfThreeSentPacketsComplete) {
   {
     GattNotifyChannel channel = BuildGattNotifyChannel(
         proxy, {.handle = capture.connection_handles[1]});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 1);
@@ -980,7 +981,8 @@ TEST_F(NumberOfCompletedPacketsTest, TwoOfThreeSentPacketsComplete) {
   {
     GattNotifyChannel channel = BuildGattNotifyChannel(
         proxy, {.handle = capture.connection_handles[2]});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
@@ -1063,7 +1065,8 @@ TEST_F(NumberOfCompletedPacketsTest,
   {
     GattNotifyChannel channel = BuildGattNotifyChannel(
         proxy, {.handle = capture.connection_handles[0]});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 1);
@@ -1073,7 +1076,8 @@ TEST_F(NumberOfCompletedPacketsTest,
   {
     GattNotifyChannel channel = BuildGattNotifyChannel(
         proxy, {.handle = capture.connection_handles[1]});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
@@ -1153,22 +1157,26 @@ TEST_F(NumberOfCompletedPacketsTest, ProxyReclaimsOnlyItsUsedCredits) {
   {
     GattNotifyChannel channel = BuildGattNotifyChannel(
         proxy, {.handle = capture.connection_handles[0]});
-    multibuf::MultiBuf mbuf1 = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf1_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf1 = MultiBufAdapter::Unwrap(mbuf1_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf1)).status);
     RunDispatcher();
 
-    multibuf::MultiBuf mbuf2 = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf2_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf2 = MultiBufAdapter::Unwrap(mbuf2_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf2)).status);
     RunDispatcher();
   }
   {
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle3});
-    multibuf::MultiBuf mbuf1 = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf1_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf1 = MultiBufAdapter::Unwrap(mbuf1_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf1)).status);
     RunDispatcher();
 
-    multibuf::MultiBuf mbuf2 = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf2_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf2 = MultiBufAdapter::Unwrap(mbuf2_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf2)).status);
     RunDispatcher();
 
@@ -1337,12 +1345,11 @@ TEST_F(NumberOfCompletedPacketsTest, MultipleChannelsDifferentTransports) {
   pw::Function<void(H4PacketWithH4&&)>&& send_to_controller_fn(
       [&capture](H4PacketWithH4&&) { ++capture.sends_called; });
 
-  auto* allocator = GetProxyHostAllocator();
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               /*le_acl_credits_to_reserve=*/1,
                               /*br_edr_acl_credits_to_reserve=*/1,
-                              allocator);
+                              GetProxyHostAllocator());
   StartDispatcherOnCurrentThread(proxy);
   // Allow proxy to reserve BR/EDR 1 credit.
   PW_TEST_EXPECT_OK(SendReadBufferResponseFromController(proxy, 1));
@@ -1358,8 +1365,9 @@ TEST_F(NumberOfCompletedPacketsTest, MultipleChannelsDifferentTransports) {
 
   L2capCoc le_channel = BuildCoc(
       proxy, CocParameters{.handle = kLeConnectionHandle, .tx_credits = 2});
-  multibuf::MultiBuf empty = MakeEmptyMultiBuf();
-  PW_TEST_EXPECT_OK(le_channel.Write(std::move(empty)).status);
+  FlatMultiBufInstance empty = MakeEmptyMultiBuf();
+  PW_TEST_EXPECT_OK(
+      le_channel.Write(std::move(MultiBufAdapter::Unwrap(empty))).status);
   RunDispatcher();
   EXPECT_EQ(capture.sends_called, 1);
 
@@ -1367,10 +1375,8 @@ TEST_F(NumberOfCompletedPacketsTest, MultipleChannelsDifferentTransports) {
       BuildBasicL2capChannel(proxy,
                              {.handle = kBrEdrConnectionHandle,
                               .transport = AclTransportType::kBrEdr});
-  auto mbuf_result = multibuf::FromSpan(
-      *allocator, as_writable_bytes(span(capture.payload)), [](ByteSpan) {});
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf mbuf = std::move(*mbuf_result);
+  FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(pw::span(capture.payload));
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(bredr_channel.Write(std::move(mbuf)).status);
   RunDispatcher();
 
@@ -1379,7 +1385,8 @@ TEST_F(NumberOfCompletedPacketsTest, MultipleChannelsDifferentTransports) {
 
   // Queue an LE write
   empty = MakeEmptyMultiBuf();
-  PW_TEST_EXPECT_OK(le_channel.Write(std::move(empty)).status);
+  PW_TEST_EXPECT_OK(
+      le_channel.Write(std::move(MultiBufAdapter::Unwrap(empty))).status);
   RunDispatcher();
   EXPECT_EQ(capture.sends_called, 2);
 
@@ -1391,11 +1398,10 @@ TEST_F(NumberOfCompletedPacketsTest, MultipleChannelsDifferentTransports) {
   PW_TEST_EXPECT_OK(SendNumberOfCompletedPackets(proxy, {{0x456, 1}}));
 
   // Write again
-  mbuf_result = multibuf::FromSpan(
-      *allocator, as_writable_bytes(span(capture.payload)), [](ByteSpan) {});
-  ASSERT_TRUE(mbuf_result.has_value());
-  mbuf = std::move(*mbuf_result);
-  PW_TEST_EXPECT_OK(bredr_channel.Write(std::move(mbuf)).status);
+  mbuf_inst = MultiBufFromSpan(pw::span(capture.payload));
+  PW_TEST_EXPECT_OK(
+      bredr_channel.Write(std::move(MultiBufAdapter::Unwrap(mbuf_inst)))
+          .status);
   RunDispatcher();
   EXPECT_EQ(capture.sends_called, 4);
 }
@@ -1459,7 +1465,8 @@ TEST_F(DisconnectionCompleteTest, DisconnectionReclaimsCredits) {
 
     // Use up 3 of the 10 credits on the Connection that will be disconnected.
     for (int i = 0; i < 3; ++i) {
-      multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+      FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+      FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
       PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
       RunDispatcher();
     }
@@ -1472,7 +1479,8 @@ TEST_F(DisconnectionCompleteTest, DisconnectionReclaimsCredits) {
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle3});
 
     for (int i = 0; i < 2; ++i) {
-      multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+      FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+      FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
       PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
       RunDispatcher();
     }
@@ -1499,7 +1507,8 @@ TEST_F(DisconnectionCompleteTest, DisconnectionReclaimsCredits) {
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = handle});
 
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
 
@@ -1540,7 +1549,8 @@ TEST_F(DisconnectionCompleteTest, FailedDisconnectionHasNoEffect) {
   // Use sole credit.
   GattNotifyChannel channel =
       BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-  multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+  FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
   RunDispatcher();
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
@@ -1575,7 +1585,8 @@ TEST_F(DisconnectionCompleteTest, DisconnectionOfUnusedConnectionHasNoEffect) {
   // Use sole credit.
   GattNotifyChannel channel =
       BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-  multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+  FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
   RunDispatcher();
   EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
@@ -1637,7 +1648,8 @@ TEST_F(DisconnectionCompleteTest, CanReuseConnectionHandleAfterDisconnection) {
     // Establish connection over `connection_handle`.
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
@@ -1656,7 +1668,8 @@ TEST_F(DisconnectionCompleteTest, CanReuseConnectionHandleAfterDisconnection) {
     // Re-establish connection over `connection_handle`.
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(proxy.GetNumFreeLeAclPackets(), 0);
@@ -1806,7 +1819,8 @@ TEST_F(ResetTest, ResetClearsActiveConnections) {
   {
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(controller_capture.sends_called, 1);
@@ -1829,7 +1843,8 @@ TEST_F(ResetTest, ResetClearsActiveConnections) {
     // Send ACL on random handle to expend one credit.
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle2});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(controller_capture.sends_called, 2);
@@ -1875,7 +1890,8 @@ TEST_F(ResetTest, ProxyHandlesMultipleResets) {
   {
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
   }
@@ -1892,7 +1908,8 @@ TEST_F(ResetTest, ProxyHandlesMultipleResets) {
   {
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
   }
@@ -1929,7 +1946,8 @@ TEST_F(ResetTest, HandleHciReset) {
   std::array<uint8_t, 1> attribute_value = {0};
   GattNotifyChannel channel =
       BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-  multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+  FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
   RunDispatcher();
   EXPECT_EQ(controller_capture.sends_called, 1);
@@ -1995,11 +2013,9 @@ TEST_F(MultiSendTest, CanOccupyAllThenReuseEachBuffer) {
   // Occupy all H4 buffers and queue 1 packet.
   size_t num_writes_0 = 0;
   do {
-    auto mbuf_result = multibuf::FromSpan(
-        allocator, as_writable_bytes(span(attribute_value)), [](ByteSpan) {});
-    ASSERT_TRUE(mbuf_result.has_value());
-    multibuf::MultiBuf mbuf = std::move(*mbuf_result);
-    PW_TEST_EXPECT_OK(channel->Write(std::move(mbuf)).status);
+    FlatMultiBufInstance mbuf = MultiBufFromSpan(span(attribute_value));
+    PW_TEST_EXPECT_OK(
+        channel->Write(std::move(MultiBufAdapter::Unwrap(mbuf))).status);
     RunDispatcher();
     ++num_writes_0;
   } while (capture.sends_called == num_writes_0);
@@ -2026,11 +2042,9 @@ TEST_F(MultiSendTest, CanOccupyAllThenReuseEachBuffer) {
   size_t num_writes_1 = 0;
   capture.sends_called = 0;
   do {
-    auto mbuf_result = multibuf::FromSpan(
-        allocator, as_writable_bytes(span(attribute_value)), [](ByteSpan) {});
-    ASSERT_TRUE(mbuf_result.has_value());
-    multibuf::MultiBuf mbuf = std::move(*mbuf_result);
-    PW_TEST_EXPECT_OK(channel->Write(std::move(mbuf)).status);
+    FlatMultiBufInstance mbuf = MultiBufFromSpan(span(attribute_value));
+    PW_TEST_EXPECT_OK(
+        channel->Write(std::move(MultiBufAdapter::Unwrap(mbuf))).status);
     RunDispatcher();
     ++num_writes_1;
   } while (capture.sends_called == num_writes_1);
@@ -2082,7 +2096,8 @@ TEST_F(MultiSendTest, CanRepeatedlyReuseOneBuffer) {
 
   // Occupy all H4 buffers.
   for (size_t sent = 1; sent <= kAclBuffersSize; ++sent) {
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     // Each write is sent towards controller
@@ -2109,7 +2124,8 @@ TEST_F(MultiSendTest, CanRepeatedlyReuseOneBuffer) {
     // buffer slot).
     EXPECT_EQ(capture.in_flight_packets.size(), kAclBuffersSize - 1);
 
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
 
@@ -2159,7 +2175,8 @@ TEST_F(MultiSendTest, CanSendOverManyDifferentConnections) {
         proxy, conn_handle, emboss::StatusCode::SUCCESS));
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = conn_handle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(capture.sends_called, send);
@@ -2260,12 +2277,11 @@ TEST_F(BasicL2capChannelTest, BasicWrite) {
         }
       });
 
-  auto* allocator = GetProxyHostAllocator();
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               /*le_acl_credits_to_reserve=*/1,
                               /*br_edr_acl_credits_to_reserve=*/0,
-                              allocator);
+                              GetProxyHostAllocator());
   StartDispatcherOnCurrentThread(proxy);
   // Allow proxy to reserve 1 LE credit.
   PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
@@ -2279,10 +2295,8 @@ TEST_F(BasicL2capChannelTest, BasicWrite) {
                               .remote_cid = capture.channel_id,
                               .transport = AclTransportType::kLe});
 
-  auto mbuf_result = multibuf::FromSpan(
-      *allocator, as_writable_bytes(span(capture.payload)), [](ByteSpan) {});
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf mbuf = std::move(*mbuf_result);
+  FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(pw::span(capture.payload));
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
   RunDispatcher();
   EXPECT_EQ(capture.sends_called, 1);
@@ -2294,12 +2308,11 @@ TEST_F(BasicL2capChannelTest, ErrorOnWriteTooLarge) {
   pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
       [](H4PacketWithH4&&) { FAIL(); });
 
-  auto* allocator = GetProxyHostAllocator();
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               /*le_acl_credits_to_reserve=*/1,
                               /*br_edr_acl_credits_to_reserve=*/0,
-                              allocator);
+                              GetProxyHostAllocator());
   StartDispatcherOnCurrentThread(proxy);
   // Allow proxy to reserve 1 credit.
   const uint16_t kAclDataPacketLength = 100;
@@ -2320,11 +2333,9 @@ TEST_F(BasicL2capChannelTest, ErrorOnWriteTooLarge) {
                               .remote_cid = 0x123,
                               .transport = AclTransportType::kBrEdr});
 
-  auto mbuf_result = multibuf::FromSpan(
-      *allocator, as_writable_bytes(span(one_byte_too_big_sdu)), [](ByteSpan) {
-      });
-  ASSERT_TRUE(mbuf_result.has_value());
-  multibuf::MultiBuf mbuf = std::move(*mbuf_result);
+  FlatMultiBufInstance mbuf_inst =
+      MultiBufFromSpan(pw::span(one_byte_too_big_sdu));
+  FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
   EXPECT_EQ(channel.Write(std::move(mbuf)).status, Status::InvalidArgument());
   RunDispatcher();
 }
@@ -2400,7 +2411,7 @@ TEST_F(BasicL2capChannelTest, BasicRead) {
           .remote_cid = 0x123,
           .transport = AclTransportType::kLe,
           .payload_from_controller_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatConstMultiBuf&& buffer) {
                 ++capture.sends_called;
                 PW_ASSERT(!buffer.empty());
                 ConstByteSpan payload = *buffer.ConstChunks().begin();
@@ -2492,10 +2503,10 @@ TEST_F(BasicL2capChannelTest, BasicForward) {
           .remote_cid = 0x123,
           .transport = AclTransportType::kLe,
           .payload_from_controller_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatConstMultiBuf&& buffer) {
                 ++capture.sends_called;
                 // Forward to host.
-                return multibuf::MultiBuf(std::move(buffer));
+                return FlatConstMultiBufInstance(std::move(buffer));
               },
       });
 
@@ -2568,9 +2579,9 @@ TEST_F(BasicL2capChannelTest, ReadPacketToController) {
           .remote_cid = remote_cid,
           .transport = AclTransportType::kBrEdr,
           .payload_from_host_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatConstMultiBuf&& buffer) {
                 ++capture.sends_called;
-                return multibuf::MultiBuf(std::move(buffer));
+                return FlatConstMultiBufInstance(std::move(buffer));
               },
       });
 
@@ -2650,11 +2661,12 @@ TEST_F(BasicL2capChannelTest, BasicModifyForwardToHost) {
           .remote_cid = 0x123,
           .transport = AclTransportType::kLe,
           .payload_from_controller_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatMultiBuf&& buffer) {
                 ++capture.from_controller_called;
                 PW_ASSERT(!buffer.empty());
                 // Forward to host.
-                ByteSpan payload = buffer.ContiguousSpan().value();
+                auto payload =
+                    pw::as_writable_bytes(MultiBufAdapter::AsSpan(buffer));
                 ConstByteSpan modified_bytes =
                     as_bytes(span(capture.expected_payload_to_host.data(),
                                   capture.expected_payload_to_host.size()));
@@ -2662,7 +2674,7 @@ TEST_F(BasicL2capChannelTest, BasicModifyForwardToHost) {
                 std::copy(modified_bytes.begin(),
                           modified_bytes.end(),
                           payload.begin());
-                return multibuf::MultiBuf(std::move(buffer));
+                return FlatConstMultiBufInstance(std::move(buffer));
               },
       });
 
@@ -2742,11 +2754,12 @@ TEST_F(BasicL2capChannelTest, BasicModifyForwardToController) {
           .remote_cid = 0x123,
           .transport = AclTransportType::kLe,
           .payload_from_host_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatMultiBuf&& buffer) {
                 ++capture.from_host_called;
                 PW_ASSERT(!buffer.empty());
                 // Forward to host.
-                ByteSpan payload = buffer.ContiguousSpan().value();
+                auto payload =
+                    pw::as_writable_bytes(MultiBufAdapter::AsSpan(buffer));
                 ConstByteSpan modified_bytes = as_bytes(
                     span(capture.expected_payload_to_controller.data(),
                          capture.expected_payload_to_controller.size()));
@@ -2754,7 +2767,7 @@ TEST_F(BasicL2capChannelTest, BasicModifyForwardToController) {
                 std::copy(modified_bytes.begin(),
                           modified_bytes.end(),
                           payload.begin());
-                return multibuf::MultiBuf(std::move(buffer));
+                return FlatConstMultiBufInstance(std::move(buffer));
               },
       });
 
@@ -2873,15 +2886,10 @@ TEST_F(BasicL2capChannelTest, MultithreadedWrite) {
   PW_TEST_ASSERT_OK(SendLeConnectionCompleteEvent(
       proxy, capture.kTestHandle, emboss::StatusCode::SUCCESS));
 
-  // Use libc allocators so msan can detect use after frees.
-  std::array<std::byte, 200 * 1024> packet_buffer{};
-  pw::multibuf::SimpleAllocator multibuf_allocator{
-      /*data_area=*/packet_buffer,
-      /*metadata_alloc=*/allocator::GetLibCAllocator()};
-
+  MultiBufAllocatorContext<200 * 1024, sync::Mutex> packet_allocator_context;
   struct ThreadCapture {
     BasicL2capChannel channel;
-    multibuf::MultiBufAllocator& packet_allocator;
+    MultiBufAllocator& packet_allocator;
   };
 
   pw::Vector<ThreadCapture, kNumThreads> captures;
@@ -2902,7 +2910,7 @@ TEST_F(BasicL2capChannelTest, MultithreadedWrite) {
             BasicL2capParameters{.handle = capture.kTestHandle,
                                  .local_cid = local_cid,
                                  .remote_cid = remote_cid}),
-        multibuf_allocator,
+        packet_allocator_context.GetAllocator(),
     };
     captures.emplace_back(std::move(thread_capture));
   }
@@ -2912,15 +2920,14 @@ TEST_F(BasicL2capChannelTest, MultithreadedWrite) {
     threads.emplace_back(context.options(), [&thread_capture]() {
       for (unsigned int packet_numb = 0; packet_numb < kPacketsPerThread;
            ++packet_numb) {
-        auto mbuf_result =
-            thread_capture.packet_allocator.AllocateContiguous(kPayloadSize);
-        ASSERT_TRUE(mbuf_result.has_value());
-        multibuf::MultiBuf mbuf_inst = std::move(*mbuf_result);
-        std::fill(mbuf_inst.begin(),
-                  mbuf_inst.end(),
-                  static_cast<std::byte>(packet_numb));
+        std::array<uint8_t, kPayloadSize> payload = {};
+        std::fill(payload.begin(), payload.end(), packet_numb);
+        FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(
+            pw::span(payload), thread_capture.packet_allocator);
         PW_TEST_EXPECT_OK(
-            thread_capture.channel.Write(std::move(mbuf_inst)).status);
+            thread_capture.channel
+                .Write(std::move(MultiBufAdapter::Unwrap(mbuf_inst)))
+                .status);
       }
     });
   }
@@ -2976,12 +2983,14 @@ TEST_F(L2capSignalingTest, FlowControlCreditIndDrainsQueue) {
                                             .tx_credits = 0});
 
   for (size_t i = 0; i < L2capCoc::QueueCapacity(); ++i) {
-    multibuf::MultiBuf empty = MakeEmptyMultiBuf();
-    PW_TEST_EXPECT_OK(channel.Write(std::move(empty)).status);
+    FlatMultiBufInstance empty = MakeEmptyMultiBuf();
+    PW_TEST_EXPECT_OK(
+        channel.Write(std::move(MultiBufAdapter::Unwrap(empty))).status);
     RunDispatcher();
   }
-  multibuf::MultiBuf empty = MakeEmptyMultiBuf();
-  EXPECT_EQ(channel.Write(std::move(empty)).status, Status::Unavailable());
+  FlatMultiBufInstance empty = MakeEmptyMultiBuf();
+  EXPECT_EQ(channel.Write(std::move(MultiBufAdapter::Unwrap(empty))).status,
+            Status::Unavailable());
   RunDispatcher();
   EXPECT_EQ(sends_called, 0u);
 
@@ -3141,7 +3150,8 @@ TEST_F(L2capSignalingTest, SignalsArePassedOnToHostAfterAclDisconnect) {
   {
     GattNotifyChannel channel =
         BuildGattNotifyChannel(proxy, {.handle = kConnectionHandle});
-    multibuf::MultiBuf mbuf = MultiBufFromArray(attribute_value);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromArray(attribute_value);
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
   }
@@ -4347,8 +4357,7 @@ class AclFragTest : public ProxyHostTest {
   }
 
   BasicL2capChannel GetL2capChannel(
-      ProxyHost& proxy,
-      multibuf::MultiBufAllocator* rx_multibuf_allocator = nullptr) {
+      ProxyHost& proxy, MultiBufAllocator* rx_multibuf_allocator = nullptr) {
     return BuildBasicL2capChannel(
         proxy,
         BasicL2capParameters{
@@ -4358,7 +4367,7 @@ class AclFragTest : public ProxyHostTest {
             .remote_cid = 0x123,
             .transport = AclTransportType::kLe,
             .payload_from_controller_fn =
-                [this](multibuf::MultiBuf&& buffer) {
+                [this](FlatConstMultiBuf&& buffer) {
                   payloads_from_controller_.emplace_back(std::move(buffer));
                   return std::nullopt;  // Consume
                 },
@@ -4372,8 +4381,8 @@ class AclFragTest : public ProxyHostTest {
     ASSERT_EQ(payloads_from_controller_.size(), expected_payloads.size());
     auto payloads_iter = payloads_from_controller_.begin();
     for (ConstByteSpan expected : expected_payloads) {
-      const multibuf::MultiBuf& mbuf = *payloads_iter++;
-      ConstByteSpan payload = mbuf.ContiguousSpan().value();
+      const FlatConstMultiBuf& mbuf = *payloads_iter++;
+      ConstByteSpan payload = as_bytes(MultiBufAdapter::AsSpan(mbuf));
       EXPECT_TRUE(std::equal(
           payload.begin(), payload.end(), expected.begin(), expected.end()));
     }
@@ -4400,7 +4409,7 @@ class AclFragTest : public ProxyHostTest {
     ++packets_sent_to_controller_;
   }
 
-  std::vector<multibuf::MultiBuf> payloads_from_controller_;
+  std::vector<FlatConstMultiBufInstance> payloads_from_controller_;
 };
 
 TEST_F(AclFragTest, AclBiggerThanL2capDropped) {
@@ -4537,12 +4546,9 @@ TEST_F(AclFragTest, ChannelCantAllocateMultibuf) {
   EXPECT_EQ(packets_sent_to_host_, 1);
 
   // Intentionally use allocator without enough room for PDU buf.
-  std::array<std::byte, 1> packet_buffer{};
-  pw::multibuf::SimpleAllocator multibuf_allocator{
-      /*data_area=*/packet_buffer,
-      /*metadata_alloc=*/allocator::GetLibCAllocator()};
-
-  BasicL2capChannel channel = GetL2capChannel(proxy, &multibuf_allocator);
+  MultiBufAllocatorContext<1> allocator_context;
+  MultiBufAllocator& allocator = allocator_context.GetAllocator();
+  BasicL2capChannel channel = GetL2capChannel(proxy, &allocator);
 
   static constexpr std::array<uint8_t, 4> kPayload = {0xA1, 0xB2, 0xC3, 0xD2};
 
@@ -4781,10 +4787,10 @@ TEST_F(AclFragTest, UnhandledRecombinedPdu) {
           .handle = kHandle,
           .local_cid = kLocalCid,
           .payload_from_controller_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatConstMultiBuf&& buffer) {
                 capture.channel_pdus_received++;
                 // Unhandled
-                return multibuf::MultiBuf(std::move(buffer));
+                return FlatConstMultiBufInstance(std::move(buffer));
               },
       });
 
@@ -4998,7 +5004,7 @@ TEST_F(AclFragTest,
           .remote_cid = 0x123,
           .transport = AclTransportType::kLe,
           .payload_from_controller_fn =
-              [&channel1_sends_called](multibuf::MultiBuf&& buffer) {
+              [&channel1_sends_called](FlatConstMultiBuf&& buffer) {
                 ++channel1_sends_called;
                 PW_ASSERT(!buffer.empty());
                 ConstByteSpan payload = *buffer.ConstChunks().begin();
@@ -5028,7 +5034,7 @@ TEST_F(AclFragTest,
           .remote_cid = 0x321,
           .transport = AclTransportType::kLe,
           .payload_from_controller_fn =
-              [&channel2_sends_called](multibuf::MultiBuf&& buffer) {
+              [&channel2_sends_called](FlatConstMultiBuf&& buffer) {
                 ++channel2_sends_called;
                 PW_ASSERT(!buffer.empty());
                 ConstByteSpan payload = *buffer.ConstChunks().begin();
@@ -5101,10 +5107,8 @@ TEST_F(ProxyHostTest, ClientProvidedAllocatorUsedForH4) {
                                 .remote_cid = remote_channel_id,
                                 .transport = AclTransportType::kLe});
 
-    auto mbuf_result = multibuf::FromSpan(
-        allocator, as_writable_bytes(span(payload)), [](ByteSpan) {});
-    ASSERT_TRUE(mbuf_result.has_value());
-    multibuf::MultiBuf mbuf = std::move(*mbuf_result);
+    FlatMultiBufInstance mbuf_inst = MultiBufFromSpan(pw::span(payload));
+    FlatMultiBuf& mbuf = MultiBufAdapter::Unwrap(mbuf_inst);
     PW_TEST_EXPECT_OK(channel.Write(std::move(mbuf)).status);
     RunDispatcher();
     EXPECT_EQ(capture.sends_called, 1);
@@ -5239,10 +5243,10 @@ TEST_F(AclFragTest, UnhandledRecombinedPduBeforeMaxLeAclLengthKnown) {
           .handle = kHandle,
           .local_cid = kLocalCid,
           .payload_from_controller_fn =
-              [&capture](multibuf::MultiBuf&& buffer) {
+              [&capture](FlatConstMultiBuf&& buffer) {
                 capture.channel_pdus_received++;
                 // Unhandled
-                return multibuf::MultiBuf(std::move(buffer));
+                return FlatConstMultiBufInstance(std::move(buffer));
               },
       });
 

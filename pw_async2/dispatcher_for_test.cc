@@ -32,7 +32,6 @@ DispatcherForTestImpl::IdleTask::~IdleTask() {
 template <>
 DispatcherForTestImpl::~DispatcherForTestFacade() {
   PW_CHECK_INT_EQ(blocking_until_released_.load(std::memory_order_relaxed), 0);
-  Terminate();
 }
 
 template <>

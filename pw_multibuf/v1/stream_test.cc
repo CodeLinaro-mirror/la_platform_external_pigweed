@@ -16,191 +16,194 @@
 
 #include "pw_bytes/array.h"
 #include "pw_multibuf/multibuf.h"
-#include "pw_multibuf_private/chunk_testing.h"
 #include "pw_multibuf_private/test_utils.h"
 #include "pw_status/status.h"
 #include "pw_unit_test/framework.h"
 
+namespace pw::multibuf::v1 {
 namespace {
 
-using pw::bytes::Initialized;
-using pw::multibuf::MultiBuf;
-using pw::multibuf::test::ExpectElementsAre;
-using pw::multibuf::test::ExpectElementsEqual;
-using pw::multibuf::v1::Stream;
+using namespace pw::multibuf::v1::test_utils;
 
-using StreamTest = pw::multibuf::test::ChunkTest;
+constexpr auto kData64 = bytes::Initialized<64>([](size_t i) { return i; });
 
-constexpr auto kPoisonByte = std::byte{0x9d};
-
-constexpr auto kData64 = Initialized<64>([](size_t i) { return i; });
-
-TEST_F(StreamTest, Write_SingleChunkMultibuf_Succeeds) {
+TEST(MultibufStream, Write_SingleChunkMultibuf_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(128, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 128, kPoisonByte));
   Stream writer(buf);
-  EXPECT_EQ(writer.Write(kData64), pw::OkStatus());
+  EXPECT_EQ(writer.Write(kData64), OkStatus());
 
   ExpectElementsEqual(buf, kData64);
   buf.DiscardPrefix(kData64.size());
   ExpectElementsAre(buf, std::byte{kPoisonByte});
 }
 
-TEST_F(StreamTest, Write_SingleChunkMultibuf_ExactSize_Succeeds) {
+TEST(MultibufStream, Write_SingleChunkMultibuf_ExactSize_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(kData64.size(), kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, kData64.size(), kPoisonByte));
   Stream writer(buf);
-  EXPECT_EQ(writer.Write(kData64), pw::OkStatus());
+  EXPECT_EQ(writer.Write(kData64), OkStatus());
 
   EXPECT_EQ(buf.size(), kData64.size());
   ExpectElementsEqual(buf, kData64);
 }
 
-TEST_F(StreamTest, Write_MultiChunkMultibuf_Succeeds) {
+TEST(MultibufStream, Write_MultiChunkMultibuf_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(24, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(8, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 24, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, kPoisonByte));
   Stream writer(buf);
-  ASSERT_EQ(writer.Write(kData64), pw::OkStatus());
+  ASSERT_EQ(writer.Write(kData64), OkStatus());
 
   ExpectElementsEqual(buf, kData64);
 }
 
-TEST_F(StreamTest, Write_MultiChunkMultibuf_OutOfRange) {
+TEST(MultibufStream, Write_MultiChunkMultibuf_OutOfRange) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(8, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, kPoisonByte));
   Stream writer(buf);
-  ASSERT_EQ(writer.Write(kData64), pw::Status::OutOfRange());
+  ASSERT_EQ(writer.Write(kData64), Status::OutOfRange());
 
-  ExpectElementsEqual(buf, pw::span(kData64).first(24));
+  ExpectElementsEqual(buf, span(kData64).first(24));
 }
 
-TEST_F(StreamTest, Write_EmptyMultibuf_ReturnsOutOfRange) {
+TEST(MultibufStream, Write_EmptyMultibuf_ReturnsOutOfRange) {
   MultiBuf buf;
   Stream writer(buf);
-  EXPECT_EQ(writer.Write(kData64), pw::Status::OutOfRange());
+  EXPECT_EQ(writer.Write(kData64), Status::OutOfRange());
 }
 
-TEST_F(StreamTest, Seek_Empty) {
+TEST(MultibufStream, Seek_Empty) {
   MultiBuf buf;
   Stream writer(buf);
-  EXPECT_EQ(writer.Seek(0), pw::Status::OutOfRange());
-  EXPECT_EQ(writer.Seek(-100), pw::Status::OutOfRange());
-  EXPECT_EQ(writer.Seek(100), pw::Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(0), Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(-100), Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(100), Status::OutOfRange());
 }
 
-TEST_F(StreamTest, Seek_OutOfBounds) {
+TEST(MultibufStream, Seek_OutOfBounds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
   Stream writer(buf);
-  EXPECT_EQ(writer.Seek(-1), pw::Status::OutOfRange());
-  EXPECT_EQ(writer.Seek(buf.size()), pw::Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(-1), Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(buf.size()), Status::OutOfRange());
 }
 
-TEST_F(StreamTest, Seek_SingleChunkMultibuf_Succeeds) {
+TEST(MultibufStream, Seek_SingleChunkMultibuf_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(64, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 64, kPoisonByte));
   Stream writer(buf);
-  EXPECT_EQ(writer.Seek(32), pw::OkStatus());
-  EXPECT_EQ(writer.Write(Initialized<8>(2)), pw::OkStatus());
-  EXPECT_EQ(writer.Seek(40), pw::OkStatus());
-  EXPECT_EQ(writer.Write(Initialized<24>(1)), pw::OkStatus());
+  EXPECT_EQ(writer.Seek(32), OkStatus());
+  EXPECT_EQ(writer.Write(bytes::Initialized<8>(2)), OkStatus());
+  EXPECT_EQ(writer.Seek(40), OkStatus());
+  EXPECT_EQ(writer.Write(bytes::Initialized<24>(1)), OkStatus());
 
   constexpr auto kExpected =
-      pw::bytes::Concat(Initialized<32>(static_cast<uint8_t>(kPoisonByte)),
-                        Initialized<8>(2),
-                        Initialized<24>(1));
+      bytes::Concat(bytes::Initialized<32>(static_cast<uint8_t>(kPoisonByte)),
+                    bytes::Initialized<8>(2),
+                    bytes::Initialized<24>(1));
 
   ExpectElementsEqual(buf, kExpected);
 }
 
-TEST_F(StreamTest, Seek_MultiChunkMultiBuf_Succeeds) {
+TEST(MultibufStream, Seek_MultiChunkMultiBuf_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(8, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(8, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
   Stream writer(buf);
-  EXPECT_EQ(writer.Seek(32), pw::OkStatus());
-  EXPECT_EQ(writer.Write(Initialized<8>(1)), pw::OkStatus());
-  EXPECT_EQ(writer.Seek(40), pw::OkStatus());
-  EXPECT_EQ(writer.Write(Initialized<24>(2)), pw::OkStatus());
+  EXPECT_EQ(writer.Seek(32), OkStatus());
+  EXPECT_EQ(writer.Write(bytes::Initialized<8>(1)), OkStatus());
+  EXPECT_EQ(writer.Seek(40), OkStatus());
+  EXPECT_EQ(writer.Write(bytes::Initialized<24>(2)), OkStatus());
 
   constexpr auto kExpected =
-      pw::bytes::Concat(Initialized<32>(static_cast<uint8_t>(kPoisonByte)),
-                        Initialized<8>(1),
-                        Initialized<24>(2));
+      bytes::Concat(bytes::Initialized<32>(static_cast<uint8_t>(kPoisonByte)),
+                    bytes::Initialized<8>(1),
+                    bytes::Initialized<24>(2));
 
   ExpectElementsEqual(buf, kExpected);
 }
 
-TEST_F(StreamTest, Seek_Backwards_ReturnsOutOfRange) {
+TEST(MultibufStream, Seek_Backwards_ReturnsOutOfRange) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(8, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(8, kPoisonByte));
-  buf.PushFrontChunk(MakeChunk(16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, kPoisonByte));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, kPoisonByte));
   Stream writer(buf);
-  EXPECT_EQ(writer.Seek(32), pw::OkStatus());
-  EXPECT_EQ(writer.Seek(30), pw::Status::OutOfRange());
-  EXPECT_EQ(writer.Seek(48), pw::OkStatus());
-  EXPECT_EQ(writer.Seek(-4, Stream::Whence::kCurrent),
-            pw::Status::OutOfRange());
-  EXPECT_EQ(writer.Seek(60), pw::OkStatus());
-  EXPECT_EQ(writer.Seek(64), pw::Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(32), OkStatus());
+  EXPECT_EQ(writer.Seek(30), Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(48), OkStatus());
+  EXPECT_EQ(writer.Seek(-4, Stream::Whence::kCurrent), Status::OutOfRange());
+  EXPECT_EQ(writer.Seek(60), OkStatus());
+  EXPECT_EQ(writer.Seek(64), Status::OutOfRange());
 }
 
-TEST_F(StreamTest, Read_EmptyMultibuf_ReturnsOutOfRange) {
-  auto destination = Initialized<64>(static_cast<uint8_t>(kPoisonByte));
+TEST(MultibufStream, Read_EmptyMultibuf_ReturnsOutOfRange) {
+  auto destination = bytes::Initialized<64>(static_cast<uint8_t>(kPoisonByte));
   MultiBuf buf;
   Stream reader(buf);
-  EXPECT_EQ(reader.Read(destination).status(), pw::Status::OutOfRange());
+  EXPECT_EQ(reader.Read(destination).status(), Status::OutOfRange());
   ExpectElementsAre(destination, kPoisonByte);
 }
 
-TEST_F(StreamTest, Read_SingleChunkMultiBuf_Succeeds) {
-  auto destination = Initialized<64>(static_cast<uint8_t>(kPoisonByte));
+TEST(MultibufStream, Read_SingleChunkMultiBuf_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
+  auto destination = bytes::Initialized<64>(static_cast<uint8_t>(kPoisonByte));
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, std::byte{1}));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, std::byte{1}));
   Stream reader(buf);
 
-  pw::Result<pw::ByteSpan> result = reader.Read(destination);
-  EXPECT_EQ(result.status(), pw::OkStatus());
+  Result<ByteSpan> result = reader.Read(destination);
+  EXPECT_EQ(result.status(), OkStatus());
   EXPECT_EQ(result->size(), 16u);
   ExpectElementsAre(*result, std::byte{1});
 
   result = reader.Read(destination);
-  EXPECT_EQ(result.status(), pw::Status::OutOfRange());
-  ExpectElementsAre(pw::span(destination).first(16), std::byte{1});
-  ExpectElementsAre(pw::span(destination).subspan(16), kPoisonByte);
+  EXPECT_EQ(result.status(), Status::OutOfRange());
+  ExpectElementsAre(span(destination).first(16), std::byte{1});
+  ExpectElementsAre(span(destination).subspan(16), kPoisonByte);
 }
 
-TEST_F(StreamTest, Read_MultiChunkMultiBuf_Succeeds) {
-  auto destination = Initialized<64>(static_cast<uint8_t>(kPoisonByte));
+TEST(MultibufStream, Read_MultiChunkMultiBuf_Succeeds) {
+  AllocatorForTest<kArbitraryAllocatorSize> allocator;
+  auto destination = bytes::Initialized<64>(static_cast<uint8_t>(kPoisonByte));
   MultiBuf buf;
-  buf.PushFrontChunk(MakeChunk(16, std::byte{2}));
-  buf.PushFrontChunk(MakeChunk(8, std::byte{3}));
-  buf.PushFrontChunk(MakeChunk(8, std::byte{4}));
+  buf.PushFrontChunk(MakeChunk(allocator, 16, std::byte{2}));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, std::byte{3}));
+  buf.PushFrontChunk(MakeChunk(allocator, 8, std::byte{4}));
   Stream reader(buf);
 
-  constexpr auto kExpected = pw::bytes::Concat(
-      Initialized<8>(4), Initialized<8>(3), Initialized<16>(2));
+  constexpr auto kExpected = bytes::Concat(bytes::Initialized<8>(4),
+                                           bytes::Initialized<8>(3),
+                                           bytes::Initialized<16>(2));
 
-  pw::Result<pw::ByteSpan> result = reader.Read(destination);
-  EXPECT_EQ(result.status(), pw::OkStatus());
+  Result<ByteSpan> result = reader.Read(destination);
+  EXPECT_EQ(result.status(), OkStatus());
   EXPECT_EQ(result->size(), 32u);
   ExpectElementsEqual(*result, kExpected);
 
   result = reader.Read(destination);
-  EXPECT_EQ(result.status(), pw::Status::OutOfRange());
-  ExpectElementsEqual(pw::span(destination).first(32), kExpected);
-  ExpectElementsAre(pw::span(destination).subspan(32), kPoisonByte);
+  EXPECT_EQ(result.status(), Status::OutOfRange());
+  ExpectElementsEqual(span(destination).first(32), kExpected);
+  ExpectElementsAre(span(destination).subspan(32), kPoisonByte);
 }
 
 }  // namespace
+}  // namespace pw::multibuf::v1

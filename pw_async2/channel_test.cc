@@ -15,9 +15,9 @@
 #include "pw_async2/channel.h"
 
 #include "pw_allocator/testing.h"
-#include "pw_async2/await.h"
 #include "pw_async2/dispatcher_for_test.h"
 #include "pw_async2/func_task.h"
+#include "pw_async2/try.h"
 #include "pw_containers/vector.h"
 #include "pw_unit_test/framework.h"
 
@@ -66,7 +66,7 @@ class SenderTask : public Task {
         future_ = sender_.Send(next_);
       }
 
-      PW_AWAIT(bool sent, future_, cx);
+      PW_TRY_READY_ASSIGN(bool sent, future_.Pend(cx));
       if (!sent) {
         success_ = false;
         return Ready();
@@ -103,7 +103,7 @@ class ReceiverTask : public Task {
         future_ = receiver_.Receive();
       }
 
-      PW_AWAIT(std::optional<int> value, future_, cx);
+      PW_TRY_READY_ASSIGN(std::optional<int> value, future_.Pend(cx));
       if (!value.has_value()) {
         break;
       }
@@ -134,7 +134,7 @@ class DisconnectingReceiverTask : public Task {
         future_ = receiver_.Receive();
       }
 
-      PW_AWAIT(std::optional<int> value, future_, cx);
+      PW_TRY_READY_ASSIGN(std::optional<int> value, future_.Pend(cx));
       if (!value.has_value()) {
         break;
       }
@@ -396,7 +396,7 @@ class ReservedSenderTask : public Task {
         future_ = sender_.ReserveSend();
       }
 
-      PW_AWAIT(auto reservation, future_, cx);
+      PW_TRY_READY_ASSIGN(auto reservation, future_.Pend(cx));
       if (!reservation.has_value()) {
         success_ = false;
         return Ready();
@@ -461,7 +461,7 @@ TEST(StaticChannel, ReserveSendReservesSpace) {
         auto reserve_send_future = sender.ReserveSend();
         auto send_future_1 = sender.Send(kFirstSendValue);
         auto send_future_2 = sender.Send(kSecondSendValue);
-        PW_AWAIT(auto reservation, reserve_send_future, cx);
+        PW_TRY_READY_ASSIGN(auto reservation, reserve_send_future.Pend(cx));
         EXPECT_EQ(sender.remaining_capacity(), 1u);
 
         EXPECT_EQ(send_future_1.Pend(cx), Ready(true));
@@ -510,7 +510,7 @@ TEST(StaticChannel, ReserveSendReleasesSpaceWhenDropped) {
         auto send_future_2 = sender.Send(kSecondSendValue);
 
         {
-          PW_AWAIT(auto reservation, reserve_send_future, cx);
+          PW_TRY_READY_ASSIGN(auto reservation, reserve_send_future.Pend(cx));
           EXPECT_EQ(sender.remaining_capacity(), 1u);
           EXPECT_EQ(send_future_1.Pend(cx), Ready(true));
           EXPECT_EQ(sender.remaining_capacity(), 0u);
@@ -560,7 +560,7 @@ TEST(StaticChannel, ReserveSendManualCancel) {
         auto send_future_1 = sender.Send(kFirstSendValue);
         auto send_future_2 = sender.Send(kSecondSendValue);
 
-        PW_AWAIT(auto reservation, reserve_send_future, cx);
+        PW_TRY_READY_ASSIGN(auto reservation, reserve_send_future.Pend(cx));
         EXPECT_EQ(sender.remaining_capacity(), 1u);
         EXPECT_EQ(send_future_1.Pend(cx), Ready(true));
         EXPECT_EQ(sender.remaining_capacity(), 0u);
@@ -838,11 +838,14 @@ TEST(StaticChannel, SendOnClosedReturnsFalse) {
 
   FuncTask task([&sender](Context& cx) -> Poll<> {
     auto send_future = sender.Send(1);
-    PW_AWAIT(bool sent, send_future, cx);
+    EXPECT_TRUE(send_future.is_pendable());
+    EXPECT_FALSE(send_future.is_complete());
+
+    PW_TRY_READY_ASSIGN(bool sent, send_future.Pend(cx));
     EXPECT_FALSE(sent);
 
     auto reserve_future = sender.ReserveSend();
-    PW_AWAIT(auto reservation, reserve_future, cx);
+    PW_TRY_READY_ASSIGN(auto reservation, reserve_future.Pend(cx));
     EXPECT_FALSE(reservation.has_value());
 
     return Ready();
@@ -866,7 +869,10 @@ TEST(StaticChannel, Receive_Closed) {
 
   FuncTask task([&receiver](Context& cx) -> Poll<> {
     auto receive_future = receiver.Receive();
-    PW_AWAIT(auto result, receive_future, cx);
+    EXPECT_TRUE(receive_future.is_pendable());
+    EXPECT_FALSE(receive_future.is_complete());
+
+    PW_TRY_READY_ASSIGN(auto result, receive_future.Pend(cx));
     EXPECT_FALSE(result.has_value());
     return Ready();
   });
@@ -918,7 +924,7 @@ TEST(StaticChannel, Receive_ClosedWithData) {
     EXPECT_TRUE(result->has_value());
     EXPECT_EQ(*result, 1);
 
-    PW_AWAIT(result, receiver.Receive(), cx);
+    PW_TRY_READY_ASSIGN(result, receiver.Receive().Pend(cx));
     EXPECT_TRUE(result.IsReady());
     EXPECT_FALSE(result->has_value());
 

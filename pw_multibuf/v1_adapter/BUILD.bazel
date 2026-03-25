@@ -52,34 +52,6 @@ cc_library(
 
 # LINT.IfChange
 cc_library(
-    name = "chunk_testing",
-    testonly = True,
-    hdrs = ["private/pw_multibuf_private/chunk_testing.h"],
-    defines = [
-        "PW_MULTIBUF_VERSION=2",
-        "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
-    ],
-    strip_include_prefix = "private",
-    visibility = ["//visibility:private"],
-    deps = [
-        "//pw_allocator",
-        "//pw_allocator:testing",
-        "//pw_multibuf",
-        "//pw_multibuf:chunk_testing",
-    ],
-)
-
-pw_cc_test(
-    name = "chunk_test",
-    srcs = ["//pw_multibuf/v1:chunk_test_srcs"],
-    defines = [
-        "PW_MULTIBUF_VERSION=2",
-        "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
-    ],
-    deps = [":chunk_testing"],
-)
-
-cc_library(
     name = "single_chunk_region_tracker",
     hdrs = ["public/pw_multibuf/v1_adapter/single_chunk_region_tracker.h"],
     strip_include_prefix = "public",
@@ -96,7 +68,7 @@ cc_library(
 
 pw_cc_test(
     name = "single_chunk_region_tracker_test",
-    srcs = ["//pw_multibuf/v1:single_chunk_region_tracker_test_srcs"],
+    srcs = ["single_chunk_region_tracker_test.cc"],
     defines = [
         "PW_MULTIBUF_VERSION=2",
         "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
@@ -138,46 +110,37 @@ cc_library(
 # LINT.IfChange
 pw_cc_test(
     name = "multibuf_v1_test",
-    srcs = ["//pw_multibuf/v1:multibuf_test_srcs"],
+    srcs = ["multibuf_v1_test.cc"],
     defines = [
         "PW_MULTIBUF_VERSION=2",
         "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
     ],
     deps = [
-        ":chunk_testing",
+        "//pw_allocator",
+        "//pw_allocator:bump_allocator",
+        "//pw_allocator:testing",
+        "//pw_assert:check",
         "//pw_bytes",
-        "//pw_multibuf:test_utils",
+        "//pw_multibuf",
+        "//pw_status",
     ],
-)
-
-cc_library(
-    name = "multibuf_testing",
-    testonly = True,
-    hdrs = ["private/pw_multibuf_private/multibuf_testing.h"],
-    defines = [
-        "PW_MULTIBUF_VERSION=2",
-        "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
-    ],
-    strip_include_prefix = "private",
-    visibility = ["//visibility:private"],
-    deps = ["//pw_multibuf"],
 )
 
 pw_cc_test(
     name = "multibuf_v2_test",
-    srcs = ["//pw_multibuf/v2:multibuf_test_srcs"],
+    srcs = ["multibuf_v2_test.cc"],
     defines = [
         "PW_MULTIBUF_VERSION=2",
         "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
     ],
     has_nc_test = True,
     deps = [
-        ":multibuf_testing",
         "//pw_allocator:chunk_pool",
         "//pw_allocator:testing",
         "//pw_assert:check",
         "//pw_bytes",
         "//pw_multibuf",
+        "//pw_multibuf/v2:iterators",
         "//pw_result",
         "//pw_status",
     ],
@@ -220,7 +183,7 @@ cc_library(
 # LINT.IfChange
 pw_cc_test(
     name = "simple_allocator_test",
-    srcs = ["//pw_multibuf/v1:simple_allocator_test_srcs"],
+    srcs = ["simple_allocator_test.cc"],
     defines = [
         "PW_MULTIBUF_VERSION=2",
         "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",
@@ -228,10 +191,12 @@ pw_cc_test(
     deps = [
         "//pw_allocator:null_allocator",
         "//pw_allocator:testing",
+        "//pw_containers:storage",
+        "//pw_containers:vector",
+        "//pw_multibuf:chunk",
         "//pw_multibuf:simple_allocator",
     ],
 )
-
 # LINT.ThenChange(BUILD.gn, CMakeLists.txt)
 
 # LINT.IfChange
@@ -254,7 +219,7 @@ cc_library(
 # LINT.IfChange
 pw_cc_test(
     name = "from_span_test",
-    srcs = ["//pw_multibuf/v1:from_span_test_srcs"],
+    srcs = ["from_span_test.cc"],
     defines = [
         "PW_MULTIBUF_VERSION=2",
         "PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1",

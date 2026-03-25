@@ -14,7 +14,7 @@
 #pragma once
 
 #include "pw_bytes/span.h"
-#include "pw_metric/list.h"
+#include "pw_containers/intrusive_list.h"
 #include "pw_metric/metric.h"
 #include "pw_metric_proto/metric_service.pwpb.h"
 #include "pw_metric_proto/metric_service.raw_rpc.pb.h"
@@ -41,7 +41,8 @@ namespace pw::metric {
 class MetricService final
     : public proto::pw_rpc::raw::MetricService::Service<MetricService> {
  public:
-  MetricService(const MetricList& metrics, const GroupList& groups)
+  MetricService(const IntrusiveList<Metric>& metrics,
+                const IntrusiveList<Group>& groups)
       : metrics_(metrics), groups_(groups) {}
 
   // Returns metrics or groups matching the requested paths. This is the legacy
@@ -59,12 +60,12 @@ class MetricService final
   // (i.e. it is non-zero and past the end of the metric list).
   void Walk(ConstByteSpan request, rpc::RawUnaryResponder& responder);
 
-  const MetricList& metrics() const { return metrics_; }
-  const GroupList& groups() const { return groups_; }
+  const IntrusiveList<Metric>& metrics() const { return metrics_; }
+  const IntrusiveList<Group>& groups() const { return groups_; }
 
  private:
-  const MetricList& metrics_;
-  const GroupList& groups_;
+  const IntrusiveList<Metric>& metrics_;
+  const IntrusiveList<Group>& groups_;
 };
 
 }  // namespace pw::metric

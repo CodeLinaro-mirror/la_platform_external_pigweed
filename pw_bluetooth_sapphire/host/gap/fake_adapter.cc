@@ -117,10 +117,6 @@ void FakeAdapter::FakeLowEnergy::Connect(
     // NOTE: This assumes there is only 1 connection handle in tests.
     PW_CHECK(connections_.erase(handle->peer_identifier()));
   };
-  auto transfer_sync_fn =
-      [](auto, auto, auto, pw::Callback<void(hci::Result<>)> cb) {
-        cb(fit::error(Error(HostError::kNotSupported)));
-      };
   auto handle =
       std::make_unique<LowEnergyConnectionHandle>(peer_id,
                                                   /*handle=*/1,
@@ -128,8 +124,7 @@ void FakeAdapter::FakeLowEnergy::Connect(
                                                   std::move(accept_cis_cb),
                                                   std::move(bondable_cb),
                                                   std::move(security_cb),
-                                                  std::move(role_cb),
-                                                  std::move(transfer_sync_fn));
+                                                  std::move(role_cb));
   connections_[peer_id] = Connection{peer_id, connection_options, handle.get()};
   callback(fit::ok(std::move(handle)));
 }

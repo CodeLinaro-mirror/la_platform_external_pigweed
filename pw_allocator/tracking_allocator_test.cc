@@ -117,14 +117,11 @@ TEST_F(TrackingAllocatorTest, AddTrackingAllocatorAsChild) {
   constexpr static pw::metric::Token kChildToken = 2U;
   TrackingAllocator<::pw::allocator::NoMetrics> child(
       kChildToken, tracker_, pw::allocator::kAddTrackingAllocatorAsChild);
-  auto& children = tracker_.metric_group().children();
+  pw::IntrusiveList<pw::metric::Group>& children =
+      tracker_.metric_group().children();
   ASSERT_FALSE(children.empty());
   EXPECT_EQ(children.size(), 1U);
-  int count = 0;
-  children.ForEach([&](const auto& group) {
-    EXPECT_EQ(&group, &child.metric_group());
-    count += 1;
-  });
+  EXPECT_EQ(&(children.front()), &(child.metric_group()));
 }
 
 TEST_F(TrackingAllocatorTest, AllocateDeallocate) {

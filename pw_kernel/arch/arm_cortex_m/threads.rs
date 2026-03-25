@@ -13,9 +13,7 @@
 // the License.
 
 use core::arch::asm;
-use core::mem;
-#[cfg(feature = "user_space")]
-use core::mem::MaybeUninit;
+use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 
 use cortex_m::peripheral::{SCB, *};
@@ -25,11 +23,9 @@ use kernel::scheduler::{self, SchedulerState, ThreadLocalState};
 use kernel::sync::spinlock::SpinLockGuard;
 use kernel::{Arch, Kernel};
 use log_if::debug_if;
-#[cfg(feature = "user_space")]
 use memory_config::{MemoryConfig as _, MemoryRegionType};
 use pw_cast::CastInto as _;
 use pw_log::info;
-#[cfg(feature = "user_space")]
 use pw_status::{Error, Result};
 
 use crate::exceptions::{
@@ -75,7 +71,6 @@ pub struct ArchThreadState {
 impl ArchThreadState {
     #[inline(never)]
     #[expect(clippy::too_many_arguments)]
-    #[allow(unused_variables)]
     fn initialize_frame(
         &mut self,
         user_frame: *mut ExceptionFrame,
@@ -98,12 +93,9 @@ impl ArchThreadState {
             (*user_frame).pc = initial_pc.cast_into();
             (*user_frame).psr = RetPsrVal(0).with_t(true);
             (*kernel_frame) = mem::zeroed();
+            (*kernel_frame).psp = psp;
+            (*kernel_frame).control = control;
             (*kernel_frame).return_address = return_address.bits().cast_into();
-            #[cfg(feature = "user_space")]
-            {
-                (*kernel_frame).psp = psp;
-                (*kernel_frame).control = control;
-            }
         }
         self.frame = kernel_frame;
     }
@@ -121,7 +113,6 @@ impl Arch for crate::Arch {
     type Clock = super::timer::Clock;
     type AtomicBool = core::sync::atomic::AtomicBool;
     type AtomicUsize = core::sync::atomic::AtomicUsize;
-    #[cfg(feature = "user_space")]
     type SyscallArgs<'a> = crate::syscall::CortexMSyscallArgs<'a>;
     type InterruptController = nvic::Nvic;
 
@@ -262,6 +253,7 @@ impl Arch for crate::Arch {
         } // unsafe
 
         // Set up PMP attr registers so that all PMP configs can reference them.
+        #[cfg(feature = "user_space")]
         crate::protection::init();
 
         crate::timer::systick_early_init();

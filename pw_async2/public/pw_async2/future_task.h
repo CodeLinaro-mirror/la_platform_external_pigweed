@@ -20,7 +20,7 @@
 
 namespace pw::async2 {
 
-/// @submodule{pw_async2,tasks}
+/// @submodule{pw_async2,futures}
 
 /// Creates a task that pends a future until it completes.
 ///

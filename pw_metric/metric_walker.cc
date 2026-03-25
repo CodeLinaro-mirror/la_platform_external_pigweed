@@ -45,9 +45,10 @@ struct ResumableMetricWalker::ScopedName {
 ResumableMetricWalker::ResumableMetricWalker(UnaryMetricWriter& writer)
     : writer_(writer) {}
 
-Result<uint64_t> ResumableMetricWalker::Walk(const MetricList& metrics,
-                                             const GroupList& groups,
-                                             std::optional<uint64_t> cursor) {
+Result<uint64_t> ResumableMetricWalker::Walk(
+    const IntrusiveList<Metric>& metrics,
+    const IntrusiveList<Group>& groups,
+    std::optional<uint64_t> cursor) {
   start_cursor_ = cursor.value_or(0);
   writing_phase_ = (start_cursor_ == 0);
   next_cursor_ = 0;
@@ -80,9 +81,9 @@ Result<uint64_t> ResumableMetricWalker::Walk(const MetricList& metrics,
   return 0u;
 }
 
-Status ResumableMetricWalker::RecursiveWalkHelper(const MetricList& metrics,
-                                                  const GroupList& groups) {
-  for (const auto& metric : metrics.list()) {
+Status ResumableMetricWalker::RecursiveWalkHelper(
+    const IntrusiveList<Metric>& metrics, const IntrusiveList<Group>& groups) {
+  for (const auto& metric : metrics) {
     ScopedName scoped_name(metric.name(), *this);
 
     if (!writing_phase_) {
@@ -104,7 +105,7 @@ Status ResumableMetricWalker::RecursiveWalkHelper(const MetricList& metrics,
     PW_TRY(status);
   }
 
-  for (const auto& group : groups.list()) {
+  for (const auto& group : groups) {
     ScopedName scoped_name(group.name(), *this);
     PW_TRY(RecursiveWalkHelper(group.metrics(), group.children()));
   }

@@ -95,6 +95,7 @@ pw_add_library(pw_containers._deque_common INTERFACE
   HEADERS
     public/pw_containers/internal/deque_iterator.h
     public/pw_containers/internal/generic_deque.h
+    public/pw_containers/internal/count_and_capacity.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
@@ -127,18 +128,6 @@ pw_add_library(pw_containers.dynamic_hash_map INTERFACE
     pw_allocator.allocator
     pw_assert.assert
     pw_preprocessor
-)
-
-pw_add_library(pw_containers.dynamic_map INTERFACE
-  HEADERS
-    public/pw_containers/dynamic_map.h
-  PUBLIC_INCLUDES
-    public
-  PUBLIC_DEPS
-    pw_allocator.allocator
-    pw_assert.assert
-    pw_containers._common
-    pw_containers.intrusive_map
 )
 
 pw_add_library(pw_containers.inline_deque INTERFACE
@@ -476,17 +465,6 @@ pw_add_library(pw_containers.intrusive_set INTERFACE
     pw_containers.aa_tree
 )
 
-pw_add_library(pw_containers.optional INTERFACE
-  HEADERS
-    public/pw_containers/internal/optional.h
-    public/pw_containers/internal/optional_data.h
-  PUBLIC_INCLUDES
-    public
-  PUBLIC_DEPS
-    pw_assert
-    pw_preprocessor
-)
-
 pw_add_library(pw_containers.optional_tuple INTERFACE
   HEADERS
     public/pw_containers/optional_tuple.h
@@ -567,15 +545,6 @@ pw_add_test(pw_containers.dynamic_hash_map_test
   PRIVATE_DEPS
     pw_allocator.testing
     pw_containers.dynamic_hash_map
-    pw_containers._test_helpers
-)
-
-pw_add_test(pw_containers.dynamic_map_test
-  SOURCES
-    dynamic_map_test.cc
-  PRIVATE_DEPS
-    pw_allocator.testing
-    pw_containers.dynamic_map
     pw_containers._test_helpers
 )
 
@@ -911,18 +880,6 @@ pw_add_test(pw_containers.optional_tuple_test
     pw_containers._test_helpers
     pw_containers.optional_tuple
     pw_polyfill
-    pw_unit_test.constexpr
-  GROUPS
-    modules
-    pw_containers
-)
-
-pw_add_test(pw_containers.optional_test
-  SOURCES
-    optional_test.cc
-  PRIVATE_DEPS
-    pw_containers.optional
-    pw_containers._test_helpers
     pw_unit_test.constexpr
   GROUPS
     modules

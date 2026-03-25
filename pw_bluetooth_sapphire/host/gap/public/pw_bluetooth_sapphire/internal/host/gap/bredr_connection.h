@@ -18,7 +18,6 @@
 #include <optional>
 
 #include "pw_bluetooth_sapphire/internal/host/common/identifier.h"
-#include "pw_bluetooth_sapphire/internal/host/common/inspect.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/bredr_connection_request.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/bredr_interrogator.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/gap.h"
@@ -113,9 +112,8 @@ class BrEdrConnection final {
     return *pairing_state_manager_;
   }
 
-  pw::chrono::SystemClock::time_point create_time() const {
-    return create_time_;
-  }
+  // Returns the duration that this connection has been alive.
+  pw::chrono::SystemClock::duration duration() const;
 
   bool interrogation_complete() const { return !request_.has_value(); }
 
@@ -158,7 +156,6 @@ class BrEdrConnection final {
 
   struct InspectProperties {
     inspect::StringProperty peer_id;
-    inspect::IntProperty connected_time;
   };
   InspectProperties inspect_properties_;
   inspect::Node inspect_node_;

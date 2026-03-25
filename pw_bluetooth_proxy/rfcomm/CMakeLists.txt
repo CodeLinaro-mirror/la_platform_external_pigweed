@@ -36,16 +36,13 @@ set(RFCOMM_HEADERS
 # LINT.IfChange
 set(RFCOMM_PUBLIC_DEPS
   pw_allocator
+  pw_bluetooth_proxy
   pw_bluetooth.emboss_rfcomm_frames
-  pw_containers.intrusive_map
   pw_checksum
-  pw_multibuf
 )
 
 set(RFCOMM_PRIVATE_DEPS
-  pw_assert.check
   pw_bluetooth.emboss_util
-  pw_span.cast
 )
 
 set(RFCOMM_SOURCES
@@ -65,44 +62,87 @@ pw_add_library(pw_bluetooth_proxy.rfcomm STATIC
   PUBLIC_DEPS
     ${RFCOMM_PUBLIC_DEPS}
     pw_bluetooth_proxy
+    pw_multibuf
   PRIVATE_DEPS
     ${RFCOMM_PRIVATE_DEPS}
   SOURCES
     ${RFCOMM_SOURCES}
 )
 
-pw_add_library(pw_bluetooth_proxy.rfcomm._sync STATIC
+pw_add_library(pw_bluetooth_proxy.rfcomm._sync_mbv1 STATIC
   HEADERS
     ${RFCOMM_HEADERS}
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
     ${RFCOMM_PUBLIC_DEPS}
-    pw_bluetooth_proxy._sync
+    pw_bluetooth_proxy._sync_mbv1
+    pw_multibuf.v1.multibuf
   PRIVATE_DEPS
     ${RFCOMM_PRIVATE_DEPS}
   SOURCES
     ${RFCOMM_SOURCES}
 )
-target_compile_definitions(pw_bluetooth_proxy.rfcomm._sync PUBLIC
+target_compile_definitions(pw_bluetooth_proxy.rfcomm._sync_mbv1 PUBLIC
   PW_BLUETOOTH_PROXY_ASYNC=0
+  PW_MULTIBUF_VERSION=1
 )
 
-pw_add_library(pw_bluetooth_proxy.rfcomm._async STATIC
+pw_add_library(pw_bluetooth_proxy.rfcomm._async_mbv1 STATIC
   HEADERS
     ${RFCOMM_HEADERS}
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
     ${RFCOMM_PUBLIC_DEPS}
-    pw_bluetooth_proxy._async
+    pw_bluetooth_proxy._async_mbv1
+    pw_multibuf.v1.multibuf
   PRIVATE_DEPS
     ${RFCOMM_PRIVATE_DEPS}
   SOURCES
     ${RFCOMM_SOURCES}
 )
-target_compile_definitions(pw_bluetooth_proxy.rfcomm._async PUBLIC
+target_compile_definitions(pw_bluetooth_proxy.rfcomm._async_mbv1 PUBLIC
   PW_BLUETOOTH_PROXY_ASYNC=1
+  PW_MULTIBUF_VERSION=1
+)
+
+pw_add_library(pw_bluetooth_proxy.rfcomm._sync_mbv2 STATIC
+  HEADERS
+    ${RFCOMM_HEADERS}
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    ${RFCOMM_PUBLIC_DEPS}
+    pw_bluetooth_proxy._sync_mbv2
+    pw_multibuf.v2.multibuf
+  PRIVATE_DEPS
+    ${RFCOMM_PRIVATE_DEPS}
+  SOURCES
+    ${RFCOMM_SOURCES}
+)
+target_compile_definitions(pw_bluetooth_proxy.rfcomm._sync_mbv2 PUBLIC
+  PW_BLUETOOTH_PROXY_ASYNC=0
+  PW_MULTIBUF_VERSION=2
+)
+
+pw_add_library(pw_bluetooth_proxy.rfcomm._async_mbv2 STATIC
+  HEADERS
+    ${RFCOMM_HEADERS}
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    ${RFCOMM_PUBLIC_DEPS}
+    pw_bluetooth_proxy._async_mbv2
+    pw_multibuf.v2.multibuf
+  PRIVATE_DEPS
+    ${RFCOMM_PRIVATE_DEPS}
+  SOURCES
+    ${RFCOMM_SOURCES}
+)
+target_compile_definitions(pw_bluetooth_proxy.rfcomm._async_mbv2 PUBLIC
+  PW_BLUETOOTH_PROXY_ASYNC=1
+  PW_MULTIBUF_VERSION=2
 )
 
 # Tests
@@ -123,20 +163,40 @@ set(RFCOMM_TEST_SOURCES
   rfcomm_manager_test.cc
 )
 
-pw_add_test(pw_bluetooth_proxy.rfcomm.rfcomm_test_sync
+pw_add_test(pw_bluetooth_proxy.rfcomm.rfcomm_test_sync_mbv1
   PRIVATE_DEPS
     ${RFCOMM_TEST_PRIVATE_DEPS}
-    pw_bluetooth_proxy.rfcomm._sync
+    pw_bluetooth_proxy.rfcomm._sync_mbv1
   SOURCES
     ${RFCOMM_TEST_SOURCES}
   GROUPS
     modules
 )
 
-pw_add_test(pw_bluetooth_proxy.rfcomm.rfcomm_test_async
+pw_add_test(pw_bluetooth_proxy.rfcomm.rfcomm_test_async_mbv1
   PRIVATE_DEPS
     ${RFCOMM_TEST_PRIVATE_DEPS}
-    pw_bluetooth_proxy.rfcomm._async
+    pw_bluetooth_proxy.rfcomm._async_mbv1
+  SOURCES
+    ${RFCOMM_TEST_SOURCES}
+  GROUPS
+    modules
+)
+
+pw_add_test(pw_bluetooth_proxy.rfcomm.rfcomm_test_sync_mbv2
+  PRIVATE_DEPS
+    ${RFCOMM_TEST_PRIVATE_DEPS}
+    pw_bluetooth_proxy.rfcomm._sync_mbv2
+  SOURCES
+    ${RFCOMM_TEST_SOURCES}
+  GROUPS
+    modules
+)
+
+pw_add_test(pw_bluetooth_proxy.rfcomm.rfcomm_test_async_mbv2
+  PRIVATE_DEPS
+    ${RFCOMM_TEST_PRIVATE_DEPS}
+    pw_bluetooth_proxy.rfcomm._async_mbv2
   SOURCES
     ${RFCOMM_TEST_SOURCES}
   GROUPS

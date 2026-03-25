@@ -25,7 +25,6 @@ namespace pw::async2 {
 class EpollDispatcher final : public RunnableDispatcher {
  public:
   EpollDispatcher() { PW_ASSERT_OK(NativeInit()); }
-  ~EpollDispatcher() override { Terminate(); }
 
   Status NativeInit();
 

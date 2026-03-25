@@ -21,7 +21,7 @@
 #include "pw_assert/check.h"
 #include "pw_bytes/array.h"
 #include "pw_bytes/span.h"
-#include "pw_multibuf_private/multibuf_testing.h"
+#include "pw_compilation_testing/negative_compilation.h"
 #include "pw_result/result.h"
 #include "pw_status/try.h"
 #include "pw_unit_test/framework.h"
@@ -41,25 +41,24 @@ using ::pw::multibuf::v2::TrackedFlatMultiBuf;
 using ::pw::multibuf::v2::TrackedMultiBuf;
 using Event = ::pw::multibuf::v2::Observer::Event;
 
-using ConstMultiBufInstance = pw::multibuf::test::ConstMultiBufInstance;
-using FlatConstMultiBufInstance = pw::multibuf::test::FlatConstMultiBufInstance;
-using FlatMultiBufInstance = pw::multibuf::test::FlatMultiBufInstance;
-using MultiBufInstance = pw::multibuf::test::MultiBufInstance;
-using TrackedConstMultiBufInstance =
-    pw::multibuf::test::TrackedConstMultiBufInstance;
-using TrackedFlatConstMultiBufInstance =
-    pw::multibuf::test::TrackedFlatConstMultiBufInstance;
-using TrackedFlatMultiBufInstance =
-    pw::multibuf::test::TrackedFlatMultiBufInstance;
-using TrackedMultiBufInstance = pw::multibuf::test::TrackedMultiBufInstance;
+using ConstMultiBufInstance = ConstMultiBuf::Instance;
+using FlatConstMultiBufInstance = FlatConstMultiBuf::Instance;
+using FlatMultiBufInstance = FlatMultiBuf::Instance;
+using MultiBufInstance = MultiBuf::Instance;
+using TrackedConstMultiBufInstance = TrackedConstMultiBuf::Instance;
+using TrackedFlatConstMultiBufInstance = TrackedFlatConstMultiBuf::Instance;
+using TrackedFlatMultiBufInstance = TrackedFlatMultiBuf::Instance;
+using TrackedMultiBufInstance = TrackedMultiBuf::Instance;
 
+// LINT.IfChange
+// Keep these tests in sync with those in ../v1_adapter/multibuf_test.cc
 constexpr size_t kN = 32;
 
 /// Test fixture that includes helper methods to set up structures used to test
 /// MultiBufs
-class MultiBufV2Test : public ::testing::Test {
+class MultiBufTest : public ::testing::Test {
  protected:
-  MultiBufV2Test() {
+  MultiBufTest() {
     Fill(unowned_chunk_);
     owned_chunk_ = allocator_.MakeUnique<std::byte[]>(kN);
     PW_CHECK_NOTNULL(owned_chunk_.get());
@@ -152,7 +151,7 @@ struct TestObserver : public pw::multibuf::v2::Observer {
 
 // Unit tests. /////////////////////////////////////////////////////////////////
 
-TEST_F(MultiBufV2Test, CheckProperties) {
+TEST_F(MultiBufTest, CheckProperties) {
   // as<T> is needed for the v1_adapter aliases.
   ConstMultiBufInstance cmbi(allocator_);
   auto& cmb = cmbi->as<ConstMultiBuf>();
@@ -203,7 +202,7 @@ TEST_F(MultiBufV2Test, CheckProperties) {
   EXPECT_TRUE(tmb.is_observable());
 }
 
-TEST_F(MultiBufV2Test, CheckAllowedConversions) {
+TEST_F(MultiBufTest, CheckAllowedConversions) {
   ConstMultiBufInstance cmbi(allocator_);
   std::ignore = cmbi->as<ConstMultiBuf>();
   std::ignore = cmbi->as<FlatConstMultiBuf>();
@@ -248,7 +247,7 @@ TEST_F(MultiBufV2Test, CheckAllowedConversions) {
   std::ignore = tmbi->as<TrackedMultiBuf>();
 }
 
-TEST_F(MultiBufV2Test, CheckAllowedAssignments) {
+TEST_F(MultiBufTest, CheckAllowedAssignments) {
   MultiBufInstance mbi(allocator_);
 
   // Non-const can become const.
@@ -262,14 +261,308 @@ TEST_F(MultiBufV2Test, CheckAllowedAssignments) {
   TrackedConstMultiBufInstance tcmbi = std::move(*mbi);
 }
 
-TEST_F(MultiBufV2Test, DefaultConstructedIsEmpty) {
+#if PW_NC_TEST(CannotConvertConstMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<FlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<MultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToTrackedConstMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToTrackedFlatConstMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToTrackedFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<ConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<FlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<MultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToTrackedConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToTrackedFlatConstMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToTrackedFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatConstMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(FlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<ConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<MultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToTrackedConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<TrackedConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToTrackedFlatConstMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToTrackedFlatMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertFlatMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(MultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertMultiBufToTrackedConstMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(MultiBuf& mb) {
+  std::ignore = mb.as<TrackedConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertMultiBufToTrackedFlatConstMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(MultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertMultiBufToTrackedFlatMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(MultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Untracked MultiBufs do not have observer-related methods.");
+[[maybe_unused]] void ShouldAssert(MultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedConstMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(TrackedConstMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedConstMultiBufToFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedConstMultiBuf& mb) {
+  std::ignore = mb.as<FlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedConstMultiBufToMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedConstMultiBuf& mb) {
+  std::ignore = mb.as<MultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedConstMultiBufToTrackedFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedConstMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<ConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<FlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<MultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToTrackedConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToTrackedFlatMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedFlatMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatConstMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Read-only data cannot be converted to mutable data.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatConstMultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatMultiBufToConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatMultiBuf& mb) {
+  std::ignore = mb.as<ConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatMultiBufToMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatMultiBuf& mb) {
+  std::ignore = mb.as<MultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatMultiBufToTrackedConstMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatMultiBuf& mb) {
+  std::ignore = mb.as<TrackedConstMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedFlatMultiBufToTrackedMultiBuf)
+PW_NC_EXPECT("Flat MultiBufs do not have layer-related methods.");
+[[maybe_unused]] void ShouldAssert(TrackedFlatMultiBuf& mb) {
+  std::ignore = mb.as<TrackedMultiBuf>();
+}
+
+#elif PW_NC_TEST(CannotConvertTrackedMultiBufToNonMultiBuf)
+PW_NC_EXPECT("Only conversion to other MultiBuf types are supported.");
+[[maybe_unused]] void ShouldAssert(TrackedMultiBuf& mb) {
+  std::ignore = mb.as<pw::ByteSpan>();
+}
+
+#elif PW_NC_TEST(CannotConvertConstMultiBufToMultiBufInstance)
+PW_NC_EXPECT("Read-only data cannot be assigned to mutable data.");
+[[maybe_unused]] MultiBufInstance ShouldAssert(ConstMultiBuf&& mb) {
+  return MultiBufInstance(std::move(mb));
+}
+#endif  // PW_NC_TEST
+
+#if !PW_MULTIBUF_INCLUDE_V1_ADAPTERS
+// Despite the aliases, the v1_adapter's underlying multibuf is tracked and
+// layered.
+#if PW_NC_TEST(CannotAssignMultiBufToFlatMultiBufInstance)
+PW_NC_EXPECT("Layered MultiBufs cannot be assigned to flat MultiBufs.");
+[[maybe_unused]] MultiBufInstance ShouldAssert(MultiBuf&& mb) {
+  return FlatMultiBufInstance(std::move(mb));
+}
+
+#elif PW_NC_TEST(CannotAssignMultiBufToTrackedMultiBufInstance)
+PW_NC_EXPECT("Tracked MultiBufs cannot be assigned to untracked MultiBufs.");
+[[maybe_unused]] TrackedMultiBufInstance ShouldAssert(TrackedMultiBuf&& mb) {
+  return MultiBufInstance(std::move(mb));
+}
+#endif  // PW_NC_TEST
+#endif  // !PW_MULTIBUF_INCLUDE_V1_ADAPTERS
+
+TEST_F(MultiBufTest, DefaultConstructedIsEmpty) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   EXPECT_TRUE(mb.empty());
   EXPECT_EQ(mb.size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, InstancesAreMovable) {
+TEST_F(MultiBufTest, InstancesAreMovable) {
   // The allocators must outlive their allocations.
   AllocatorForTest<128> allocator1;
   AllocatorForTest<128> allocator2;
@@ -321,34 +614,34 @@ void ConsumesConstMultiBuf(ConstMultiBuf&& cmb) {
   static_cast<void>(cmbi);
 }
 
-TEST_F(MultiBufV2Test, MultiBufInstanceRvalueConversion) {
+TEST_F(MultiBufTest, MultiBufInstanceRvalueConversion) {
   ConstMultiBufInstance cmbi(allocator_);
   ConsumesConstMultiBuf(std::move(cmbi));
 }
 
-TEST_F(MultiBufV2Test, MultiBufInstanceRvalueDereference) {
+TEST_F(MultiBufTest, MultiBufInstanceRvalueDereference) {
   ConstMultiBufInstance cmbi(allocator_);
   ConsumesConstMultiBuf(*std::move(cmbi));
 }
 
-TEST_F(MultiBufV2Test, MultiBufInstanceRvalueDereferenceAndConvert) {
+TEST_F(MultiBufTest, MultiBufInstanceRvalueDereferenceAndConvert) {
   MultiBufInstance mbi(allocator_);
   ConsumesConstMultiBuf(*std::move(mbi));
 }
 
-TEST_F(MultiBufV2Test, MultiBufInstanceRvalueConvert) {
+TEST_F(MultiBufTest, MultiBufInstanceRvalueConvert) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   ConsumesConstMultiBuf(std::move(mb));
 }
 
-TEST_F(MultiBufV2Test, MultiBufInstanceRvalueAs) {
+TEST_F(MultiBufTest, MultiBufInstanceRvalueAs) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   ConsumesConstMultiBuf(std::move(mb).as<ConstMultiBuf>());
 }
 
-TEST_F(MultiBufV2Test, MultiBufInstanceMoveAssignment) {
+TEST_F(MultiBufTest, MultiBufInstanceMoveAssignment) {
   MultiBufInstance mbi1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi1->PushBack(std::move(chunk));
@@ -360,13 +653,93 @@ TEST_F(MultiBufV2Test, MultiBufInstanceMoveAssignment) {
   EXPECT_EQ(mb2->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, SizeForEmptyMultiBuf) {
+#if PW_NC_TEST(CannotCopyConstructMultiBuf)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] void ShouldAssert(MultiBuf&& mb) {
+  MultiBuf mb1(mb);
+  EXPECT_TRUE(mb1.empty());
+}
+
+#elif PW_NC_TEST(CannotCopyAssignMultiBuf)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] void ShouldAssert(MultiBuf&& mb) {
+  MultiBuf mb1(std::move(mb));
+  EXPECT_TRUE(mb1.empty());
+}
+
+#elif PW_NC_TEST(CannotMoveConstructMultiBuf)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] void ShouldAssert(MultiBuf&& mb) {
+  MultiBuf mb1 = mb;
+  EXPECT_TRUE(mb1.empty());
+}
+
+#elif PW_NC_TEST(CannotMoveAssignMultiBuf)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] void ShouldAssert(MultiBuf&& mb) {
+  MultiBuf mb1 = std::move(mb);
+  EXPECT_TRUE(mb1.empty());
+}
+
+#elif PW_NC_TEST(CannotConstructFromMultiBufInstance)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] void ShouldAssert(MultiBufInstance&& mbi) {
+  MultiBuf mb(mbi);
+  EXPECT_TRUE(mb.empty());
+}
+
+#elif PW_NC_TEST(CannotAssignFromMultiBufInstance)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] void ShouldAssert(MultiBufInstance&& mbi) {
+  MultiBuf mb = mbi;
+  EXPECT_TRUE(mb.empty());
+}
+
+#elif PW_NC_TEST(CannotCopyConstructInstance)
+PW_NC_EXPECT(
+    "(no matching constructor for initialization|Instances can only be created "
+    "from existing MultiBufs using move-construction or move-assignment)");
+[[maybe_unused]] void ShouldAssert(MultiBuf&& mb) {
+  MultiBufInstance tmp(mb);
+  EXPECT_TRUE(tmp->empty());
+}
+
+#elif PW_NC_TEST(CannotCopyAssignInstance)
+PW_NC_EXPECT(
+    "(no viable conversion|Instances can only be created from existing "
+    "MultiBufs using move-construction or move-assignment)");
+[[maybe_unused]] void ShouldAssert(MultiBuf&& mb) {
+  MultiBufInstance tmp = mb;
+  EXPECT_TRUE(tmp->empty());
+}
+
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, SizeForEmptyMultiBuf) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   EXPECT_EQ(mb.size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, SizeForMultiBufWithOneChunk) {
+TEST_F(MultiBufTest, SizeForMultiBufWithOneChunk) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -375,7 +748,7 @@ TEST_F(MultiBufV2Test, SizeForMultiBufWithOneChunk) {
   EXPECT_EQ(mb.size(), kN);
 }
 
-TEST_F(MultiBufV2Test, SizeForMultiBufWithMultipleChunks) {
+TEST_F(MultiBufTest, SizeForMultiBufWithMultipleChunks) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -387,7 +760,7 @@ TEST_F(MultiBufV2Test, SizeForMultiBufWithMultipleChunks) {
   EXPECT_EQ(mb.size(), kN + kN / 2);
 }
 
-TEST_F(MultiBufV2Test, IsDerefencableWithAt) {
+TEST_F(MultiBufTest, IsDerefencableWithAt) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -397,7 +770,54 @@ TEST_F(MultiBufV2Test, IsDerefencableWithAt) {
   }
 }
 
-TEST_F(MultiBufV2Test, IsDerefencableWithArrayOperator) {
+#if PW_NC_TEST(MutableDereference)
+PW_NC_EXPECT_CLANG(
+    "cannot assign to return value because function 'at' returns a const "
+    "value");
+PW_NC_EXPECT_GCC("assignment of read-only location");
+TEST_F(MultiBufTest, MutableDereference) {
+  ConstMultiBufInstance mbi(allocator_);
+  auto& mb = mbi->as<ConstMultiBuf>();
+  mb.at(0) = std::byte(0);
+}
+
+#elif PW_NC_TEST(CannotReturnMultiBuf)
+PW_NC_EXPECT(
+    "Only copies and moves from `BasicMultiBuf<...>::Instance`"
+    "to `BasicMultiBuf<...>&` or another "
+    "`BasicMultiBuf<...>::Instance` are valid.");
+[[maybe_unused]] MultiBuf ShouldAssert(MultiBuf&& mb) { return mb; }
+
+#endif  // PW_NC_TEST
+
+#if !PW_MULTIBUF_INCLUDE_V1_ADAPTERS
+// The v1_adapter doesn't have a concept of constness.
+
+#if PW_NC_TEST(MutableAccess)
+PW_NC_EXPECT_CLANG(
+    "cannot assign to return value because function 'operator\[\]' returns a "
+    "const value");
+PW_NC_EXPECT_GCC("assignment of read-only location");
+TEST_F(MultiBufTest, MutableAccess) {
+  ConstMultiBufInstance mbi(allocator_);
+  auto& mb = mbi->as<ConstMultiBuf>();
+  mb[0] = std::byte(0);
+}
+
+#elif PW_NC_TEST(MutableIterators)
+PW_NC_EXPECT_CLANG(
+    "cannot assign to return value because function 'operator\*' returns a "
+    "const value");
+PW_NC_EXPECT_GCC("assignment of read-only location");
+TEST_F(MultiBufTest, MutableIterators) {
+  ConstMultiBufInstance mb(allocator_);
+  *mb->begin() = std::byte(0);
+}
+
+#endif  // PW_NC_TEST
+#endif  // !PW_MULTIBUF_INCLUDE_V1_ADAPTERS
+
+TEST_F(MultiBufTest, IsDerefencableWithArrayOperator) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -407,7 +827,7 @@ TEST_F(MultiBufV2Test, IsDerefencableWithArrayOperator) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateConstChunksOverEmpty) {
+TEST_F(MultiBufTest, IterateConstChunksOverEmpty) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   for ([[maybe_unused]] auto buffer : mb.ConstChunks()) {
@@ -415,7 +835,7 @@ TEST_F(MultiBufV2Test, IterateConstChunksOverEmpty) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateChunksOverEmpty) {
+TEST_F(MultiBufTest, IterateChunksOverEmpty) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   for ([[maybe_unused]] auto buffer : mb.Chunks()) {
@@ -423,7 +843,7 @@ TEST_F(MultiBufV2Test, IterateChunksOverEmpty) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateChunksOverEmptyChunks) {
+TEST_F(MultiBufTest, IterateChunksOverEmptyChunks) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   for (size_t i = 0; i < 3; ++i) {
@@ -437,7 +857,7 @@ TEST_F(MultiBufV2Test, IterateChunksOverEmptyChunks) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateConstChunksOverOne) {
+TEST_F(MultiBufTest, IterateConstChunksOverOne) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -449,7 +869,7 @@ TEST_F(MultiBufV2Test, IterateConstChunksOverOne) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateChunksOverOne) {
+TEST_F(MultiBufTest, IterateChunksOverOne) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -461,7 +881,7 @@ TEST_F(MultiBufV2Test, IterateChunksOverOne) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateConstBytesOverEmpty) {
+TEST_F(MultiBufTest, IterateConstBytesOverEmpty) {
   ConstMultiBufInstance mbi(allocator_);
 
   const auto& mb1 = mbi->as<ConstMultiBuf>();
@@ -471,7 +891,7 @@ TEST_F(MultiBufV2Test, IterateConstBytesOverEmpty) {
   EXPECT_EQ(mb2.cbegin(), mb2.cend());
 }
 
-TEST_F(MultiBufV2Test, IterateConstBytesOverContiguous) {
+TEST_F(MultiBufTest, IterateConstBytesOverContiguous) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -484,7 +904,7 @@ TEST_F(MultiBufV2Test, IterateConstBytesOverContiguous) {
   EXPECT_EQ(value, unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, IterateBytesOverContiguous) {
+TEST_F(MultiBufTest, IterateBytesOverContiguous) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -507,7 +927,7 @@ TEST_F(MultiBufV2Test, IterateBytesOverContiguous) {
   EXPECT_EQ(value, unowned_chunk_.size() * 2);
 }
 
-TEST_F(MultiBufV2Test, IterateConstBytesOverNonContiguous) {
+TEST_F(MultiBufTest, IterateConstBytesOverNonContiguous) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   MakeNonContiguous(mb, kN, 0xFF);
@@ -516,7 +936,7 @@ TEST_F(MultiBufV2Test, IterateConstBytesOverNonContiguous) {
   }
 }
 
-TEST_F(MultiBufV2Test, IterateBytesOverNonContiguous) {
+TEST_F(MultiBufTest, IterateBytesOverNonContiguous) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   MakeNonContiguous(mb.as<ConstMultiBuf>(), kN, 0xFF);
@@ -540,12 +960,12 @@ TEST_F(MultiBufV2Test, IterateBytesOverNonContiguous) {
   EXPECT_EQ(value, kN * 3);
 }
 
-TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksEqualToZero) {
+TEST_F(MultiBufTest, TryReserveChunksWithNumChunksEqualToZero) {
   ConstMultiBufInstance mb(allocator_);
   EXPECT_TRUE(mb->TryReserveChunks(0));
 }
 
-TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksLessThanTheCurrentChunks) {
+TEST_F(MultiBufTest, TryReserveChunksWithNumChunksLessThanTheCurrentChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -555,7 +975,7 @@ TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksLessThanTheCurrentChunks) {
   EXPECT_TRUE(mb->TryReserveChunks(1));
 }
 
-TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksEqualToTheCurrentChunks) {
+TEST_F(MultiBufTest, TryReserveChunksWithNumChunksEqualToTheCurrentChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -565,7 +985,7 @@ TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksEqualToTheCurrentChunks) {
   EXPECT_TRUE(mb->TryReserveChunks(2));
 }
 
-TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksMoreThanTheCurrentChunks) {
+TEST_F(MultiBufTest, TryReserveChunksWithNumChunksMoreThanTheCurrentChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -574,14 +994,13 @@ TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksMoreThanTheCurrentChunks) {
   EXPECT_TRUE(mb->TryReserveChunks(3));
 }
 
-TEST_F(MultiBufV2Test, TryReserveChunksWithNumChunksMoreThanCanBeSatisfied) {
+TEST_F(MultiBufTest, TryReserveChunksWithNumChunksMoreThanCanBeSatisfied) {
   ConstMultiBufInstance mb(allocator_);
   allocator_.Exhaust();
   EXPECT_FALSE(mb->TryReserveChunks(1));
 }
 
-TEST_F(MultiBufV2Test,
-       TryReserveForInsertOfMultiBufFailsDueToAllocationFailure) {
+TEST_F(MultiBufTest, TryReserveForInsertOfMultiBufFailsDueToAllocationFailure) {
   ConstMultiBufInstance mb1(allocator_);
   ConstMultiBufInstance mb2(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -590,14 +1009,14 @@ TEST_F(MultiBufV2Test,
   EXPECT_FALSE(mb1->TryReserveForInsert(mb1->begin(), *mb2));
 }
 
-TEST_F(MultiBufV2Test, TryReserveForInsertOfUniquePtrFailsDueToExcessiveSize) {
+TEST_F(MultiBufTest, TryReserveForInsertOfUniquePtrFailsDueToExcessiveSize) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   allocator_.Exhaust();
   EXPECT_FALSE(mb->TryReserveForInsert(mb->begin()));
 }
 
-TEST_F(MultiBufV2Test, InsertMultiBufIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, InsertMultiBufIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb1(allocator_);
 
   ConstMultiBufInstance mb2(allocator_);
@@ -612,7 +1031,7 @@ TEST_F(MultiBufV2Test, InsertMultiBufIntoEmptyMultiBuf) {
   EXPECT_TRUE(mb2->empty());
 }
 
-TEST_F(MultiBufV2Test, InsertMultiBufIntoNonEmptyMultiBufAtBoundary) {
+TEST_F(MultiBufTest, InsertMultiBufIntoNonEmptyMultiBufAtBoundary) {
   ConstMultiBufInstance mb1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb1->PushBack(std::move(chunk));
@@ -629,7 +1048,7 @@ TEST_F(MultiBufV2Test, InsertMultiBufIntoNonEmptyMultiBufAtBoundary) {
   EXPECT_TRUE(mb2->empty());
 }
 
-TEST_F(MultiBufV2Test, InsertMultiBufIntoNonEmptyMultiBufMidChunk) {
+TEST_F(MultiBufTest, InsertMultiBufIntoNonEmptyMultiBufMidChunk) {
   ConstMultiBufInstance mb1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb1->PushBack(std::move(chunk));
@@ -646,7 +1065,7 @@ TEST_F(MultiBufV2Test, InsertMultiBufIntoNonEmptyMultiBufMidChunk) {
   EXPECT_TRUE(mb2->empty());
 }
 
-TEST_F(MultiBufV2Test, InsertUnownedIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, InsertUnownedIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
 
   auto iter = mb->Insert(mb->begin(), unowned_chunk_);
@@ -656,7 +1075,7 @@ TEST_F(MultiBufV2Test, InsertUnownedIntoEmptyMultiBuf) {
   EXPECT_EQ(mb->size(), unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, InsertUnownedIntoNonEmptyMultiBufAtBoundary) {
+TEST_F(MultiBufTest, InsertUnownedIntoNonEmptyMultiBufAtBoundary) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -668,7 +1087,7 @@ TEST_F(MultiBufV2Test, InsertUnownedIntoNonEmptyMultiBufAtBoundary) {
   EXPECT_EQ(mb->size(), kN + unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, InsertUnownedIntoNonEmptyMultiBufMidChunk) {
+TEST_F(MultiBufTest, InsertUnownedIntoNonEmptyMultiBufMidChunk) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -680,7 +1099,7 @@ TEST_F(MultiBufV2Test, InsertUnownedIntoNonEmptyMultiBufMidChunk) {
   EXPECT_EQ(mb->size(), kN + unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, InsertUniquePtrIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, InsertUniquePtrIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
 
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -692,7 +1111,7 @@ TEST_F(MultiBufV2Test, InsertUniquePtrIntoEmptyMultiBuf) {
   EXPECT_EQ(mb->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, InsertUniquePtrIntoNonEmptyMultiBufAtBoundary) {
+TEST_F(MultiBufTest, InsertUniquePtrIntoNonEmptyMultiBufAtBoundary) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -706,7 +1125,7 @@ TEST_F(MultiBufV2Test, InsertUniquePtrIntoNonEmptyMultiBufAtBoundary) {
   EXPECT_EQ(mb->size(), 2 * kN);
 }
 
-TEST_F(MultiBufV2Test, InsertUniquePtrIntoNonEmptyMultiBufMidChunk) {
+TEST_F(MultiBufTest, InsertUniquePtrIntoNonEmptyMultiBufMidChunk) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -720,7 +1139,7 @@ TEST_F(MultiBufV2Test, InsertUniquePtrIntoNonEmptyMultiBufMidChunk) {
   EXPECT_EQ(mb->size(), 2 * kN);
 }
 
-TEST_F(MultiBufV2Test, InsertSharedPtrIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, InsertSharedPtrIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
 
   auto chunk = allocator_.MakeShared<std::byte[]>(kN);
@@ -732,7 +1151,7 @@ TEST_F(MultiBufV2Test, InsertSharedPtrIntoEmptyMultiBuf) {
   EXPECT_EQ(mb->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, InsertSharedPtrIntoNonEmptyMultiBufAtBoundary) {
+TEST_F(MultiBufTest, InsertSharedPtrIntoNonEmptyMultiBufAtBoundary) {
   ConstMultiBufInstance mb(allocator_);
 
   auto chunk = allocator_.MakeShared<std::byte[]>(2 * kN);
@@ -756,7 +1175,7 @@ TEST_F(MultiBufV2Test, InsertSharedPtrIntoNonEmptyMultiBufAtBoundary) {
   }
 }
 
-TEST_F(MultiBufV2Test, InsertSharedPtrIntoNonEmptyMultiBufMidChunk) {
+TEST_F(MultiBufTest, InsertSharedPtrIntoNonEmptyMultiBufMidChunk) {
   ConstMultiBufInstance mb(allocator_);
 
   auto chunk = allocator_.MakeShared<std::byte[]>(2 * kN);
@@ -785,7 +1204,7 @@ TEST_F(MultiBufV2Test, InsertSharedPtrIntoNonEmptyMultiBufMidChunk) {
   }
 }
 
-TEST_F(MultiBufV2Test,
+TEST_F(MultiBufTest,
        TryReserveForPushBackOfMultiBufFailsDueToAllocationFailure) {
   ConstMultiBufInstance mb1(allocator_);
   ConstMultiBufInstance mb2(allocator_);
@@ -795,21 +1214,20 @@ TEST_F(MultiBufV2Test,
   EXPECT_FALSE(mb1->TryReserveForPushBack(*mb2));
 }
 
-TEST_F(MultiBufV2Test, TryReserveForPushBackOfUnownedFailsDueToExcessiveSize) {
+TEST_F(MultiBufTest, TryReserveForPushBackOfUnownedFailsDueToExcessiveSize) {
   ConstMultiBufInstance mb(allocator_);
   allocator_.Exhaust();
   EXPECT_FALSE(mb->TryReserveForPushBack());
 }
 
-TEST_F(MultiBufV2Test,
-       TryReserveForPushBackOfUniquePtrFailsDueToExcessiveSize) {
+TEST_F(MultiBufTest, TryReserveForPushBackOfUniquePtrFailsDueToExcessiveSize) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   allocator_.Exhaust();
   EXPECT_FALSE(mb->TryReserveForPushBack());
 }
 
-TEST_F(MultiBufV2Test, TryReserveForPushBackFailsWhenMemoryExhausted) {
+TEST_F(MultiBufTest, TryReserveForPushBackFailsWhenMemoryExhausted) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
 
@@ -817,7 +1235,7 @@ TEST_F(MultiBufV2Test, TryReserveForPushBackFailsWhenMemoryExhausted) {
   EXPECT_FALSE(mb.TryReserveForPushBack());
 }
 
-TEST_F(MultiBufV2Test, PushBackSucceedsWithMultiBuf) {
+TEST_F(MultiBufTest, PushBackSucceedsWithMultiBuf) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -834,7 +1252,7 @@ TEST_F(MultiBufV2Test, PushBackSucceedsWithMultiBuf) {
   EXPECT_TRUE(fragment->empty());
 }
 
-TEST_F(MultiBufV2Test, PushBackSucceedsWithByteSpan) {
+TEST_F(MultiBufTest, PushBackSucceedsWithByteSpan) {
   {
     ConstMultiBufInstance mbi(allocator_);
     auto& mb = mbi->as<ConstMultiBuf>();
@@ -848,7 +1266,7 @@ TEST_F(MultiBufV2Test, PushBackSucceedsWithByteSpan) {
   EXPECT_EQ(unowned_chunk_[0], static_cast<std::byte>(0));
 }
 
-TEST_F(MultiBufV2Test, PushBackMultiBufIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackMultiBufIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb1(allocator_);
   ConstMultiBufInstance mb2(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -858,7 +1276,7 @@ TEST_F(MultiBufV2Test, PushBackMultiBufIntoEmptyMultiBuf) {
   EXPECT_TRUE(mb2->empty());
 }
 
-TEST_F(MultiBufV2Test, PushBackMultiBufIntoNonEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackMultiBufIntoNonEmptyMultiBuf) {
   ConstMultiBufInstance mb1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb1->PushBack(std::move(chunk));
@@ -870,13 +1288,13 @@ TEST_F(MultiBufV2Test, PushBackMultiBufIntoNonEmptyMultiBuf) {
   EXPECT_TRUE(mb2->empty());
 }
 
-TEST_F(MultiBufV2Test, PushBackUnownedIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackUnownedIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
   mb->PushBack(unowned_chunk_);
   EXPECT_EQ(mb->size(), unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, PushBackUnownedIntoNonEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackUnownedIntoNonEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -884,14 +1302,14 @@ TEST_F(MultiBufV2Test, PushBackUnownedIntoNonEmptyMultiBuf) {
   EXPECT_EQ(mb->size(), kN + unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, PushBackUniquePtrIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackUniquePtrIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
   EXPECT_EQ(mb->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, PushBackUniquePtrIntoNonEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackUniquePtrIntoNonEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk1 = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk1));
@@ -900,7 +1318,7 @@ TEST_F(MultiBufV2Test, PushBackUniquePtrIntoNonEmptyMultiBuf) {
   EXPECT_EQ(mb->size(), 2 * kN);
 }
 
-TEST_F(MultiBufV2Test, PushBackSucceedsWithUniquePtr) {
+TEST_F(MultiBufTest, PushBackSucceedsWithUniquePtr) {
   auto& metrics = allocator_.metrics();
   {
     ConstMultiBufInstance mbi(allocator_);
@@ -915,14 +1333,14 @@ TEST_F(MultiBufV2Test, PushBackSucceedsWithUniquePtr) {
   // Chunk and deque automatically freed.
   EXPECT_EQ(metrics.allocated_bytes.value(), 0u);
 }
-TEST_F(MultiBufV2Test, PushBackSharedPtrIntoEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackSharedPtrIntoEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeShared<std::byte[]>(kN);
   mb->PushBack(chunk);
   EXPECT_EQ(mb->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, PushBackSharedPtrIntoNonEmptyMultiBuf) {
+TEST_F(MultiBufTest, PushBackSharedPtrIntoNonEmptyMultiBuf) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk1 = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk1));
@@ -931,13 +1349,13 @@ TEST_F(MultiBufV2Test, PushBackSharedPtrIntoNonEmptyMultiBuf) {
   EXPECT_EQ(mb->size(), 2 * kN);
 }
 
-TEST_F(MultiBufV2Test, IsRemovableReturnsFalseWhenOutOfRange) {
+TEST_F(MultiBufTest, IsRemovableReturnsFalseWhenOutOfRange) {
   ConstMultiBufInstance mb(allocator_);
   mb->PushBack(unowned_chunk_);
   EXPECT_FALSE(mb->IsRemovable(mb->begin() + 1, unowned_chunk_.size()));
 }
 
-TEST_F(MultiBufV2Test, RemoveFailsWhenUnableToAllocateForSplit) {
+TEST_F(MultiBufTest, RemoveFailsWhenUnableToAllocateForSplit) {
   ConstMultiBufInstance mbi(allocator_);
   mbi->PushBack(unowned_chunk_);
   allocator_.Exhaust();
@@ -946,7 +1364,7 @@ TEST_F(MultiBufV2Test, RemoveFailsWhenUnableToAllocateForSplit) {
   EXPECT_EQ(mbi->size(), unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, RemoveOnlyUnownedChunk) {
+TEST_F(MultiBufTest, RemoveOnlyUnownedChunk) {
   ConstMultiBufInstance mb(allocator_);
   mb->PushBack(unowned_chunk_);
 
@@ -957,7 +1375,7 @@ TEST_F(MultiBufV2Test, RemoveOnlyUnownedChunk) {
   EXPECT_EQ(result.value()->size(), unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, RemoveChunkPrefix) {
+TEST_F(MultiBufTest, RemoveChunkPrefix) {
   ConstMultiBufInstance mb(allocator_);
   mb->PushBack(unowned_chunk_);
 
@@ -968,7 +1386,7 @@ TEST_F(MultiBufV2Test, RemoveChunkPrefix) {
   EXPECT_EQ(result.value()->size(), unowned_chunk_.size() / 2);
 }
 
-TEST_F(MultiBufV2Test, RemoveCompleteUnownedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, RemoveCompleteUnownedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -981,7 +1399,7 @@ TEST_F(MultiBufV2Test, RemoveCompleteUnownedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(result.value()->size(), unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, RemovePartialUnownedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, RemovePartialUnownedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto owned = allocator_.MakeUnique<std::byte[]>(kN / 2);
   mb->PushBack(std::move(owned));
@@ -995,7 +1413,7 @@ TEST_F(MultiBufV2Test, RemovePartialUnownedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(result.value()->size(), kN / 2);
 }
 
-TEST_F(MultiBufV2Test, RemoveOnlyOwnedChunk) {
+TEST_F(MultiBufTest, RemoveOnlyOwnedChunk) {
   ConstMultiBufInstance mbi1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi1->PushBack(std::move(chunk));
@@ -1015,7 +1433,7 @@ TEST_F(MultiBufV2Test, RemoveOnlyOwnedChunk) {
   EXPECT_EQ(mbi2->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, RemoveCompleteOwnedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, RemoveCompleteOwnedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mbi1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi1->PushBack(std::move(chunk));
@@ -1035,7 +1453,7 @@ TEST_F(MultiBufV2Test, RemoveCompleteOwnedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(mbi2->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, RemovePartialOwnedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, RemovePartialOwnedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mbi1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi1->PushBack(std::move(chunk));
@@ -1062,7 +1480,7 @@ TEST_F(MultiBufV2Test, RemovePartialOwnedChunkFromMultiBufWithOtherChunks) {
   EXPECT_FALSE(mbi2->IsReleasable(mbi2->begin() + 3 * kN / 2));
 }
 
-TEST_F(MultiBufV2Test, RemoveOnlySharedChunk) {
+TEST_F(MultiBufTest, RemoveOnlySharedChunk) {
   ConstMultiBufInstance mbi1(allocator_);
   auto chunk = allocator_.MakeShared<std::byte[]>(kN);
   mbi1->PushBack(chunk);
@@ -1082,7 +1500,7 @@ TEST_F(MultiBufV2Test, RemoveOnlySharedChunk) {
   EXPECT_EQ(mbi2->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, RemoveCompleteSharedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, RemoveCompleteSharedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mbi1(allocator_);
   auto owned = allocator_.MakeUnique<std::byte[]>(kN);
   mbi1->PushBack(std::move(owned));
@@ -1102,7 +1520,7 @@ TEST_F(MultiBufV2Test, RemoveCompleteSharedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(mbi2->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, RemovePartialSharedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, RemovePartialSharedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mbi1(allocator_);
   auto owned = allocator_.MakeUnique<std::byte[]>(kN / 2);
   mbi1->PushBack(std::move(owned));
@@ -1122,7 +1540,7 @@ TEST_F(MultiBufV2Test, RemovePartialSharedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(mbi2->size(), kN / 2);
 }
 
-TEST_F(MultiBufV2Test, RemoveMultipleChunksFromMultiBufWithMixedOwnership) {
+TEST_F(MultiBufTest, RemoveMultipleChunksFromMultiBufWithMixedOwnership) {
   ConstMultiBufInstance mbi1(allocator_);
 
   // [0.0 * kN, 0.5 * kN)
@@ -1160,7 +1578,7 @@ TEST_F(MultiBufV2Test, RemoveMultipleChunksFromMultiBufWithMixedOwnership) {
   EXPECT_EQ(mbi2->size(), kN * 3);
 }
 
-TEST_F(MultiBufV2Test, PopFrontFragmentFailsOnAllocationFailure) {
+TEST_F(MultiBufTest, PopFrontFragmentFailsOnAllocationFailure) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
 
@@ -1178,7 +1596,7 @@ TEST_F(MultiBufV2Test, PopFrontFragmentFailsOnAllocationFailure) {
   EXPECT_EQ(mb.size(), kN * 3);
 }
 
-TEST_F(MultiBufV2Test, PopFrontFragmentSucceedsWhenNotEmpty) {
+TEST_F(MultiBufTest, PopFrontFragmentSucceedsWhenNotEmpty) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
 
@@ -1197,7 +1615,7 @@ TEST_F(MultiBufV2Test, PopFrontFragmentSucceedsWhenNotEmpty) {
   EXPECT_EQ(mb.size(), kN * 2);
 }
 
-TEST_F(MultiBufV2Test, DiscardFailsOnAllocationFailure) {
+TEST_F(MultiBufTest, DiscardFailsOnAllocationFailure) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(2 * kN);
   mbi->PushBack(std::move(chunk));
@@ -1208,7 +1626,7 @@ TEST_F(MultiBufV2Test, DiscardFailsOnAllocationFailure) {
   EXPECT_EQ(mbi->size(), 2 * kN);
 }
 
-TEST_F(MultiBufV2Test, DiscardOnlyUnownedChunk) {
+TEST_F(MultiBufTest, DiscardOnlyUnownedChunk) {
   ConstMultiBufInstance mb(allocator_);
   mb->PushBack(unowned_chunk_);
   auto result = mb->Discard(mb->begin(), unowned_chunk_.size());
@@ -1216,7 +1634,7 @@ TEST_F(MultiBufV2Test, DiscardOnlyUnownedChunk) {
   EXPECT_TRUE(mb->empty());
 }
 
-TEST_F(MultiBufV2Test, DiscardCompleteUnownedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, DiscardCompleteUnownedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -1226,7 +1644,7 @@ TEST_F(MultiBufV2Test, DiscardCompleteUnownedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(mb->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, DiscardPartialUnownedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, DiscardPartialUnownedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -1236,7 +1654,7 @@ TEST_F(MultiBufV2Test, DiscardPartialUnownedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(mb->size(), kN + unowned_chunk_.size() / 2);
 }
 
-TEST_F(MultiBufV2Test, DiscardOnlyOwnedChunk) {
+TEST_F(MultiBufTest, DiscardOnlyOwnedChunk) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -1245,7 +1663,7 @@ TEST_F(MultiBufV2Test, DiscardOnlyOwnedChunk) {
   EXPECT_TRUE(mb->empty());
 }
 
-TEST_F(MultiBufV2Test, DiscardCompleteOwnedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, DiscardCompleteOwnedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk1 = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk1));
@@ -1256,7 +1674,7 @@ TEST_F(MultiBufV2Test, DiscardCompleteOwnedChunkFromMultiBufWithOtherChunks) {
   EXPECT_EQ(mb->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, DiscardPartialOwnedChunkFromMultiBufWithOtherChunks) {
+TEST_F(MultiBufTest, DiscardPartialOwnedChunkFromMultiBufWithOtherChunks) {
   ConstMultiBufInstance mb(allocator_);
   // Each step modifies the contents as listed, in units of kN.
   // Step 1: [0, 1]
@@ -1315,7 +1733,7 @@ TEST_F(MultiBufV2Test, DiscardPartialOwnedChunkFromMultiBufWithOtherChunks) {
             sizeof(pw::allocator::internal::ControlBlock));
 }
 
-TEST_F(MultiBufV2Test, DiscardContiguousChunks) {
+TEST_F(MultiBufTest, DiscardContiguousChunks) {
   MultiBufInstance mbi(allocator_);
   std::array<std::byte, 2 * kN> unowned;
   pw::ByteSpan first(unowned.data(), kN);
@@ -1330,13 +1748,13 @@ TEST_F(MultiBufV2Test, DiscardContiguousChunks) {
   EXPECT_EQ(mbi->size(), kN / 2);
 }
 
-TEST_F(MultiBufV2Test, IsReleasableReturnsFalseWhenNotOwned) {
+TEST_F(MultiBufTest, IsReleasableReturnsFalseWhenNotOwned) {
   ConstMultiBufInstance mb(allocator_);
   mb->PushBack(unowned_chunk_);
   EXPECT_FALSE(mb->IsReleasable(mb->begin()));
 }
 
-TEST_F(MultiBufV2Test, ReleaseSucceedsWhenNotEmptyAndOwned) {
+TEST_F(MultiBufTest, ReleaseSucceedsWhenNotEmptyAndOwned) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1352,7 +1770,7 @@ TEST_F(MultiBufV2Test, ReleaseSucceedsWhenNotEmptyAndOwned) {
   EXPECT_EQ(mb.size(), kN * 2);
 }
 
-TEST_F(MultiBufV2Test, ReleaseSucceedsWithoutMatchingChunkBoundary) {
+TEST_F(MultiBufTest, ReleaseSucceedsWithoutMatchingChunkBoundary) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi->PushBack(std::move(chunk));
@@ -1361,13 +1779,13 @@ TEST_F(MultiBufV2Test, ReleaseSucceedsWithoutMatchingChunkBoundary) {
   EXPECT_TRUE(mbi->empty());
 }
 
-TEST_F(MultiBufV2Test, IsShareableReturnsFalseWhenNotShared) {
+TEST_F(MultiBufTest, IsShareableReturnsFalseWhenNotShared) {
   ConstMultiBufInstance mbi(allocator_);
   mbi->PushBack(std::move(owned_chunk_));
   EXPECT_FALSE(mbi->IsShareable(mbi->begin()));
 }
 
-TEST_F(MultiBufV2Test, ShareSucceedsWhenNotEmptyAndShared) {
+TEST_F(MultiBufTest, ShareSucceedsWhenNotEmptyAndShared) {
   ConstMultiBufInstance mbi(allocator_);
   auto shared1 = allocator_.MakeShared<std::byte[]>(kN * 2);
   mbi->PushBack(shared1);
@@ -1381,7 +1799,7 @@ TEST_F(MultiBufV2Test, ShareSucceedsWhenNotEmptyAndShared) {
   EXPECT_EQ(mbi->size(), 3 * kN);
 }
 
-TEST_F(MultiBufV2Test, ShareSucceedsWithoutMatchingChunkBoundary) {
+TEST_F(MultiBufTest, ShareSucceedsWithoutMatchingChunkBoundary) {
   ConstMultiBufInstance mbi(allocator_);
   auto shared1 = allocator_.MakeShared<std::byte[]>(kN);
   mbi->PushBack(shared1);
@@ -1390,7 +1808,7 @@ TEST_F(MultiBufV2Test, ShareSucceedsWithoutMatchingChunkBoundary) {
   EXPECT_EQ(mbi->size(), kN);
 }
 
-TEST_F(MultiBufV2Test, CopyToWithContiguousChunks) {
+TEST_F(MultiBufTest, CopyToWithContiguousChunks) {
   MultiBufInstance mbi(allocator_);
   std::array<std::byte, kN> unowned;
   std::memset(unowned.data(), 0xAA, unowned.size());
@@ -1419,7 +1837,7 @@ TEST_F(MultiBufV2Test, CopyToWithContiguousChunks) {
   }
 }
 
-TEST_F(MultiBufV2Test, CopyToWithNonContiguousChunks) {
+TEST_F(MultiBufTest, CopyToWithNonContiguousChunks) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   MakeNonContiguous(mb, kN, 0xAA);
@@ -1444,7 +1862,7 @@ TEST_F(MultiBufV2Test, CopyToWithNonContiguousChunks) {
   }
 }
 
-TEST_F(MultiBufV2Test, CopyToWithMultipleChunks) {
+TEST_F(MultiBufTest, CopyToWithMultipleChunks) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   std::memset(chunk.get(), 0xAA, chunk.size());
@@ -1461,7 +1879,7 @@ TEST_F(MultiBufV2Test, CopyToWithMultipleChunks) {
   EXPECT_EQ(out[kN - 1], static_cast<std::byte>(0xAA));
 }
 
-TEST_F(MultiBufV2Test, CopyFromWithContiguousChunks) {
+TEST_F(MultiBufTest, CopyFromWithContiguousChunks) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1489,7 +1907,7 @@ TEST_F(MultiBufV2Test, CopyFromWithContiguousChunks) {
   }
 }
 
-TEST_F(MultiBufV2Test, CopyFromWithNonContiguousChunks) {
+TEST_F(MultiBufTest, CopyFromWithNonContiguousChunks) {
   MultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<MultiBuf>();
   MakeNonContiguous(mb.as<ConstMultiBuf>(), kN, 0xAA);
@@ -1517,7 +1935,7 @@ TEST_F(MultiBufV2Test, CopyFromWithNonContiguousChunks) {
   }
 }
 
-TEST_F(MultiBufV2Test, CopyFromWithMultipleChunks) {
+TEST_F(MultiBufTest, CopyFromWithMultipleChunks) {
   MultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   std::memset(chunk.get(), 0xAA, chunk.size());
@@ -1535,7 +1953,7 @@ TEST_F(MultiBufV2Test, CopyFromWithMultipleChunks) {
   EXPECT_EQ((*mbi)[kN - 1], static_cast<std::byte>(0xCC));
 }
 
-TEST_F(MultiBufV2Test, GetContiguousDoesNotCopy) {
+TEST_F(MultiBufTest, GetContiguousDoesNotCopy) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1563,7 +1981,7 @@ TEST_F(MultiBufV2Test, GetContiguousDoesNotCopy) {
   }
 }
 
-TEST_F(MultiBufV2Test, GetNonContiguousCopies) {
+TEST_F(MultiBufTest, GetNonContiguousCopies) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   MakeNonContiguous(mb, kN, 0xAA);
@@ -1583,7 +2001,7 @@ TEST_F(MultiBufV2Test, GetNonContiguousCopies) {
   }
 }
 
-TEST_F(MultiBufV2Test, GetMoreThanAvailableTruncates) {
+TEST_F(MultiBufTest, GetMoreThanAvailableTruncates) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1599,7 +2017,7 @@ TEST_F(MultiBufV2Test, GetMoreThanAvailableTruncates) {
   }
 }
 
-TEST_F(MultiBufV2Test, GetPastTheEndReturnsEmpty) {
+TEST_F(MultiBufTest, GetPastTheEndReturnsEmpty) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1610,7 +2028,7 @@ TEST_F(MultiBufV2Test, GetPastTheEndReturnsEmpty) {
   EXPECT_EQ(bytes.size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, VisitContiguousDoesNotCopy) {
+TEST_F(MultiBufTest, VisitContiguousDoesNotCopy) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1640,7 +2058,7 @@ TEST_F(MultiBufV2Test, VisitContiguousDoesNotCopy) {
   }
 }
 
-TEST_F(MultiBufV2Test, VisitNonContiguousCopies) {
+TEST_F(MultiBufTest, VisitNonContiguousCopies) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   MakeNonContiguous(mb, kN, 0x01);
@@ -1669,7 +2087,7 @@ TEST_F(MultiBufV2Test, VisitNonContiguousCopies) {
   }
 }
 
-TEST_F(MultiBufV2Test, ClearFreesChunks) {
+TEST_F(MultiBufTest, ClearFreesChunks) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1680,7 +2098,7 @@ TEST_F(MultiBufV2Test, ClearFreesChunks) {
   EXPECT_LT(allocator_.GetAllocated(), allocated);
 }
 
-TEST_F(MultiBufV2Test, ShrinkToFitFreesUnusedCapacity) {
+TEST_F(MultiBufTest, ShrinkToFitFreesUnusedCapacity) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
 
@@ -1696,7 +2114,7 @@ TEST_F(MultiBufV2Test, ShrinkToFitFreesUnusedCapacity) {
   EXPECT_EQ(allocator_.GetAllocated(), allocated);
 }
 
-TEST_F(MultiBufV2Test, ClearAndShrinkToFitFreesAllMemory) {
+TEST_F(MultiBufTest, ClearAndShrinkToFitFreesAllMemory) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   ASSERT_TRUE(mb.TryReserveForPushBack());
@@ -1707,7 +2125,7 @@ TEST_F(MultiBufV2Test, ClearAndShrinkToFitFreesAllMemory) {
   EXPECT_EQ(allocator_.GetAllocated(), 0U);
 }
 
-TEST_F(MultiBufV2Test, IsReusableAfterClear) {
+TEST_F(MultiBufTest, IsReusableAfterClear) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -1720,12 +2138,19 @@ TEST_F(MultiBufV2Test, IsReusableAfterClear) {
   mb.PushBack(std::move(chunk));
 }
 
-TEST_F(MultiBufV2Test, NumFragmentsIsZeroWhenEmpty) {
+#if PW_NC_TEST(CannotCallNumFragmentsWhenUnlayered)
+PW_NC_EXPECT("`NumFragments` may only be called on layerable MultiBufs");
+[[maybe_unused]] size_t ShouldAssert(const FlatMultiBuf& mb) {
+  return mb.NumFragments();
+}
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, NumFragmentsIsZeroWhenEmpty) {
   ConstMultiBufInstance mbi(allocator_);
   EXPECT_EQ(mbi->NumFragments(), 0u);
 }
 
-TEST_F(MultiBufV2Test, NumFragmentsWithoutLayersMatchesChunks) {
+TEST_F(MultiBufTest, NumFragmentsWithoutLayersMatchesChunks) {
   ConstMultiBufInstance mbi1(allocator_);
   auto& mb1 = mbi1->as<ConstMultiBuf>();
 
@@ -1754,19 +2179,26 @@ TEST_F(MultiBufV2Test, NumFragmentsWithoutLayersMatchesChunks) {
   EXPECT_EQ(mb1.NumFragments(), 0u);
 }
 
-TEST_F(MultiBufV2Test, NumFragmentsWithLayersMatchesAddedFragments) {
+TEST_F(MultiBufTest, NumFragmentsWithLayersMatchesAddedFragments) {
   ConstMultiBufInstance mb(allocator_);
   AddLayers(*mb);
   EXPECT_EQ(mb->NumFragments(), 2u);
 }
 
-TEST_F(MultiBufV2Test, NumLayersIsOneWhenEmpty) {
+#if PW_NC_TEST(CannotCallNumLayersWhenUnlayered)
+PW_NC_EXPECT("`NumLayers` may only be called on layerable MultiBufs");
+[[maybe_unused]] size_t ShouldAssert(const FlatMultiBuf& mb) {
+  return mb.NumLayers();
+}
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, NumLayersIsOneWhenEmpty) {
   ConstMultiBufInstance mbi(allocator_);
   auto& mb = mbi->as<ConstMultiBuf>();
   EXPECT_EQ(mb.NumLayers(), 1u);
 }
 
-TEST_F(MultiBufV2Test, NumLayersMatchesAddedLayers) {
+TEST_F(MultiBufTest, NumLayersMatchesAddedLayers) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
@@ -1777,21 +2209,21 @@ TEST_F(MultiBufV2Test, NumLayersMatchesAddedLayers) {
   EXPECT_EQ(mb->NumLayers(), 3u);
 }
 
-TEST_F(MultiBufV2Test, TryReserveLayersWithNumLayersEqualToZero) {
+TEST_F(MultiBufTest, TryReserveLayersWithNumLayersEqualToZero) {
   ConstMultiBufInstance mb(allocator_);
   allocator_.ResetParameters();
   EXPECT_TRUE(mb->TryReserveLayers(0, 3));
   EXPECT_EQ(allocator_.allocate_size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, TryReserveLayersWithNumChunksEqualToZero) {
+TEST_F(MultiBufTest, TryReserveLayersWithNumChunksEqualToZero) {
   ConstMultiBufInstance mb(allocator_);
   allocator_.ResetParameters();
   EXPECT_TRUE(mb->TryReserveLayers(3, 0));
   EXPECT_EQ(allocator_.allocate_size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, TryReserveLayersWhenAlreadyReserved) {
+TEST_F(MultiBufTest, TryReserveLayersWhenAlreadyReserved) {
   ConstMultiBufInstance mb(allocator_);
   EXPECT_TRUE(mb->TryReserveLayers(3, 4));
 
@@ -1801,20 +2233,20 @@ TEST_F(MultiBufV2Test, TryReserveLayersWhenAlreadyReserved) {
   EXPECT_EQ(allocator_.allocate_size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, TryReserveLayers) {
+TEST_F(MultiBufTest, TryReserveLayers) {
   ConstMultiBufInstance mb(allocator_);
   allocator_.ResetParameters();
   EXPECT_TRUE(mb->TryReserveLayers(2, 3));
   EXPECT_NE(allocator_.allocate_size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, TryReserveLayersWithAllocationFailure) {
+TEST_F(MultiBufTest, TryReserveLayersWithAllocationFailure) {
   ConstMultiBufInstance mb(allocator_);
   allocator_.Exhaust();
   EXPECT_FALSE(mb->TryReserveLayers(1, 1));
 }
 
-TEST_F(MultiBufV2Test, IterateChunksOverLayers) {
+TEST_F(MultiBufTest, IterateChunksOverLayers) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(mbi);
   size_t i = 0;
@@ -1828,14 +2260,14 @@ TEST_F(MultiBufV2Test, IterateChunksOverLayers) {
   EXPECT_EQ(total, 32u);
 }
 
-TEST_F(MultiBufV2Test, IterateBytesOverLayers) {
+TEST_F(MultiBufTest, IterateBytesOverLayers) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(mbi);
   // See `AddLayers`. Span lengths should be [8, 8, 16].
   EXPECT_EQ(mbi->end() - mbi->begin(), 32);
 }
 
-TEST_F(MultiBufV2Test, InsertAddsLayersAsNeeded) {
+TEST_F(MultiBufTest, InsertAddsLayersAsNeeded) {
   ConstMultiBufInstance mbi1(allocator_);
 
   // Insert a MultiBuf of greater depth.
@@ -1861,7 +2293,7 @@ TEST_F(MultiBufV2Test, InsertAddsLayersAsNeeded) {
   EXPECT_EQ(mbi1->NumLayers(), 3u);
 }
 
-TEST_F(MultiBufV2Test, TryReserveForInsertAddsNoLayersOnAllocationFailure) {
+TEST_F(MultiBufTest, TryReserveForInsertAddsNoLayersOnAllocationFailure) {
   ConstMultiBufInstance mbi1(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi1->PushBack(std::move(chunk));
@@ -1882,7 +2314,7 @@ TEST_F(MultiBufV2Test, TryReserveForInsertAddsNoLayersOnAllocationFailure) {
   EXPECT_EQ(mbi2->NumLayers(), 3u);
 }
 
-TEST_F(MultiBufV2Test, RemoveFromLayeredIsRelativeToTopLayer) {
+TEST_F(MultiBufTest, RemoveFromLayeredIsRelativeToTopLayer) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeShared<std::byte[]>(5 * kN);
   std::byte* data = chunk.get();
@@ -1901,7 +2333,7 @@ TEST_F(MultiBufV2Test, RemoveFromLayeredIsRelativeToTopLayer) {
   EXPECT_EQ(&(*(mbi->begin() + 2 * kN)), data + 3 * kN);
 }
 
-TEST_F(MultiBufV2Test, DiscardFromLayeredIsRelativeToTopLayer) {
+TEST_F(MultiBufTest, DiscardFromLayeredIsRelativeToTopLayer) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeShared<std::byte[]>(5 * kN);
   std::byte* data = chunk.get();
@@ -1921,7 +2353,7 @@ TEST_F(MultiBufV2Test, DiscardFromLayeredIsRelativeToTopLayer) {
   EXPECT_EQ(&(*(mbi->begin() + 2 * kN)), data + 3 * kN);
 }
 
-TEST_F(MultiBufV2Test, ReleaseFromLayeredIsRelativeToTopLayer) {
+TEST_F(MultiBufTest, ReleaseFromLayeredIsRelativeToTopLayer) {
   MultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(2 * kN);
   mbi->PushBack(std::move(chunk));
@@ -1940,7 +2372,7 @@ TEST_F(MultiBufV2Test, ReleaseFromLayeredIsRelativeToTopLayer) {
   EXPECT_EQ(mbi->size(), 2 * kN);
 }
 
-TEST_F(MultiBufV2Test, ShareFromLayeredIsRelativeToTopLayer) {
+TEST_F(MultiBufTest, ShareFromLayeredIsRelativeToTopLayer) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(2 * kN);
   mbi->PushBack(std::move(chunk));
@@ -1957,13 +2389,20 @@ TEST_F(MultiBufV2Test, ShareFromLayeredIsRelativeToTopLayer) {
   EXPECT_EQ(shared1.get(), shared2.get());
 }
 
-TEST_F(MultiBufV2Test, AddLayerSucceedsWhenEmpty) {
+#if PW_NC_TEST(CannotCallAddLayerWhenUnlayered)
+PW_NC_EXPECT("`AddLayer` may only be called on layerable MultiBufs");
+[[maybe_unused]] bool ShouldAssert(const FlatMultiBuf& mb) {
+  return mb.AddLayer(0);
+}
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, AddLayerSucceedsWhenEmpty) {
   ConstMultiBufInstance mb(allocator_);
   EXPECT_TRUE(mb->AddLayer(0));
   EXPECT_EQ(mb->NumLayers(), 2u);
 }
 
-TEST_F(MultiBufV2Test, AddLayerFailsUnableToGrowQueue) {
+TEST_F(MultiBufTest, AddLayerFailsUnableToGrowQueue) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN * 2);
   mbi->PushBack(std::move(chunk));
@@ -1974,7 +2413,7 @@ TEST_F(MultiBufV2Test, AddLayerFailsUnableToGrowQueue) {
   EXPECT_EQ(mbi->NumLayers(), 1u);
 }
 
-TEST_F(MultiBufV2Test, AddLayerSucceedsWithZeroOffset) {
+TEST_F(MultiBufTest, AddLayerSucceedsWithZeroOffset) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi->PushBack(std::move(chunk));
@@ -1992,7 +2431,7 @@ TEST_F(MultiBufV2Test, AddLayerSucceedsWithZeroOffset) {
   EXPECT_EQ(mbi->NumLayers(), 4u);
 }
 
-TEST_F(MultiBufV2Test, AddLayerSucceedsWithNonzeroOffset) {
+TEST_F(MultiBufTest, AddLayerSucceedsWithNonzeroOffset) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi->PushBack(std::move(chunk));
@@ -2010,14 +2449,14 @@ TEST_F(MultiBufV2Test, AddLayerSucceedsWithNonzeroOffset) {
   EXPECT_EQ(mbi->NumLayers(), 4u);
 }
 
-TEST_F(MultiBufV2Test, AddLayerSucceedsWithZeroLength) {
+TEST_F(MultiBufTest, AddLayerSucceedsWithZeroLength) {
   ConstMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mb->PushBack(std::move(chunk));
   EXPECT_TRUE(mb->AddLayer(0, 0));
 }
 
-TEST_F(MultiBufV2Test, AddLayerSucceedsWithNonzeroLength) {
+TEST_F(MultiBufTest, AddLayerSucceedsWithNonzeroLength) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi->PushBack(std::move(chunk));
@@ -2035,7 +2474,7 @@ TEST_F(MultiBufV2Test, AddLayerSucceedsWithNonzeroLength) {
   EXPECT_EQ(mbi->NumLayers(), 4u);
 }
 
-TEST_F(MultiBufV2Test, AddLayerCreatesNewFragment) {
+TEST_F(MultiBufTest, AddLayerCreatesNewFragment) {
   ConstMultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   mbi->PushBack(std::move(chunk));
@@ -2051,7 +2490,7 @@ TEST_F(MultiBufV2Test, AddLayerCreatesNewFragment) {
   EXPECT_EQ(mbi->NumFragments(), 3u);
 }
 
-TEST_F(MultiBufV2Test, PopFrontFragmentWithMultipleLayers) {
+TEST_F(MultiBufTest, PopFrontFragmentWithMultipleLayers) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
   EXPECT_EQ(mbi->NumFragments(), 2u);
@@ -2070,7 +2509,7 @@ TEST_F(MultiBufV2Test, PopFrontFragmentWithMultipleLayers) {
   EXPECT_TRUE(mbi->empty());
 }
 
-TEST_F(MultiBufV2Test, PopFrontFragmentSkipsZeroLengthChunks) {
+TEST_F(MultiBufTest, PopFrontFragmentSkipsZeroLengthChunks) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
 
@@ -2083,7 +2522,26 @@ TEST_F(MultiBufV2Test, PopFrontFragmentSkipsZeroLengthChunks) {
   EXPECT_TRUE(mbi->empty());
 }
 
-TEST_F(MultiBufV2Test, TruncateTopLayerSucceedsWithZeroLength) {
+#if PW_NC_TEST(CannotCallSealTopLayerWhenUnlayered)
+PW_NC_EXPECT("`SealTopLayer` may only be called on layerable MultiBufs");
+[[maybe_unused]] void ShouldAssert(const FlatMultiBuf& mb) {
+  mb.SealTopLayer();
+}
+
+#elif PW_NC_TEST(CannotCallUnsealTopLayerWhenUnlayered)
+PW_NC_EXPECT("`UnsealTopLayer` may only be called on layerable MultiBufs");
+[[maybe_unused]] void ShouldAssert(const FlatMultiBuf& mb) {
+  mb.UnsealTopLayer();
+}
+
+#elif PW_NC_TEST(CannotCallTruncateTopLayerWhenUnlayered)
+PW_NC_EXPECT("`TruncateTopLayer` may only be called on layerable MultiBufs");
+[[maybe_unused]] void ShouldAssert(const FlatMultiBuf& mb) {
+  mb.TruncateTopLayer(6);
+}
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, TruncateTopLayerSucceedsWithZeroLength) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
   EXPECT_EQ(mbi->size(), 32u);
@@ -2091,7 +2549,7 @@ TEST_F(MultiBufV2Test, TruncateTopLayerSucceedsWithZeroLength) {
   EXPECT_EQ(mbi->size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, TruncateTopLayerSucceedsWithNonzeroLength) {
+TEST_F(MultiBufTest, TruncateTopLayerSucceedsWithNonzeroLength) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
   EXPECT_EQ(mbi->size(), 32u);
@@ -2102,7 +2560,7 @@ TEST_F(MultiBufV2Test, TruncateTopLayerSucceedsWithNonzeroLength) {
       std::equal(mbi->begin(), mbi->end(), expected.begin(), expected.end()));
 }
 
-TEST_F(MultiBufV2Test, TruncateTopLayerSucceedsWithCurrentMultiBufLength) {
+TEST_F(MultiBufTest, TruncateTopLayerSucceedsWithCurrentMultiBufLength) {
   ConstMultiBufInstance mbi1(allocator_);
   ConstMultiBufInstance mbi2(allocator_);
   AddLayers(*mbi1);
@@ -2112,7 +2570,7 @@ TEST_F(MultiBufV2Test, TruncateTopLayerSucceedsWithCurrentMultiBufLength) {
       std::equal(mbi1->begin(), mbi1->end(), mbi2->begin(), mbi2->end()));
 }
 
-TEST_F(MultiBufV2Test, PopLayerSucceedsWithLayers) {
+TEST_F(MultiBufTest, PopLayerSucceedsWithLayers) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
 
@@ -2132,7 +2590,15 @@ TEST_F(MultiBufV2Test, PopLayerSucceedsWithLayers) {
   EXPECT_EQ(mbi->size(), 64u);
 }
 
-TEST_F(MultiBufV2Test, SetTopLayerCopiesDataAndTruncates) {
+#if PW_NC_TEST(CannotCallSetTopLayerWhenUnlayered)
+PW_NC_EXPECT(
+    "`SetTopLayer` may only be called on mutable, layerable MultiBufs");
+[[maybe_unused]] void ShouldAssert(FlatMultiBuf& mb) {
+  mb.SetTopLayer(pw::ConstByteSpan());
+}
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, SetTopLayerCopiesDataAndTruncates) {
   MultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   std::memset(chunk.get(), 0xAA, chunk.size());
@@ -2158,7 +2624,7 @@ TEST_F(MultiBufV2Test, SetTopLayerCopiesDataAndTruncates) {
   }
 }
 
-TEST_F(MultiBufV2Test, SetTopLayerWorksWithEmptySpan) {
+TEST_F(MultiBufTest, SetTopLayerWorksWithEmptySpan) {
   MultiBufInstance mbi(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
   std::memset(chunk.get(), 0xAA, chunk.size());
@@ -2169,7 +2635,12 @@ TEST_F(MultiBufV2Test, SetTopLayerWorksWithEmptySpan) {
   EXPECT_EQ(mbi->size(), 0u);
 }
 
-TEST_F(MultiBufV2Test, PopLayerFailsWhenSealed) {
+#if PW_NC_TEST(CannotCallPopLayerWhenUnlayered)
+PW_NC_EXPECT("`PopLayer` may only be called on layerable MultiBufs");
+void ShouldAssert(const FlatMultiBuf& mb) { mb.PopLayer(); }
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, PopLayerFailsWhenSealed) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
   mbi->SealTopLayer();
@@ -2178,7 +2649,7 @@ TEST_F(MultiBufV2Test, PopLayerFailsWhenSealed) {
   EXPECT_DEATH_IF_SUPPORTED(mbi->PopLayer(), ".*");
 }
 
-TEST_F(MultiBufV2Test, PopLayerSucceedsAfterUnseal) {
+TEST_F(MultiBufTest, PopLayerSucceedsAfterUnseal) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
   mbi->SealTopLayer();
@@ -2190,7 +2661,7 @@ TEST_F(MultiBufV2Test, PopLayerSucceedsAfterUnseal) {
   EXPECT_EQ(mbi->NumLayers(), 2u);
 }
 
-TEST_F(MultiBufV2Test, CopyToGetsDataFromTopLayerOnly) {
+TEST_F(MultiBufTest, CopyToGetsDataFromTopLayerOnly) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
 
@@ -2207,7 +2678,7 @@ TEST_F(MultiBufV2Test, CopyToGetsDataFromTopLayerOnly) {
   }
 }
 
-TEST_F(MultiBufV2Test, CopyFromSetsDataInTopLayerOnly) {
+TEST_F(MultiBufTest, CopyFromSetsDataInTopLayerOnly) {
   MultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
 
@@ -2223,7 +2694,7 @@ TEST_F(MultiBufV2Test, CopyFromSetsDataInTopLayerOnly) {
   EXPECT_EQ(mbi->at(kN - 1), std::byte(0x3F));
 }
 
-TEST_F(MultiBufV2Test, GetReturnsDataFromTopLayerOnly) {
+TEST_F(MultiBufTest, GetReturnsDataFromTopLayerOnly) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
 
@@ -2241,7 +2712,7 @@ TEST_F(MultiBufV2Test, GetReturnsDataFromTopLayerOnly) {
   }
 }
 
-TEST_F(MultiBufV2Test, GetDoesNotCopyIfTopLayerIsContiguous) {
+TEST_F(MultiBufTest, GetDoesNotCopyIfTopLayerIsContiguous) {
   std::array<std::byte, 2 * kN> unowned;
   pw::ByteSpan bytes(unowned);
 
@@ -2260,7 +2731,7 @@ TEST_F(MultiBufV2Test, GetDoesNotCopyIfTopLayerIsContiguous) {
   EXPECT_NE(tmp.data(), retrieved.data());
 }
 
-TEST_F(MultiBufV2Test, GetCopiesIfTopLayerIsNonContiguous) {
+TEST_F(MultiBufTest, GetCopiesIfTopLayerIsNonContiguous) {
   std::array<std::byte, 2 * kN> unowned;
   pw::ByteSpan bytes(unowned);
 
@@ -2279,7 +2750,7 @@ TEST_F(MultiBufV2Test, GetCopiesIfTopLayerIsNonContiguous) {
   EXPECT_EQ(tmp.data(), retrieved.data());
 }
 
-TEST_F(MultiBufV2Test, VisitActsOnDataFromTopLayerOnly) {
+TEST_F(MultiBufTest, VisitActsOnDataFromTopLayerOnly) {
   ConstMultiBufInstance mbi(allocator_);
   AddLayers(*mbi);
 
@@ -2303,7 +2774,14 @@ TEST_F(MultiBufV2Test, VisitActsOnDataFromTopLayerOnly) {
       5));
 }
 
-TEST_F(MultiBufV2Test, InsertMultiBufNotifiesObserver) {
+#if PW_NC_TEST(CannotSetObserverWhenUntracked)
+PW_NC_EXPECT("`set_observer` may only be called on observable MultiBufs");
+[[maybe_unused]] void ShouldAssert(ConstMultiBuf& mb, TestObserver& observer) {
+  return mb.set_observer(&observer);
+}
+#endif  // PW_NC_TEST
+
+TEST_F(MultiBufTest, InsertMultiBufNotifiesObserver) {
   TestObserver observer1, observer2;
 
   TrackedMultiBufInstance mb1(allocator_);
@@ -2324,7 +2802,7 @@ TEST_F(MultiBufV2Test, InsertMultiBufNotifiesObserver) {
   EXPECT_EQ(observer2.value, kN);
 }
 
-TEST_F(MultiBufV2Test, InsertUnownedNotifiesObserver) {
+TEST_F(MultiBufTest, InsertUnownedNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   mb->set_observer(&observer);
@@ -2334,7 +2812,7 @@ TEST_F(MultiBufV2Test, InsertUnownedNotifiesObserver) {
   EXPECT_EQ(observer.value, unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, InsertUniquePtrNotifiesObserver) {
+TEST_F(MultiBufTest, InsertUniquePtrNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   mb->set_observer(&observer);
@@ -2345,7 +2823,7 @@ TEST_F(MultiBufV2Test, InsertUniquePtrNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
 }
 
-TEST_F(MultiBufV2Test, PushBackMultiBufNotifiesObserver) {
+TEST_F(MultiBufTest, PushBackMultiBufNotifiesObserver) {
   TestObserver observer;
 
   TrackedMultiBufInstance mbi1(allocator_);
@@ -2364,7 +2842,7 @@ TEST_F(MultiBufV2Test, PushBackMultiBufNotifiesObserver) {
   EXPECT_EQ(observer.value, kN * 2);
 }
 
-TEST_F(MultiBufV2Test, PushBackUnownedNotifiesObserver) {
+TEST_F(MultiBufTest, PushBackUnownedNotifiesObserver) {
   TestObserver observer;
 
   TrackedMultiBufInstance mbi(allocator_);
@@ -2378,7 +2856,7 @@ TEST_F(MultiBufV2Test, PushBackUnownedNotifiesObserver) {
   EXPECT_EQ(observer.value, unowned_chunk_.size());
 }
 
-TEST_F(MultiBufV2Test, PushBackUniquePtrNotifiesObserver) {
+TEST_F(MultiBufTest, PushBackUniquePtrNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   mb->set_observer(&observer);
@@ -2389,7 +2867,7 @@ TEST_F(MultiBufV2Test, PushBackUniquePtrNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
 }
 
-TEST_F(MultiBufV2Test, RemoveNotifiesObserver) {
+TEST_F(MultiBufTest, RemoveNotifiesObserver) {
   TestObserver observer;
 
   TrackedMultiBufInstance mbi(allocator_);
@@ -2405,7 +2883,7 @@ TEST_F(MultiBufV2Test, RemoveNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
 }
 
-TEST_F(MultiBufV2Test, DiscardNotifiesObserver) {
+TEST_F(MultiBufTest, DiscardNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -2417,7 +2895,7 @@ TEST_F(MultiBufV2Test, DiscardNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
 }
 
-TEST_F(MultiBufV2Test, ReleaseNotifiesObserver) {
+TEST_F(MultiBufTest, ReleaseNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -2429,7 +2907,7 @@ TEST_F(MultiBufV2Test, ReleaseNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
 }
 
-TEST_F(MultiBufV2Test, PopFrontFragmentNotifiesObserver) {
+TEST_F(MultiBufTest, PopFrontFragmentNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -2441,7 +2919,7 @@ TEST_F(MultiBufV2Test, PopFrontFragmentNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
 }
 
-TEST_F(MultiBufV2Test, AddLayerNotifiesObserver) {
+TEST_F(MultiBufTest, AddLayerNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   AddLayers(*mb);
@@ -2452,7 +2930,7 @@ TEST_F(MultiBufV2Test, AddLayerNotifiesObserver) {
   EXPECT_EQ(observer.value, 2u);
 }
 
-TEST_F(MultiBufV2Test, PopLayerNotifiesObserver) {
+TEST_F(MultiBufTest, PopLayerNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   AddLayers(*mb);
@@ -2463,7 +2941,7 @@ TEST_F(MultiBufV2Test, PopLayerNotifiesObserver) {
   EXPECT_EQ(observer.value, 2u);
 }
 
-TEST_F(MultiBufV2Test, ClearNotifiesObserver) {
+TEST_F(MultiBufTest, ClearNotifiesObserver) {
   TestObserver observer;
   TrackedMultiBufInstance mb(allocator_);
   auto chunk = allocator_.MakeUnique<std::byte[]>(kN);
@@ -2477,5 +2955,6 @@ TEST_F(MultiBufV2Test, ClearNotifiesObserver) {
   EXPECT_EQ(observer.value, kN);
   EXPECT_EQ(mb->observer(), nullptr);
 }
+// LINT.ThenChange(../v1_adapter/multibuf_test.cc)
 
 }  // namespace

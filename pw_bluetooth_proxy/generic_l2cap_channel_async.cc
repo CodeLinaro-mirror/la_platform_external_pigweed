@@ -63,8 +63,7 @@ Status GenericL2capChannelImpl::Init() {
   return channel_->Start();
 }
 
-StatusWithMultiBuf GenericL2capChannelImpl::Write(
-    multibuf::MultiBuf&& payload) {
+StatusWithMultiBuf GenericL2capChannelImpl::Write(FlatConstMultiBuf&& payload) {
   if (auto status = IsWriteAvailable(); !status.ok()) {
     return {status, std::move(payload)};
   }

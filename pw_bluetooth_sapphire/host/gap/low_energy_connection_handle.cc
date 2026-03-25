@@ -28,9 +28,7 @@ LowEnergyConnectionHandle::LowEnergyConnectionHandle(
     AcceptCisCallback accept_cis_cb,
     fit::function<sm::BondableMode()> bondable_cb,
     fit::function<sm::SecurityProperties()> security_cb,
-    fit::function<pw::bluetooth::emboss::ConnectionRole()> role_cb,
-    PeriodicAdvertisingSyncManager::TransferSyncFn&&
-        transfer_periodic_advertising_sync_fn)
+    fit::function<pw::bluetooth::emboss::ConnectionRole()> role_cb)
     : active_(true),
       peer_id_(peer_id),
       handle_(handle),
@@ -38,9 +36,7 @@ LowEnergyConnectionHandle::LowEnergyConnectionHandle(
       accept_cis_cb_(std::move(accept_cis_cb)),
       bondable_cb_(std::move(bondable_cb)),
       security_cb_(std::move(security_cb)),
-      role_cb_(std::move(role_cb)),
-      transfer_periodic_advertising_sync_fn_(
-          std::move(transfer_periodic_advertising_sync_fn)) {
+      role_cb_(std::move(role_cb)) {
   PW_CHECK(peer_id_.IsValid());
 }
 
@@ -72,15 +68,6 @@ iso::AcceptCisStatus LowEnergyConnectionHandle::AcceptCis(
     iso::CigCisIdentifier id, iso::CisEstablishedCallback cis_established_cb) {
   PW_CHECK(active_);
   return accept_cis_cb_(id, std::move(cis_established_cb));
-}
-
-void LowEnergyConnectionHandle::TransferPeriodicAdvertisingSync(
-    hci::SyncId sync_id,
-    uint16_t service_data,
-    pw::Callback<void(hci::Result<>)> callback) {
-  PW_CHECK(active_);
-  transfer_periodic_advertising_sync_fn_(
-      sync_id, handle_, service_data, std::move(callback));
 }
 
 sm::BondableMode LowEnergyConnectionHandle::bondable_mode() const {

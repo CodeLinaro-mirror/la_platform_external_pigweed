@@ -205,7 +205,7 @@ impl<K: Kernel, T> Mutex<K, T> {
         // TODO - konkers: investigate using core::intrinsics::unlikely() or
         //                 core::hint::unlikely()
         if state.count > 0 {
-            let _ = state.wake_one();
+            state.wake_one();
         }
     }
 }

@@ -17,11 +17,10 @@
 #include "pw_allocator/allocator.h"
 #include "pw_bluetooth_proxy/channel_proxy.h"
 #include "pw_bluetooth_proxy/connection_handle.h"
+#include "pw_bluetooth_proxy/internal/multibuf.h"
 #include "pw_bluetooth_proxy/l2cap_channel_manager_interface.h"
 #include "pw_containers/dynamic_vector.h"
 #include "pw_containers/intrusive_map.h"
-#include "pw_multibuf/allocator.h"
-#include "pw_multibuf/multibuf.h"
 #include "pw_span/span.h"
 #include "pw_sync/lock_annotations.h"
 #include "pw_sync/mutex.h"
@@ -64,14 +63,14 @@ class Client final {
 
     void HandleNotification(ConnectionHandle connection_handle,
                             AttributeHandle value_handle,
-                            multibuf::MultiBuf&& value);
+                            FlatConstMultiBuf&& value);
 
     void HandleError(Error error, ConnectionHandle connection_handle);
 
    private:
     virtual void DoHandleNotification(ConnectionHandle connection_handle,
                                       AttributeHandle value_handle,
-                                      multibuf::MultiBuf&& value) = 0;
+                                      FlatConstMultiBuf&& value) = 0;
 
     /// Called when a fatal error occurs, invalidating this delegate and Client.
     /// The Client may be destroyed/closed inside of this function.
@@ -143,7 +142,7 @@ class Server {
     virtual ~Delegate() = default;
     void HandleWriteWithoutResponse(ConnectionHandle connection_handle,
                                     AttributeHandle value_handle,
-                                    multibuf::MultiBuf&& value);
+                                    FlatConstMultiBuf&& value);
 
     void HandleWriteAvailable(ConnectionHandle connection_handle);
 
@@ -157,7 +156,7 @@ class Server {
     virtual void DoHandleWriteWithoutResponse(
         ConnectionHandle connection_handle,
         AttributeHandle value_handle,
-        multibuf::MultiBuf&& value) = 0;
+        FlatConstMultiBuf&& value) = 0;
 
     /// Called when queue space for TX packets is available.
     /// The only API call that is allowed inside of this method is
@@ -213,7 +212,7 @@ class Server {
   /// * @INVALID_ARGUMENT: `value_handle` is not being offloaded by this Server.
   /// * @RESOURCE_EXHAUSTED: An allocation failed.
   [[nodiscard]] StatusWithMultiBuf SendNotification(
-      AttributeHandle value_handle, multibuf::MultiBuf&& value);
+      AttributeHandle value_handle, FlatConstMultiBuf&& value);
 
  private:
   friend class Gatt;
@@ -241,7 +240,7 @@ class Gatt {
   /// @param multibuf_allocator The allocator to use for allocating buffers.
   Gatt(L2capChannelManagerInterface& l2cap,
        Allocator& allocator,
-       multibuf::MultiBufAllocator& multibuf_allocator);
+       MultiBufAllocator& multibuf_allocator);
 
   Gatt(const Gatt&) = delete;
   Gatt(Gatt&&) = delete;
@@ -391,7 +390,7 @@ class Gatt {
   StatusWithMultiBuf SendNotification(internal::ServerId server_id,
                                       ConnectionHandle connection_handle,
                                       AttributeHandle value_handle,
-                                      multibuf::MultiBuf&& value);
+                                      FlatConstMultiBuf&& value);
 
   ConnectionMap::iterator FindOrInterceptAttChannel(
       ConnectionHandle connection_handle) PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -419,7 +418,7 @@ class Gatt {
 
   L2capChannelManagerInterface& l2cap_;
   Allocator& allocator_;
-  multibuf::MultiBufAllocator& multibuf_allocator_;
+  MultiBufAllocator& multibuf_allocator_;
 
   // Entries are allocated with allocator_.
   ConnectionMap connections_ PW_GUARDED_BY(mutex_);

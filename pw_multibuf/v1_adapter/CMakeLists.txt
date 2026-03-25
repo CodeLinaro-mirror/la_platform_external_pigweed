@@ -42,31 +42,6 @@ pw_add_library(pw_multibuf.v1_adapter.chunk STATIC
 # LINT.ThenChange(../Android.bp, BUILD.bazel, BUILD.gn)
 
 # LINT.IfChange
-pw_add_library(pw_multibuf.v1_adapter._chunk_testing INTERFACE
-  HEADERS
-    private/pw_multibuf_private/chunk_testing.h
-  PUBLIC_INCLUDES
-    private
-  PUBLIC_DEFINES
-    PW_MULTIBUF_VERSION=2
-    PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1
-  PUBLIC_DEPS
-    pw_allocator
-    pw_allocator.testing
-    pw_multibuf
-    pw_multibuf._chunk_testing
-)
-
-pw_add_test(pw_multibuf.v1_adapter.chunk_test
-  SOURCES
-    ../v1/multibuf_test.cc
-  PRIVATE_DEFINES
-    PW_MULTIBUF_VERSION=2
-    PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1
-  PRIVATE_DEPS
-    pw_multibuf.v1_adapter._chunk_testing
-)
-
 pw_add_library(pw_multibuf.v1_adapter.single_chunk_region_tracker INTERFACE
   HEADERS
     public/pw_multibuf/v1_adapter/single_chunk_region_tracker.h
@@ -84,7 +59,7 @@ pw_add_library(pw_multibuf.v1_adapter.single_chunk_region_tracker INTERFACE
 
 pw_add_test(pw_multibuf.v1_adapter.single_chunk_region_tracker_test
   SOURCES
-    ../v1/single_chunk_region_tracker_test.cc
+    single_chunk_region_tracker_test.cc
   PRIVATE_DEFINES
     PW_MULTIBUF_VERSION=2
     PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1
@@ -120,31 +95,26 @@ pw_add_library(pw_multibuf.v1_adapter.multibuf STATIC
 # LINT.IfChange
 pw_add_test(pw_multibuf.v1_adapter.multibuf_v1_test
   SOURCES
-    ../v1/multibuf_test.cc
+    multibuf_v1_test.cc
   PRIVATE_DEFINES
     PW_MULTIBUF_VERSION=2
     PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1
   PRIVATE_DEPS
-    pw_multibuf.v1_adapter._chunk_testing
-    pw_multibuf._test_utils
+    pw_allocator
+    pw_allocator.bump_allocator
+    pw_allocator.testing
+    pw_assert.check
     pw_bytes
+    pw_multibuf
+    pw_status
   GROUPS
     modules
     pw_multibuf
 )
 
-pw_add_library(pw_multibuf.v1_adapter._multibuf_testing INTERFACE
-  HEADERS
-    private/pw_multibuf_private/multibuf_testing.h
-  PUBLIC_INCLUDES
-    private
-  PUBLIC_DEPS
-    pw_multibuf
-)
-
 pw_add_test(pw_multibuf.v1_adapter.multibuf_v2_test
   SOURCES
-    ../v2/multibuf_test.cc
+    multibuf_v2_test.cc
   PRIVATE_DEFINES
     PW_MULTIBUF_VERSION=2
     PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1
@@ -156,7 +126,6 @@ pw_add_test(pw_multibuf.v1_adapter.multibuf_v2_test
     pw_compilation_testing._pigweed_only_negative_compilation
     pw_multibuf
     pw_multibuf.v2.iterators
-    pw_multibuf.v1_adapter._multibuf_testing
     pw_result
     pw_status
   GROUPS
@@ -203,13 +172,16 @@ pw_add_library(pw_multibuf.v1_adapter.simple_allocator STATIC
 # LINT.IfChange
 pw_add_test(pw_multibuf.v1_adapter.simple_allocator_test
   SOURCES
-    ../v1/simple_allocator_test.cc
+    simple_allocator_test.cc
   PRIVATE_DEFINES
     PW_MULTIBUF_VERSION=2
     PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1
   PRIVATE_DEPS
     pw_allocator.null_allocator
     pw_allocator.testing
+    pw_containers.storage
+    pw_containers.vector
+    pw_multibuf.chunk
     pw_multibuf.simple_allocator
   GROUPS
     modules
@@ -239,7 +211,7 @@ pw_add_library(pw_multibuf.v1_adapter.from_span STATIC
 # LINT.IfChange
 pw_add_test(pw_multibuf.v1_adapter.from_span_test
   SOURCES
-    ../v1/from_span_test.cc
+    from_span_test.cc
   PRIVATE_DEFINES
     PW_MULTIBUF_VERSION=2
     PW_MULTIBUF_INCLUDE_V1_ADAPTERS=1

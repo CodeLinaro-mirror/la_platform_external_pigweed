@@ -22,9 +22,8 @@ pw_add_library(pw_result INTERFACE
     public
   PUBLIC_DEPS
     pw_assert
-    pw_containers.optional
-    pw_preprocessor
     pw_status
+    pw_preprocessor
 )
 
 pw_add_library(pw_result.expected INTERFACE
