@@ -14,6 +14,7 @@
 #pragma once
 
 #include <mutex>
+#include <optional>
 
 #include "pw_allocator/allocator.h"
 #include "pw_async2/callback_task.h"
@@ -58,11 +59,16 @@ class BaseChannel;
 
 class BaseChannelFuture {
  public:
+  constexpr BaseChannelFuture() : channel_(nullptr) {}
+
   BaseChannelFuture(const BaseChannelFuture&) = delete;
   BaseChannelFuture& operator=(const BaseChannelFuture&) = delete;
 
   // Derived classes call MoveAssignFrom to move rather than use the operator.
   BaseChannelFuture& operator=(BaseChannelFuture&&) = delete;
+
+  /// True if the `Pend` can be called on the future.
+  [[nodiscard]] bool is_pendable() const { return core_.is_pendable(); }
 
   /// True if the future has returned `Ready()`.
   [[nodiscard]] bool is_complete() const { return core_.is_complete(); }
@@ -74,7 +80,8 @@ class BaseChannelFuture {
 
   enum AllowClosed { kAllowClosed };
 
-  // Creates a new future, but does NOT check if the channel is open.
+  // Creates a new future. Always increases the ref count, even if the channel
+  // is closed. This allows ReceiveFutures to read values from closed channels.
   BaseChannelFuture(BaseChannel* channel, AllowClosed)
       PW_LOCKS_EXCLUDED(*channel)
       : core_(FutureState::kPending) {
@@ -127,12 +134,16 @@ class ChannelFuture : public BaseChannelFuture {
   Poll<value_type> Pend(Context& cx) PW_LOCKS_EXCLUDED(*this->channel()) {
     Poll<value_type> result = static_cast<Derived&>(*this).DoPend(cx);
     if (result.IsReady()) {
+      // If Ready(), the future is no longer associated with the channel, so it
+      // can be marked complete without the lock held.
       MarkCompleted();
     }
     return result;
   }
 
  protected:
+  constexpr ChannelFuture() = default;
+
   explicit ChannelFuture(Channel<T>* channel) : BaseChannelFuture(channel) {}
 
   ChannelFuture(Channel<T>* channel, AllowClosed)
@@ -791,11 +802,12 @@ class [[nodiscard]] ReceiveFuture final
 
   PollOptional<T> DoPend(Context& cx) PW_LOCKS_EXCLUDED(*this->channel()) {
     if (this->channel() == nullptr) {
-      PW_ASSERT(!this->is_complete());
+      PW_DASSERT(this->is_pendable());
       return Ready<std::optional<T>>(std::nullopt);
     }
 
     this->channel()->lock();
+    PW_DASSERT(this->is_pendable());
     if (this->channel()->empty()) {
       return this->StoreWakerForReceiveIfOpen(cx)
                  ? Pending()
@@ -965,6 +977,8 @@ class [[nodiscard]] SendFuture final
   using Base = internal::ChannelFuture<SendFuture, T, bool>;
 
  public:
+  constexpr SendFuture() = default;
+
   SendFuture(SendFuture&& other) PW_LOCKS_EXCLUDED(*other.channel())
       : Base(static_cast<Base&&>(other)), value_(std::move(other.value_)) {}
 
@@ -994,11 +1008,12 @@ class [[nodiscard]] SendFuture final
 
   Poll<bool> DoPend(Context& cx) PW_LOCKS_EXCLUDED(*this->channel()) {
     if (this->channel() == nullptr) {
-      PW_ASSERT(!this->is_complete());
+      PW_DASSERT(this->is_pendable());
       return Ready(false);
     }
 
     this->channel()->lock();
+    PW_DASSERT(this->is_pendable());
     if (!this->channel()->is_open_locked()) {
       this->Complete();
       return Ready(false);
@@ -1009,12 +1024,12 @@ class [[nodiscard]] SendFuture final
       return Pending();
     }
 
-    this->channel()->PushAndWake(std::move(value_));
+    this->channel()->PushAndWake(std::move(*value_));
     this->Complete();
     return Ready(true);
   }
 
-  T value_;
+  std::optional<T> value_;
 };
 
 /// A reservation for sending values to a channel, returned from a
@@ -1083,6 +1098,8 @@ class [[nodiscard]] ReserveSendFuture final
       ChannelFuture<ReserveSendFuture, T, std::optional<SendReservation<T>>>;
 
  public:
+  constexpr ReserveSendFuture() = default;
+
   ReserveSendFuture(ReserveSendFuture&& other) : Base(std::move(other)) {}
 
   ReserveSendFuture& operator=(ReserveSendFuture&& other) {
@@ -1106,11 +1123,12 @@ class [[nodiscard]] ReserveSendFuture final
   PollOptional<SendReservation<T>> DoPend(Context& cx)
       PW_LOCKS_EXCLUDED(*this->channel()) {
     if (this->channel() == nullptr) {
-      PW_ASSERT(!this->is_complete());
+      PW_DASSERT(this->is_pendable());
       return Ready<std::optional<SendReservation<T>>>(std::nullopt);
     }
 
     this->channel()->lock();
+    PW_DASSERT(this->is_pendable());
     if (!this->channel()->is_open_locked()) {
       this->Complete();
       return Ready<std::optional<SendReservation<T>>>(std::nullopt);

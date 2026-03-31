@@ -54,6 +54,20 @@
       ]
     },
     {
+      "name": "all_host_cpp23",
+      "build_config": {
+        "name": "bazel_default_cpp23",
+        "description": "Host C++23 build",
+        "build_type": "bazel",
+        "args": [
+          "--//pw_toolchain/cc:cxx_standard=23"
+        ]
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
       "name": "docs",
       "use_config": "bazel_default_notest",
       "targets": [
@@ -559,6 +573,12 @@
       "target": "@pigweed//:format"
     },
     {
+      "name": "keep-sorted",
+      "description": "Keep specified lists sorted.",
+      "use_config": "bazel_default",
+      "target": "//pw_presubmit/py:keep_sorted"
+    },
+    {
       "name": "pw_presubmit_checks",
       "description": "Run checks that use the pw_presubmit framework",
       "use_config": "bazel_default",
@@ -642,6 +662,7 @@
       "builds": [
         "all_host",
         "all_host_cpp17",
+        "all_host_cpp23",
         "docs"
       ]
     },

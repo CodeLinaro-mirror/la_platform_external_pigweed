@@ -16,7 +16,7 @@
 
 #include "pw_allocator/testing.h"
 #include "pw_async2/dispatcher_for_test.h"
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/func_task.h"
 #include "pw_async2/try.h"
 #include "pw_containers/vector.h"
 #include "pw_unit_test/framework.h"
@@ -31,11 +31,11 @@ using pw::async2::CreateMpscChannel;
 using pw::async2::CreateSpmcChannel;
 using pw::async2::CreateSpscChannel;
 using pw::async2::DispatcherForTest;
+using pw::async2::FuncTask;
 using pw::async2::McChannelHandle;
 using pw::async2::MpChannelHandle;
 using pw::async2::MpmcChannelHandle;
 using pw::async2::MpscChannelHandle;
-using pw::async2::PendFuncTask;
 using pw::async2::Pending;
 using pw::async2::Poll;
 using pw::async2::Ready;
@@ -62,17 +62,16 @@ class SenderTask : public Task {
  private:
   Poll<> DoPend(Context& cx) override {
     while (next_ <= end_) {
-      if (!future_.has_value()) {
-        future_.emplace(sender_.Send(next_));
+      if (!future_.is_pendable()) {
+        future_ = sender_.Send(next_);
       }
 
-      PW_TRY_READY_ASSIGN(bool sent, future_->Pend(cx));
+      PW_TRY_READY_ASSIGN(bool sent, future_.Pend(cx));
       if (!sent) {
         success_ = false;
         return Ready();
       }
 
-      future_.reset();
       next_++;
     }
 
@@ -82,7 +81,7 @@ class SenderTask : public Task {
   }
 
   Sender<int> sender_;
-  std::optional<SendFuture<int>> future_;
+  SendFuture<int> future_;
   bool success_ = false;
   int next_;
   int end_;
@@ -100,17 +99,16 @@ class ReceiverTask : public Task {
  private:
   Poll<> DoPend(Context& cx) override {
     while (true) {
-      if (!future_.has_value()) {
-        future_.emplace(receiver_.Receive());
+      if (!future_.is_pendable()) {
+        future_ = receiver_.Receive();
       }
 
-      PW_TRY_READY_ASSIGN(std::optional<int> value, future_->Pend(cx));
+      PW_TRY_READY_ASSIGN(std::optional<int> value, future_.Pend(cx));
       if (!value.has_value()) {
         break;
       }
 
       received_.push_back(*value);
-      future_.reset();
     }
 
     receiver_.Disconnect();
@@ -118,7 +116,7 @@ class ReceiverTask : public Task {
   }
 
   Receiver<int> receiver_;
-  std::optional<ReceiveFuture<int>> future_;
+  ReceiveFuture<int> future_;
   pw::Vector<int, 10> received_;
 };
 
@@ -132,15 +130,14 @@ class DisconnectingReceiverTask : public Task {
  private:
   Poll<> DoPend(Context& cx) override {
     while (disconnect_after_ > 0) {
-      if (!future_.has_value()) {
-        future_.emplace(receiver_.Receive());
+      if (!future_.is_pendable()) {
+        future_ = receiver_.Receive();
       }
 
-      PW_TRY_READY_ASSIGN(std::optional<int> value, future_->Pend(cx));
+      PW_TRY_READY_ASSIGN(std::optional<int> value, future_.Pend(cx));
       if (!value.has_value()) {
         break;
       }
-      future_.reset();
       disconnect_after_--;
     }
 
@@ -149,7 +146,7 @@ class DisconnectingReceiverTask : public Task {
   }
 
   Receiver<int> receiver_;
-  std::optional<ReceiveFuture<int>> future_;
+  ReceiveFuture<int> future_;
   size_t disconnect_after_;
 };
 
@@ -395,11 +392,11 @@ class ReservedSenderTask : public Task {
  private:
   Poll<> DoPend(Context& cx) override {
     while (next_ <= end_) {
-      if (!future_.has_value()) {
-        future_.emplace(sender_.ReserveSend());
+      if (!future_.is_pendable()) {
+        future_ = sender_.ReserveSend();
       }
 
-      PW_TRY_READY_ASSIGN(auto reservation, future_->Pend(cx));
+      PW_TRY_READY_ASSIGN(auto reservation, future_.Pend(cx));
       if (!reservation.has_value()) {
         success_ = false;
         return Ready();
@@ -407,7 +404,6 @@ class ReservedSenderTask : public Task {
 
       reservation->Commit(next_);
       next_++;
-      future_.reset();
     }
 
     success_ = true;
@@ -416,7 +412,7 @@ class ReservedSenderTask : public Task {
   }
 
   Sender<int> sender_;
-  std::optional<ReserveSendFuture<int>> future_;
+  ReserveSendFuture<int> future_;
   bool success_ = false;
   int next_;
   int end_;
@@ -454,7 +450,7 @@ TEST(StaticChannel, ReserveSendReservesSpace) {
   static constexpr int kFirstSendValue = 40;
   static constexpr int kSecondSendValue = 43;
 
-  PendFuncTask reserved_sender_task(
+  FuncTask reserved_sender_task(
       [sender = std::move(channel_sender)](Context& cx) mutable -> Poll<> {
         // This task runs once without sleeping.
         // The channel has two slots. First, we reserve a slot through
@@ -501,7 +497,7 @@ TEST(StaticChannel, ReserveSendReleasesSpaceWhenDropped) {
   static constexpr int kFirstSendValue = 40;
   static constexpr int kSecondSendValue = 43;
 
-  PendFuncTask reserved_sender_task(
+  FuncTask reserved_sender_task(
       [sender = std::move(channel_sender)](Context& cx) mutable -> Poll<> {
         // This task runs once without sleeping.
         // The channel has two slots. First, we reserve a slot through
@@ -552,7 +548,7 @@ TEST(StaticChannel, ReserveSendManualCancel) {
   static constexpr int kFirstSendValue = 40;
   static constexpr int kSecondSendValue = 43;
 
-  PendFuncTask reserved_sender_task(
+  FuncTask reserved_sender_task(
       [sender = std::move(channel_sender)](Context& cx) mutable -> Poll<> {
         // This task runs once without sleeping.
         // The channel has two slots. First, we reserve a slot through
@@ -636,7 +632,7 @@ TEST(StaticChannel, MoveOnly) {
   Receiver<MoveOnly> channel_receiver = channel.CreateReceiver();
   channel.Release();
 
-  PendFuncTask sender_task(
+  FuncTask sender_task(
       [sender = std::move(channel_sender)](Context& cx) mutable -> Poll<> {
         MoveOnly move_only_1(1);
         auto send_future = sender.Send(std::move(move_only_1));
@@ -658,7 +654,7 @@ TEST(StaticChannel, MoveOnly) {
         return Ready();
       });
 
-  PendFuncTask receiver_task(
+  FuncTask receiver_task(
       [receiver = std::move(channel_receiver)](Context& cx) mutable -> Poll<> {
         auto receive_future = receiver.Receive();
         auto poll1 = receive_future.Pend(cx);
@@ -689,7 +685,7 @@ TEST(StaticChannel, CanPollReceiveFuturesTwice) {
   auto [channel, channel_sender, channel_receiver] = CreateSpscChannel(storage);
   channel.Release();
 
-  PendFuncTask poll_task(
+  FuncTask poll_task(
       [receiver = std::move(channel_receiver)](Context& cx) mutable -> Poll<> {
         auto future = receiver.Receive();
         EXPECT_EQ(future.Pend(cx), Pending());
@@ -714,7 +710,7 @@ TEST(StaticChannel, CanPollSendFuturesTwice) {
   ASSERT_TRUE(channel_sender.TrySend(1).ok());
   ASSERT_TRUE(channel_sender.TrySend(2).ok());
 
-  PendFuncTask poll_task(
+  FuncTask poll_task(
       [sender = std::move(channel_sender)](Context& cx) mutable -> Poll<> {
         auto future = sender.Send(3);
         EXPECT_EQ(future.Pend(cx), Pending());
@@ -742,7 +738,7 @@ TEST(StaticChannel, CanPollReserveSendFutureTwice) {
   ASSERT_TRUE(channel_sender.TrySend(1).ok());
   ASSERT_TRUE(channel_sender.TrySend(2).ok());
 
-  PendFuncTask poll_task(
+  FuncTask poll_task(
       [sender = std::move(channel_sender)](Context& cx) mutable -> Poll<> {
         auto future = sender.ReserveSend();
         EXPECT_EQ(future.Pend(cx), Pending());
@@ -827,23 +823,6 @@ TEST(DynamicChannel, AllocationFailure) {
   EXPECT_EQ(deque_only_alloc.metrics().num_deallocations.value(), 1u);
 }
 
-TEST(ChannelHandles, DefaultConstruct) {
-  SpscChannelHandle<int> channel1;
-  EXPECT_FALSE(channel1.is_open());
-  SpmcChannelHandle<int> channel2;
-  EXPECT_FALSE(channel2.is_open());
-  MpscChannelHandle<int> channel3;
-  EXPECT_FALSE(channel3.is_open());
-  MpmcChannelHandle<int> channel4;
-  EXPECT_FALSE(channel4.is_open());
-
-  Sender<int> sender;
-  EXPECT_FALSE(sender.is_open());
-
-  Receiver<int> receiver;
-  EXPECT_FALSE(receiver.is_open());
-}
-
 TEST(StaticChannel, SendOnClosedReturnsFalse) {
   DispatcherForTest dispatcher;
   ChannelStorage<int, 2> storage;
@@ -857,8 +836,11 @@ TEST(StaticChannel, SendOnClosedReturnsFalse) {
   EXPECT_EQ(sender.TrySend(1), pw::Status::FailedPrecondition());
   EXPECT_EQ(sender.TryReserveSend().status(), pw::Status::FailedPrecondition());
 
-  PendFuncTask task([&sender](Context& cx) -> Poll<> {
+  FuncTask task([&sender](Context& cx) -> Poll<> {
     auto send_future = sender.Send(1);
+    EXPECT_TRUE(send_future.is_pendable());
+    EXPECT_FALSE(send_future.is_complete());
+
     PW_TRY_READY_ASSIGN(bool sent, send_future.Pend(cx));
     EXPECT_FALSE(sent);
 
@@ -885,8 +867,11 @@ TEST(StaticChannel, Receive_Closed) {
 
   EXPECT_EQ(receiver.TryReceive().status(), pw::Status::FailedPrecondition());
 
-  PendFuncTask task([&receiver](Context& cx) -> Poll<> {
+  FuncTask task([&receiver](Context& cx) -> Poll<> {
     auto receive_future = receiver.Receive();
+    EXPECT_TRUE(receive_future.is_pendable());
+    EXPECT_FALSE(receive_future.is_complete());
+
     PW_TRY_READY_ASSIGN(auto result, receive_future.Pend(cx));
     EXPECT_FALSE(result.has_value());
     return Ready();
@@ -929,8 +914,12 @@ TEST(StaticChannel, Receive_ClosedWithData) {
   sender.Disconnect();
   EXPECT_FALSE(channel.is_open());
 
-  PendFuncTask task([&receiver](Context& cx) -> Poll<> {
-    auto result = receiver.Receive().Pend(cx);
+  FuncTask task([&receiver](Context& cx) -> Poll<> {
+    ReceiveFuture<int> receive_future = receiver.Receive();
+    EXPECT_TRUE(receive_future.is_pendable());
+    EXPECT_FALSE(receive_future.is_complete());
+
+    auto result = receive_future.Pend(cx);
     EXPECT_TRUE(result.IsReady());
     EXPECT_TRUE(result->has_value());
     EXPECT_EQ(*result, 1);
@@ -961,6 +950,68 @@ TEST(StaticChannel, CreateReceiverWhenClosed) {
   channel.Close();
 
   Receiver<int> receiver = channel.CreateReceiver();
+  EXPECT_FALSE(receiver.is_open());
+}
+
+TEST(StaticChannel, MoveFuture) {
+  DispatcherForTest dispatcher;
+  ChannelStorage<int, 2> storage;
+  auto channel = CreateMpmcChannel(storage);
+
+  Sender<int> sender = channel.CreateSender();
+  Receiver<int> receiver = channel.CreateReceiver();
+  channel.Release();
+
+  PW_TEST_ASSERT_OK(sender.TrySend(404));
+
+  FuncTask task([&receiver](Context& cx) -> Poll<> {
+    ReceiveFuture<int> future = receiver.Receive();
+    EXPECT_TRUE(future.is_pendable());
+    EXPECT_FALSE(future.is_complete());
+
+    ReceiveFuture<int> assigned;
+    EXPECT_FALSE(assigned.is_pendable());
+    EXPECT_FALSE(assigned.is_complete());
+
+    assigned = std::move(future);
+    EXPECT_TRUE(assigned.is_pendable());
+    EXPECT_FALSE(assigned.is_complete());
+
+    EXPECT_FALSE(future.is_pendable());  // NOLINT(bugprone-use-after-move)
+    EXPECT_FALSE(future.is_complete());  // NOLINT(bugprone-use-after-move)
+
+    ReceiveFuture<int> constructed(std::move(assigned));
+
+    EXPECT_FALSE(assigned.is_pendable());  // NOLINT(bugprone-use-after-move)
+    EXPECT_FALSE(assigned.is_complete());  // NOLINT(bugprone-use-after-move)
+
+    auto result = constructed.Pend(cx);
+    EXPECT_EQ(result.value(), 404);
+
+    EXPECT_FALSE(constructed.is_pendable());
+    EXPECT_TRUE(constructed.is_complete());
+
+    return Ready();
+  });
+
+  dispatcher.Post(task);
+  dispatcher.RunToCompletion();
+}
+
+TEST(ChannelHandles, DefaultConstruct) {
+  SpscChannelHandle<int> channel1;
+  EXPECT_FALSE(channel1.is_open());
+  SpmcChannelHandle<int> channel2;
+  EXPECT_FALSE(channel2.is_open());
+  MpscChannelHandle<int> channel3;
+  EXPECT_FALSE(channel3.is_open());
+  MpmcChannelHandle<int> channel4;
+  EXPECT_FALSE(channel4.is_open());
+
+  Sender<int> sender;
+  EXPECT_FALSE(sender.is_open());
+
+  Receiver<int> receiver;
   EXPECT_FALSE(receiver.is_open());
 }
 

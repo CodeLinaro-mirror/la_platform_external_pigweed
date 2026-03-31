@@ -16,7 +16,7 @@
 #include "pw_bluetooth_proxy/internal/multibuf.h"
 #include "pw_span/cast.h"
 
-#if PW_BLUETOOTH_PROXY_MULTIBUF == PW_BLUETOOTH_PROXY_MULTIBUF_V2
+#if PW_MULTIBUF_VERSION == 2
 
 namespace pw::bluetooth::proxy {
 
@@ -27,7 +27,7 @@ std::optional<FlatMultiBufInstance> MultiBufAdapter::Create(
     return mbuf;
   }
   auto chunk = allocator.data_alloc.MakeUnique<std::byte[]>(payload);
-  if (chunk == nullptr || !mbuf->TryReserveForPushBack(chunk)) {
+  if (chunk == nullptr || !mbuf->TryReserveForPushBack()) {
     return std::nullopt;
   }
   mbuf->PushBack(std::move(chunk));
@@ -98,4 +98,4 @@ span<const uint8_t> MultiBufAdapter::AsSpan(const FlatConstMultiBuf& mbuf) {
 
 }  // namespace pw::bluetooth::proxy
 
-#endif  // PW_BLUETOOTH_PROXY_MULTIBUF
+#endif  // PW_MULTIBUF_VERSION

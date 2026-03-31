@@ -13,6 +13,8 @@
 // the License.
 #pragma once
 
+#include <mutex>
+#include <optional>
 #include <type_traits>
 
 #include "pw_assert/assert.h"
@@ -27,6 +29,9 @@ inline sync::InterruptSpinLock& ValueProviderLock() {
   PW_CONSTINIT static sync::InterruptSpinLock lock;
   return lock;
 }
+
+bool PendValueFutureCore(FutureCore& core, Context& cx)
+    PW_EXCLUSIVE_LOCKS_REQUIRED(ValueProviderLock());
 
 }  // namespace internal
 
@@ -84,7 +89,10 @@ class ValueFuture {
     // With some care (and complexity), the lock could be moved to the provider.
     // A global lock is simpler and more efficient in practice.
     std::lock_guard lock(internal::ValueProviderLock());
-    return core_.DoPend<ValueFuture<T>>(*this, cx);
+    if (internal::PendValueFutureCore(core_, cx)) {
+      return Pending();
+    }
+    return Ready(std::move(*value_));
   }
 
   [[nodiscard]] bool is_pendable() const {
@@ -98,11 +106,8 @@ class ValueFuture {
   }
 
  private:
-  friend class FutureCore;
   friend class ValueProvider<T>;
   friend class BroadcastValueProvider<T>;
-
-  static constexpr char kWaitReason[] = "ValueFuture";
 
   template <typename... Args>
   explicit ValueFuture(std::in_place_t, Args&&... args)
@@ -110,15 +115,6 @@ class ValueFuture {
         value_(std::in_place, std::forward<Args>(args)...) {}
 
   ValueFuture(FutureState::Pending) : core_(FutureState::kPending) {}
-
-  Poll<T> DoPend(Context&)
-      PW_EXCLUSIVE_LOCKS_REQUIRED(internal::ValueProviderLock()) {
-    if (!core_.is_ready()) {
-      return Pending();
-    }
-
-    return Ready(std::move(*value_));
-  }
 
   template <typename... Args>
   void ResolveLocked(Args&&... args)
@@ -138,7 +134,7 @@ class ValueFuture {
 template <>
 class ValueFuture<void> {
  public:
-  using value_type = ReadyType;
+  using value_type = void;
 
   constexpr ValueFuture() = default;
 
@@ -153,7 +149,10 @@ class ValueFuture<void> {
 
   Poll<> Pend(Context& cx) {
     std::lock_guard lock(internal::ValueProviderLock());
-    return core_.DoPend<ValueFuture<void>>(*this, cx);
+    if (internal::PendValueFutureCore(core_, cx)) {
+      return Pending();
+    }
+    return Ready();
   }
 
   [[nodiscard]] bool is_pendable() const { return core_.is_pendable(); }
@@ -163,10 +162,7 @@ class ValueFuture<void> {
     return ValueFuture(FutureState::kReadyForCompletion);
   }
 
-  static constexpr char kWaitReason[] = "ValueFuture<void>";
-
  private:
-  friend class FutureCore;
   friend class ValueProvider<void>;
   friend class BroadcastValueProvider<void>;
 
@@ -175,18 +171,15 @@ class ValueFuture<void> {
 
   explicit ValueFuture(FutureState::Pending) : core_(FutureState::kPending) {}
 
-  Poll<> DoPend(Context&) {
-    if (!core_.is_ready()) {
-      return Pending();
-    }
-    return Ready();
-  }
-
   FutureCore core_;
 };
 
 /// A `ValueFuture` that does not return any value, just a completion signal.
 using VoidFuture = ValueFuture<void>;
+
+/// A `ValueFuture` that wraps a `std::optional`.
+template <typename T>
+using OptionalValueFuture = ValueFuture<std::optional<T>>;
 
 /// A one-to-many provider for a single value.
 ///
@@ -196,10 +189,35 @@ using VoidFuture = ValueFuture<void>;
 ///
 /// This provider is multi-shot: after `Resolve` is called, new futures can
 /// be retrieved with `Get` to wait for the next `Resolve` event.
+///
+/// `BroadcastValueProvider` must resolve all futures it has vended before it is
+/// destroyed. `OptionalBroadcastValueProvider`, in contrast, supports
+/// cancelling its futures.
+///
+/// @tparam T The type of value to provide.
 template <typename T>
 class BroadcastValueProvider {
  public:
   constexpr BroadcastValueProvider() = default;
+
+  BroadcastValueProvider(BroadcastValueProvider&& other) noexcept
+      PW_LOCKS_EXCLUDED(internal::ValueProviderLock()) {
+    std::lock_guard lock(internal::ValueProviderLock());
+    list_ = std::move(other.list_);
+  }
+
+  BroadcastValueProvider& operator=(BroadcastValueProvider&& other) noexcept
+      PW_LOCKS_EXCLUDED(internal::ValueProviderLock()) {
+    if (this != &other) {
+      std::lock_guard lock(internal::ValueProviderLock());
+      PW_ASSERT(list_.empty());  // ensure any futures were resolved
+      list_ = std::move(other.list_);
+    }
+    return *this;
+  }
+
+  BroadcastValueProvider(const BroadcastValueProvider&) = delete;
+  BroadcastValueProvider& operator=(const BroadcastValueProvider&) = delete;
 
   ~BroadcastValueProvider() { PW_ASSERT(list_.empty()); }
 
@@ -242,10 +260,34 @@ class BroadcastValueProvider {
 ///
 /// This provider is multi-shot: after `Resolve` is called, a new future can
 /// be retrieved with `Get` to wait for the next `Resolve` event.
+///
+/// `ValueProvider` must resolve its future, if any, before it is destroyed.
+/// `OptionalValueProvider`, in contrast, supports cancelling its future.
+///
+/// @tparam T The type of value to provide.
 template <typename T>
 class ValueProvider {
  public:
   constexpr ValueProvider() = default;
+
+  ValueProvider(ValueProvider&& other) noexcept
+      PW_LOCKS_EXCLUDED(internal::ValueProviderLock()) {
+    std::lock_guard lock(internal::ValueProviderLock());
+    list_ = std::move(other.list_);
+  }
+
+  ValueProvider& operator=(ValueProvider&& other) noexcept
+      PW_LOCKS_EXCLUDED(internal::ValueProviderLock()) {
+    if (this != &other) {
+      std::lock_guard lock(internal::ValueProviderLock());
+      PW_ASSERT(list_.empty());  // ensure any futures were resolved
+      list_ = std::move(other.list_);
+    }
+    return *this;
+  }
+
+  ValueProvider(const ValueProvider&) = delete;
+  ValueProvider& operator=(const ValueProvider&) = delete;
 
   ~ValueProvider() { PW_ASSERT(list_.empty()); }
 
@@ -256,7 +298,7 @@ class ValueProvider {
     ValueFuture<T> future(FutureState::kPending);
     {
       std::lock_guard lock(internal::ValueProviderLock());
-      list_.PushRequireEmpty(future);
+      list_.PushRequireEmpty(future.core_);
     }
     return future;
   }
@@ -304,6 +346,82 @@ class ValueProvider {
  private:
   FutureList<&ValueFuture<T>::core_> list_
       PW_GUARDED_BY(internal::ValueProviderLock());
+};
+
+/// A `ValueProvider` that may or may not produce a value.
+///
+/// Adds a `Cancel()` function that resolves the pending future with
+/// `std::nullopt`.
+template <typename T>
+class OptionalValueProvider {
+ public:
+  OptionalValueProvider() = default;
+
+  OptionalValueProvider(OptionalValueProvider&&) = default;
+  OptionalValueProvider& operator=(OptionalValueProvider&& other) {
+    Cancel();
+    provider_ = std::move(other.provider_);
+    return *this;
+  }
+
+  OptionalValueProvider(const OptionalValueProvider&) = delete;
+  OptionalValueProvider& operator=(const OptionalValueProvider&) = delete;
+
+  ~OptionalValueProvider() { Cancel(); }
+
+  /// Returns a `ValueFuture` that will be completed when `Resolve` or `Cancel`
+  /// is called.
+  OptionalValueFuture<T> Get() { return provider_.Get(); }
+
+  /// Resolves the pending `ValueFuture` by constructing it in-place.
+  template <typename... Args>
+  void Resolve(Args&&... args) {
+    provider_.Resolve(std::in_place, std::forward<Args>(args)...);
+  }
+
+  /// Resolves the pending `ValueFuture` with `std::nullopt`.
+  void Cancel() { provider_.Resolve(std::nullopt); }
+
+ private:
+  ValueProvider<std::optional<T>> provider_;
+};
+
+/// A `BroadcastValueProvider` that may or may not produce a value.
+///
+/// Adds a `Cancel()` function that resolves all pending futures with
+/// `std::nullopt`.
+template <typename T>
+class OptionalBroadcastValueProvider {
+ public:
+  OptionalBroadcastValueProvider() = default;
+
+  OptionalBroadcastValueProvider(OptionalBroadcastValueProvider&&) = default;
+  OptionalBroadcastValueProvider& operator=(
+      OptionalBroadcastValueProvider&& other) {
+    Cancel();
+    provider_ = std::move(other.provider_);
+    return *this;
+  }
+
+  OptionalBroadcastValueProvider(const OptionalBroadcastValueProvider&) =
+      delete;
+  OptionalBroadcastValueProvider& operator=(
+      const OptionalBroadcastValueProvider&) = delete;
+
+  ~OptionalBroadcastValueProvider() { Cancel(); }
+
+  /// Returns a `ValueFuture` that will be completed when `Resolve` or `Cancel`
+  /// is called.
+  OptionalValueFuture<T> Get() { return provider_.Get(); }
+
+  /// Resolves all pending `ValueFuture`s with the provided value.
+  void Resolve(const T& value) { provider_.Resolve(value); }
+
+  /// Resolves all pending `ValueFuture`s with `std::nullopt`.
+  void Cancel() { provider_.Resolve(std::nullopt); }
+
+ private:
+  BroadcastValueProvider<std::optional<T>> provider_;
 };
 
 /// @endsubmodule

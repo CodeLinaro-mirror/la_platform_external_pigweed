@@ -12,6 +12,24 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+//! Kernel Scheduler / Context Switching engine
+//!
+//! The module provides several interfaces for managing context switches. Each is
+//! different in its contract:
+//! - `block()` is used when a thread is taken out of the scheduler algorithm
+//!   and is managed by another source such as a wait queue. These threads
+//!   should be in the [`State::Waiting`] state.
+//! - `try_reschedule()` is used when there is a change to the scheduling state
+//!   (such as waking a thread). Depending on the local thread's
+//!   [`PreemptDisableGuard`] state and the scheduler state, this may trigger an
+//!   immediate context switch or it may defer it. This is useful for code which
+//!   may or may not be called in an interrupt context.
+//! - `try_deferred_reschedule()` is used to trigger a context switch if one was
+//!   deferred by `try_reschedule()`. Notably, this does not guarantee a context
+//!   switch if the [`PreemptDisableGuard`] state is not active but does
+//!   guarantee forward progress. This comes into play for architectures like
+//!   M-profile ARM which handles the context switch in an exception handler
+//!   after an interrupt has returned.
 use core::cell::UnsafeCell;
 use core::ptr::NonNull;
 use core::sync::atomic::Ordering;
@@ -98,8 +116,8 @@ pub fn start_thread<K: Kernel>(kernel: K, mut thread: ForeignBox<Thread<K>>) -> 
         .algorithm
         .schedule_thread(thread, RescheduleReason::Started);
 
-    // Now that we've added the new thread, trigger a reschedule event.
-    reschedule(kernel, sched_state, id);
+    // Now that we've added the new thread, trigger a context switch.
+    let (_sched_state, _switched) = context_switch(kernel, sched_state, id);
 
     thread_ref
 }
@@ -139,7 +157,7 @@ pub fn bootstrap_scheduler<K: Kernel>(
 
     drop(preempt_guard);
 
-    reschedule(kernel, sched_state, Thread::<K>::null_id());
+    let _ = block(kernel, sched_state, Thread::<K>::null_id());
     pw_assert::panic!("Bootstrap scheduler returned unexpectedly");
 }
 
@@ -321,6 +339,7 @@ enum TryJoinResult<K: Kernel> {
 // ensures the scheduler lock is held while the state is manipulated.
 impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
     /// Reschedule if preemption is enabled
+    #[must_use]
     fn try_reschedule(mut self, kernel: K, reason: RescheduleReason) -> Self {
         if kernel
             .thread_local_state()
@@ -329,7 +348,8 @@ impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
             == 1
         {
             let current_thread_id = self.reschedule_current_thread(reason);
-            reschedule(kernel, self, current_thread_id)
+            let (guard, _switched) = context_switch(kernel, self, current_thread_id);
+            guard
         } else {
             kernel
                 .thread_local_state()
@@ -563,7 +583,7 @@ impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
         thread.join_event = None;
     }
 
-    fn thread_exit(mut self, kernel: K) -> ! {
+    fn thread_exit(mut self, kernel: K) {
         let mut current_thread = self.take_current_thread();
         let current_thread_id = current_thread.id();
 
@@ -589,9 +609,7 @@ impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
 
         self.termination_queue.push_back(current_thread);
 
-        reschedule(kernel, self, current_thread_id);
-
-        pw_assert::panic!("thread_exit returned unexpectedly");
+        let _ = context_switch(kernel, self, current_thread_id);
     }
 
     fn thread_is_terminating(&self, thread: &ThreadRef<K>) -> bool {
@@ -600,11 +618,23 @@ impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
     }
 }
 
-fn reschedule<K: Kernel>(
+#[must_use]
+fn block<K: Kernel>(
+    kernel: K,
+    sched_state: SpinLockGuard<K, SchedulerState<K>>,
+    current_thread_id: usize,
+) -> SpinLockGuard<K, SchedulerState<K>> {
+    let (sched_state, switched) = context_switch(kernel, sched_state, current_thread_id);
+    pw_assert::assert!(switched, "Blocking requires a context switch");
+    sched_state
+}
+
+#[must_use]
+fn context_switch<K: Kernel>(
     kernel: K,
     mut sched_state: SpinLockGuard<K, SchedulerState<K>>,
     current_thread_id: usize,
-) -> SpinLockGuard<K, SchedulerState<K>> {
+) -> (SpinLockGuard<K, SchedulerState<K>>, bool) {
     // Caller to reschedule is responsible for removing current thread and
     // put it in the correct run/wait queue.
     pw_assert::assert!(sched_state.current_thread.is_none());
@@ -637,7 +667,7 @@ fn reschedule<K: Kernel>(
 
     if current_thread_id == new_thread.id() {
         sched_state.current_thread = Some(new_thread);
-        return sched_state;
+        return (sched_state, false);
     }
 
     let old_thread_state = sched_state.current_arch_thread_state;
@@ -655,7 +685,7 @@ pub fn try_deferred_reschedule<K: Kernel>(kernel: K) {
             .needs_reschedule
             .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
     {
-        kernel
+        let _ = kernel
             .get_scheduler()
             .lock(kernel)
             .try_reschedule(kernel, RescheduleReason::Preempted);
@@ -671,22 +701,7 @@ pub fn yield_timeslice<K: Kernel>(kernel: K) {
         sched_state.current_thread_name() as &str,
         sched_state.current_thread_id() as usize
     );
-    sched_state.try_reschedule(kernel, RescheduleReason::Ticked);
-}
-
-#[allow(dead_code)]
-fn preempt<K: Kernel>(kernel: K) {
-    let mut sched_state = kernel.get_scheduler().lock(kernel);
-    log_if::info_if!(
-        LOG_SCHEDULER_EVENTS,
-        "Preempting thread '{}' ({:#010x})",
-        sched_state.current_thread_name() as &str,
-        sched_state.current_thread_id() as usize
-    );
-
-    let current_thread_id = sched_state.reschedule_current_thread(RescheduleReason::Preempted);
-
-    reschedule(kernel, sched_state, current_thread_id);
+    let _ = sched_state.try_reschedule(kernel, RescheduleReason::Ticked);
 }
 
 // Tick that is called from a timer handler. The scheduler will evaluate if the current thread
@@ -718,7 +733,7 @@ pub fn tick<K: Kernel>(kernel: K, now: Instant<K::Clock>) {
     timer::process_queue(kernel, now);
     drop(guard);
 
-    kernel
+    let _ = kernel
         .get_scheduler()
         .lock(kernel)
         .try_reschedule(kernel, RescheduleReason::Ticked);
@@ -730,7 +745,27 @@ pub fn tick<K: Kernel>(kernel: K, now: Instant<K::Clock>) {
 /// references to be dropped, then wait to be joined.
 #[allow(dead_code)]
 pub fn exit_thread<K: Kernel>(kernel: K) -> ! {
-    kernel.get_scheduler().lock(kernel).thread_exit(kernel)
+    kernel.get_scheduler().lock(kernel).thread_exit(kernel);
+
+    // This thread should never get scheduled again at this point.  This assert
+    // firing indicates a scheduler or context switch bug.
+    pw_assert::panic!("thread_exit returned unexpectedly");
+}
+
+/// Handle a terminal exception in the current thread.
+///
+/// This should only be called from an architecture specific exception handler.
+/// `in_kernel` should be true if the exception occurred while executing in
+/// kernel mode.
+///
+/// If the exception occurred in user mode, the process will be terminated.
+/// If the exception occurred in kernel mode, the kernel will panic.
+pub fn handle_terminal_exception<K: Kernel>(kernel: K, in_kernel: bool) {
+    if in_kernel {
+        pw_assert::panic!("Terminal exception in kernel mode");
+    } else {
+        kernel.get_scheduler().lock(kernel).thread_exit(kernel);
+    }
 }
 
 pub fn sleep_until<K: Kernel>(kernel: K, deadline: Instant<K::Clock>) -> Result<()> {
@@ -796,7 +831,7 @@ impl<K: Kernel> SchedLockGuard<'_, K, WaitQueue<K>> {
             current_thread_name as &str,
             current_thread_id as usize
         );
-        self.reschedule(current_thread_id)
+        self.block(current_thread_id)
     }
 
     // Safety:

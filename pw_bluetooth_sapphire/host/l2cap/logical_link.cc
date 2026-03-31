@@ -168,12 +168,13 @@ LogicalLink::LogicalLink(
         signaling_channel_.get(),
         fit::bind_member<&LogicalLink::OnChannelDisconnectRequest>(this),
         fit::bind_member<&LogicalLink::OnServiceRequest>(this),
-        random_channel_ids);
+        random_channel_ids,
+        pw_dispatcher_);
 
     SendFixedChannelsSupportedInformationRequest();
   }
   a2dp_offload_manager_.SetSniffSuppress(
-      fit::bind_member<&LogicalLink::AutosniffSuppress>(this));
+      fit::bind_member<&LogicalLink::SuppressAutosniff>(this));
 }
 
 LogicalLink::~LogicalLink() {
@@ -1129,7 +1130,11 @@ void LogicalLink::OnRxFlowControlCreditInd(ChannelId remote_cid,
 
 bool LogicalLink::AutosniffEnabled() const { return autosniff_.has_value(); }
 
-std::unique_ptr<AutosniffSuppressInterest> LogicalLink::AutosniffSuppress(
+bool LogicalLink::AutosniffIsSuppressed() const {
+  return !AutosniffEnabled() || autosniff_->IsSuppressed();
+}
+
+std::unique_ptr<AutosniffSuppressInterest> LogicalLink::SuppressAutosniff(
     const char* reason) {
   if (!autosniff_.has_value()) {
     return nullptr;
