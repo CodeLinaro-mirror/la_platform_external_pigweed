@@ -26,24 +26,17 @@ pw_add_library(pw_async2.config INTERFACE
     ${pw_async2_CONFIG}
 )
 
+# TODO: b/481069684 - Remove deprecated alias.
 pw_add_library(pw_async2.poll INTERFACE
-  HEADERS
-    public/pw_async2/poll.h
-    public/pw_async2/internal/poll_internal.h
-    public/pw_async2/try.h
   PUBLIC_DEPS
-    pw_polyfill
-    pw_string.to_string
-    pw_third_party.fuchsia.stdcompat
-  PUBLIC_INCLUDES
-    public
+    pw_async2
 )
 
 pw_add_test(pw_async2.poll_test
   SOURCES
     poll_test.cc
   PRIVATE_DEPS
-    pw_async2.poll
+    pw_async2
     pw_async2.testing
 )
 
@@ -52,33 +45,39 @@ pw_add_library(pw_async2 STATIC
     public/pw_async2/context.h
     public/pw_async2/dispatcher.h
     public/pw_async2/future.h
-    public/pw_async2/internal/config.h
+    public/pw_async2/future_task.h
     public/pw_async2/internal/lock.h
-    public/pw_async2/owned_task.h
+    public/pw_async2/internal/logging.h
+    public/pw_async2/internal/owned_task.h
     public/pw_async2/runnable_dispatcher.h
     public/pw_async2/task.h
     public/pw_async2/waker.h
+    public/pw_async2/poll.h
+    public/pw_async2/internal/poll_internal.h
+    public/pw_async2/try.h
+    public/pw_async2/func_task.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
     pw_assert.assert
-    pw_async2.poll
+    pw_async2.config
     pw_chrono.system_clock
     pw_containers.intrusive_forward_list
     pw_containers.intrusive_list
+    pw_function
     pw_log
     pw_log.args
-    pw_polyfill
     pw_memory
+    pw_polyfill
+    pw_preprocessor
+    pw_string.to_string
     pw_sync.interrupt_spin_lock
     pw_sync.lock_annotations
-    pw_third_party.fuchsia.stdcompat
     pw_tokenizer
     pw_toolchain.no_destructor
-
+    pw_third_party.fuchsia.stdcompat
   PRIVATE_DEPS
     pw_assert.check
-    pw_async2.config
     pw_thread.sleep
   SOURCES
     context.cc
@@ -154,7 +153,6 @@ pw_add_library(pw_async2.epoll_dispatcher STATIC
   PUBLIC_DEPS
     pw_assert
     pw_async2
-    pw_async2.poll
     pw_status
   PRIVATE_DEPS
     pw_log
@@ -169,34 +167,23 @@ pw_add_library(pw_async2.epoll_dispatcher_for_test INTERFACE
     epoll_dispatcher_for_test_public_overrides
 )
 
-pw_add_library(pw_async2.pendable INTERFACE
-  HEADERS
-    public/pw_async2/pendable.h
-  PUBLIC_DEPS
-    pw_async2.poll
-    pw_async2
-  PUBLIC_INCLUDES
-    public
-)
-
-pw_add_test(pw_async2.pendable_test
-  SOURCES
-    pendable_test.cc
-  PRIVATE_DEPS
-    pw_async2.pendable
-    pw_async2.testing
-)
-
 pw_add_test(pw_async2.future_test
   SOURCES
     future_test.cc
   PRIVATE_DEPS
     pw_async2
-    pw_async2.pend_func_task
-    pw_async2.poll
     pw_async2.select
     pw_async2.testing
     pw_compilation_testing._pigweed_only_negative_compilation
+)
+
+pw_add_test(pw_async2.future_task_test
+  SOURCES
+    future_task_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.testing
+    pw_async2.value_future
 )
 
 pw_add_library(pw_async2.future_timeout INTERFACE
@@ -206,7 +193,6 @@ pw_add_library(pw_async2.future_timeout INTERFACE
     pw_assert.assert
     pw_async2.channel
     pw_async2
-    pw_async2.poll
     pw_async2.system_time_provider
     pw_async2.time_provider
     pw_async2.value_future
@@ -226,26 +212,27 @@ pw_add_test(pw_async2.future_timeout_test
     pw_async2.channel
     pw_async2
     pw_async2.future_timeout
-    pw_async2.pend_func_task
-    pw_async2.poll
     pw_async2.simulated_time_provider
     pw_async2.testing
     pw_async2.value_future
     pw_chrono.system_clock
     pw_compilation_testing._pigweed_only_negative_compilation
-    pw_function
-    pw_result
-    pw_status
 )
 
-pw_add_library(pw_async2.value_future INTERFACE
+pw_add_library(pw_async2.value_future STATIC
+  SOURCES
+    value_future.cc
   HEADERS
     public/pw_async2/value_future.h
-  PUBLIC_DEPS
-    pw_async2
-    pw_async2.poll
   PUBLIC_INCLUDES
     public
+  PUBLIC_DEPS
+    pw_async2
+  PRIVATE_DEPS
+    pw_assert.assert
+    pw_assert.check
+    pw_polyfill
+    pw_sync.interrupt_spin_lock
 )
 
 pw_add_test(pw_async2.value_future_test
@@ -253,8 +240,6 @@ pw_add_test(pw_async2.value_future_test
     value_future_test.cc
   PRIVATE_DEPS
     pw_async2
-    pw_async2.pend_func_task
-    pw_async2.poll
     pw_async2.testing
     pw_async2.value_future
 )
@@ -263,8 +248,8 @@ pw_add_test(pw_async2.value_future_thread_test
   SOURCES
     value_future_thread_test.cc
   PRIVATE_DEPS
+    pw_async2
     pw_async2.callback_task
-    pw_async2.poll
     pw_async2.testing
     pw_async2.value_future
     pw_thread.sleep
@@ -272,22 +257,23 @@ pw_add_test(pw_async2.value_future_thread_test
     pw_thread.thread
 )
 
-pw_add_library(pw_async2.pend_func_task INTERFACE
-  HEADERS
-    public/pw_async2/pend_func_task.h
+# TODO: b/481069684 - Remove deprecated alias.
+pw_add_library(pw_async2.func_task INTERFACE
   PUBLIC_DEPS
     pw_async2
-    pw_function
-  PUBLIC_INCLUDES
-    public
 )
 
-pw_add_test(pw_async2.pend_func_task_test
+pw_add_library(pw_async2.pend_func_task INTERFACE
+  PUBLIC_DEPS
+    pw_async2
+)
+
+pw_add_test(pw_async2.func_task_test
   SOURCES
-    pend_func_task_test.cc
+    func_task_test.cc
   PRIVATE_DEPS
+    pw_async2
     pw_async2.testing
-    pw_async2.pend_func_task
 )
 
 pw_add_library(pw_async2.callback_task INTERFACE
@@ -310,29 +296,6 @@ pw_add_test(pw_async2.callback_task_test
     pw_function
 )
 
-pw_add_library(pw_async2.waker_queue STATIC
-  HEADERS
-    public/pw_async2/waker_queue.h
-  PUBLIC_DEPS
-    pw_async2
-    pw_containers.inline_queue
-  PUBLIC_INCLUDES
-    public
-  SOURCES
-    waker_queue.cc
-  PRIVATE_DEPS
-    pw_log
-)
-
-pw_add_test(pw_async2.waker_queue_test
-  SOURCES
-    waker_queue_test.cc
-  PRIVATE_DEPS
-    pw_async2.pend_func_task
-    pw_async2.testing
-    pw_async2.waker_queue
-)
-
 pw_add_library(pw_async2.allocate_task INTERFACE
   HEADERS
     public/pw_async2/allocate_task.h
@@ -352,24 +315,24 @@ pw_add_test(pw_async2.allocate_task_test
     pw_allocator.testing
 )
 
-pw_add_library(pw_async2.once_sender INTERFACE
+
+
+pw_add_library(pw_async2.notification INTERFACE
   HEADERS
-    public/pw_async2/once_sender.h
+    public/pw_async2/notification.h
   PUBLIC_DEPS
-    pw_async2
-    pw_function
-    pw_sync.mutex
+    pw_async2.value_future
   PUBLIC_INCLUDES
     public
 )
 
-pw_add_test(pw_async2.once_sender_test
+pw_add_test(pw_async2.notification_test
   SOURCES
-    once_sender_test.cc
+    notification_test.cc
   PRIVATE_DEPS
-    pw_async2.once_sender
+    pw_async2.notification
     pw_async2.testing
-    pw_containers.vector
+    pw_async2
 )
 
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
@@ -423,32 +386,6 @@ if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
       pw_allocator.testing
       pw_status
   )
-
-  pw_add_library(pw_async2.pend_func_awaitable INTERFACE
-    HEADERS
-      public/pw_async2/pend_func_task.h
-    PUBLIC_DEPS
-      pw_async2
-      pw_async2.poll
-      pw_function
-    PUBLIC_INCLUDES
-      public
-  )
-
-  pw_add_test(pw_async2.pend_func_awaitable_test
-    SOURCES
-      pend_func_awaitable_test.cc
-    PRIVATE_DEPS
-      pw_async2.coro
-      pw_async2.coro_or_else_task
-      pw_async2
-      pw_async2.pend_func_awaitable
-      pw_async2.poll
-      pw_async2.testing
-      pw_allocator.testing
-      pw_function
-      pw_status
-  )
 endif()
 
 pw_add_library(pw_async2.time_provider STATIC
@@ -459,7 +396,6 @@ pw_add_library(pw_async2.time_provider STATIC
   PUBLIC_DEPS
     pw_async2
     pw_chrono.virtual_clock
-    pw_async2.poll
     pw_containers.intrusive_list
     pw_function
     pw_memory
@@ -522,25 +458,6 @@ if((NOT "${pw_chrono.system_clock_BACKEND}" STREQUAL "") AND
   )
 endif()
 
-pw_add_library(pw_async2.enqueue_heap_func INTERFACE
-  HEADERS
-    public/pw_async2/enqueue_heap_func.h
-  PUBLIC_DEPS
-    pw_async2
-)
-
-pw_add_test(pw_async2.enqueue_heap_func_test
-  SOURCES
-    enqueue_heap_func_test.cc
-  PRIVATE_DEPS
-    pw_async2
-    pw_async2.enqueue_heap_func
-    pw_async2.testing
-  GROUPS
-    modules
-    pw_async2
-)
-
 pw_add_library(pw_async2.join INTERFACE
   HEADERS
     public/pw_async2/join.h
@@ -575,7 +492,6 @@ pw_add_test(pw_async2.select_test
     select_test.cc
   PRIVATE_DEPS
     pw_async2
-    pw_async2.pendable
     pw_async2.select
     pw_async2.testing
     pw_async2.value_future
@@ -598,10 +514,8 @@ pw_add_test(pw_async2.cancellable_task_test
   SOURCES
     cancellable_task_test.cc
   PRIVATE_DEPS
-    pw_async2.cancellable_task
     pw_async2
-    pw_async2.pendable
-    pw_async2.poll
+    pw_async2.cancellable_task
     pw_async2.testing
     pw_function
 )
@@ -613,9 +527,8 @@ pw_add_library(pw_async2.channel STATIC
     channel.cc
   PUBLIC_DEPS
     pw_assert
-    pw_async2.callback_task
     pw_async2
-    pw_async2.poll
+    pw_async2.callback_task
     pw_allocator
     pw_containers.deque
     pw_numeric.checked_arithmetic
@@ -629,10 +542,8 @@ pw_add_test(pw_async2.channel_test
   SOURCES
     channel_test.cc
   PRIVATE_DEPS
-    pw_async2.channel
     pw_async2
-    pw_async2.pend_func_task
-    pw_async2.poll
+    pw_async2.channel
     pw_async2.testing
     pw_allocator.testing
     pw_containers.vector
@@ -644,7 +555,6 @@ pw_add_test(pw_async2.channel_thread_test
   PRIVATE_DEPS
     pw_async2.channel
     pw_async2
-    pw_async2.poll
     pw_async2.testing
     pw_containers.vector
     pw_thread.test_thread_context
@@ -657,10 +567,8 @@ pw_add_test(pw_async2.channel_typed_test
   SOURCES
     channel_typed_test.cc
   PRIVATE_DEPS
-    pw_async2.channel
     pw_async2
-    pw_async2.pend_func_task
-    pw_async2.poll
+    pw_async2.channel
     pw_async2.testing
     pw_allocator.testing
     pw_containers.vector
@@ -701,7 +609,6 @@ if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
       pw_async2.coro
       pw_async2.coro_or_else_task
       pw_async2
-      pw_async2.poll
       pw_async2.testing
       pw_allocator.testing
       pw_containers.vector

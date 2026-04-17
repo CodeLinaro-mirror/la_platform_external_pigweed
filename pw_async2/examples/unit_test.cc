@@ -15,7 +15,7 @@
 // DOCSTAG[pw_async2-minimal-test]
 #include "pw_async2/context.h"
 #include "pw_async2/dispatcher_for_test.h"
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/func_task.h"
 #include "pw_unit_test/framework.h"
 
 using ::pw::async2::Context;
@@ -27,7 +27,7 @@ TEST(Async2UnitTest, MinimalExample) {
   pw::async2::DispatcherForTest dispatcher;
 
   // Create a test task to run the pw_async2 code under test.
-  pw::async2::PendFuncTask task([](Context&) { return Ready(); });
+  pw::async2::FuncTask task([](Context&) { return Ready(); });
 
   // Post and run the task on the dispatcher.
   dispatcher.Post(task);
@@ -42,7 +42,7 @@ TEST(Async2UnitTest, MinimalExample) {
 
 #include "pw_async2/context.h"
 #include "pw_async2/dispatcher.h"
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/func_task.h"
 #include "pw_async2/try.h"
 #include "pw_async2/value_future.h"
 #include "pw_unit_test/framework.h"
@@ -84,15 +84,15 @@ TEST(Async2UnitTest, MultiStepExample) {
 
   FortuneTeller oracle;
   const char* fortune = "";
-  std::optional<pw::async2::ValueFuture<const char*>> future;
+  pw::async2::ValueFuture<const char*> future;
 
   // This task gets a fortune and checks that it matches the expected value.
   // The task may need to execute multiple times if the fortune is not ready.
-  pw::async2::PendFuncTask task([&](Context& context) -> Poll<> {
-    if (!future.has_value()) {
+  pw::async2::FuncTask task([&](Context& context) -> Poll<> {
+    if (!future.is_pendable()) {
       future = oracle.WaitForFortune();
     }
-    PW_TRY_READY_ASSIGN(fortune, future->Pend(context));
+    PW_TRY_READY_ASSIGN(fortune, future.Pend(context));
     return Ready();
   });
 

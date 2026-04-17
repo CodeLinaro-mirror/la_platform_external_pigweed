@@ -460,8 +460,11 @@ class AdapterImpl final : public Adapter {
       const hci::EventPacket& event);
 
   hci::AdvertisingPacketFilter::Config GetPacketFilterConfig() const {
+    using PeerDeliveryMode = hci::AdvertisingPacketFilter::Config::DeliveryMode;
+
     bool offloading_enabled = false;
     uint8_t max_filters = 0;
+    PeerDeliveryMode peer_delivery_mode = PeerDeliveryMode::kImmediate;
 
     // TODO(b/448475405): We suspect there is a bug with advertising packet
     // filtering where we don't get scan results on time from the Controller. So
@@ -483,8 +486,8 @@ class AdapterImpl final : public Adapter {
            offloading_enabled ? "yes" : "no",
            max_filters);
 
-    return hci::AdvertisingPacketFilter::Config(offloading_enabled,
-                                                max_filters);
+    return hci::AdvertisingPacketFilter::Config(
+        offloading_enabled, max_filters, peer_delivery_mode);
   }
 
   std::unique_ptr<hci::LowEnergyAdvertiser> CreateAdvertiser(bool extended) {
@@ -568,11 +571,11 @@ class AdapterImpl final : public Adapter {
       UintMetricCounter start_discovery_events;
     } le;
     struct BrEdrMetrics {
+      UintMetricCounter open_l2cap_channel_requests;
       UintMetricCounter outgoing_connection_requests;
       UintMetricCounter pair_requests;
       UintMetricCounter set_connectable_true_events;
       UintMetricCounter set_connectable_false_events;
-      UintMetricCounter open_l2cap_channel_requests;
     } bredr;
   };
   AdapterMetrics metrics_;
@@ -1155,9 +1158,9 @@ void AdapterImpl::InitializeStep2() {
         pw::bluetooth::emboss::WriteDefaultLinkPolicySettingsCommandWriter>(
         hci_spec::kWriteDefaultLinkPolicySettings);
     auto view = write_default_link_policy_cmd.view_t();
-    view.default_link_policy_settings().enable_role_switch().Write(1);
-    view.default_link_policy_settings().enable_hold_mode().Write(0);
-    view.default_link_policy_settings().enable_sniff_mode().Write(1);
+    view.default_link_policy_settings().enable_role_switch().Write(true);
+    view.default_link_policy_settings().enable_hold_mode().Write(false);
+    view.default_link_policy_settings().enable_sniff_mode().Write(true);
     init_seq_runner_->QueueCommand(
         write_default_link_policy_cmd,
         [](const hci::EventPacket& cmd_complete) {

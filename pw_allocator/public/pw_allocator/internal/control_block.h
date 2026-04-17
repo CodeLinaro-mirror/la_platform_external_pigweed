@@ -28,6 +28,23 @@ class Deallocator;
 
 namespace allocator::internal {
 
+/// For internal use only, DO NOT USE!
+///
+/// This empty class is used as an access token for certain
+/// `ControlBlock`-related methods. This allows other modules in upstream
+/// Pigweed to be effectively friended by `ControlBlock` without needing a list
+/// friendship declarations.
+///
+/// This type and its implementation is unstable and unavailable to downstream
+/// consumers of Pigweed. DO NOT USE!
+class ControlBlockHandle {
+ public:
+  static const ControlBlockHandle& GetInstance_DO_NOT_USE();
+
+ private:
+  constexpr ControlBlockHandle() = default;
+};
+
 /// Object metadata used to track ref counts of shared and weak pointers.
 ///
 /// This control block is associated with an object, and will destroy it when
@@ -53,25 +70,33 @@ class ControlBlock final {
   ///
   /// If allocation fails, this call will return null.
   ///
+  /// The handle parameter is used to limit access to this method to upstream
+  /// Pigweed types only. This method MUST only be called from upstream Pigweed.
+  ///
+  /// @param  handle      Access token to allow calling.
   /// @param  allocator   Allocator to use to provide memory.
   /// @param  layout      Layout of an object to allocate and associate with a
   ///                     control block.
-  /// @param  size        Number of objects if allocating an array, or 1.
-  static ControlBlock* Create(Allocator* allocator, Layout layout, size_t size);
+  static ControlBlock* Create(const ControlBlockHandle&,
+                              Allocator* allocator,
+                              Layout layout);
 
   /// Factory method for allocating a control block for previously allocated
   /// memory.
   ///
-  /// The parameters are expected to come from a `UniquePtr`.
-  ///
   /// If allocation fails, this call will return null.
   ///
+  /// The handle parameter is used to limit access to this method to upstream
+  /// Pigweed types only. This method MUST only be called from upstream Pigweed.
+  ///
+  /// @param  handle      Access token to allow calling.
   /// @param  deallocator Deallocator to use to provide memory. Must have the
   ///                     `kCanAllocateArbitraryLayout` capability, i.e. be an
   ///                     upcast allocator.
   /// @param  data        Previously allocated memory.
-  /// @param  size        Number of objects if data is an array, or 1.
-  static ControlBlock* Create(Deallocator* deallocator,
+  /// @param  size        Size of the previously allocated memory, in bytes.
+  static ControlBlock* Create(const ControlBlockHandle&,
+                              Deallocator* deallocator,
                               void* data,
                               size_t size);
 
@@ -87,8 +112,7 @@ class ControlBlock final {
   /// Returns a pointer to the memory location of the associated object.
   constexpr void* data() const { return data_; }
 
-  /// Returns the number of underlying objects if the shared pointer is to an
-  /// array type, otherwise returns 1.
+  /// Returns the number of bytes pointed at by the shared pointer.
   constexpr size_t size() const { return GetSize(); }
 
   /// Returns the number of active shared pointers to the associated object.

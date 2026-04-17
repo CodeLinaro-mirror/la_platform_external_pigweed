@@ -32,6 +32,7 @@
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/vendor_protocol.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h"
 
 namespace bt::testing {
 namespace {
@@ -191,6 +192,7 @@ void FakeController::Settings::ApplyAndroidVendorExtensionDefaults() {
   view.max_advt_instances().Write(3);
   view.version_supported().major_number().Write(0);
   view.version_supported().minor_number().Write(55);
+  view.total_scan_results_storage().Write(1);
 }
 
 bool FakeController::Settings::is_event_unmasked(
@@ -1577,6 +1579,43 @@ void FakeController::OnLEPeriodicAdvertisingCreateSyncCommandReceived(
   pending_periodic_advertising_create_sync_.emplace(create_sync);
 
   MaybeSendPeriodicAdvertisingSyncEstablishedEvent();
+}
+
+void FakeController::OnLEPeriodicAdvertisingSyncTransferCommandReceived(
+    const pw::bluetooth::emboss::LEPeriodicAdvertisingSyncTransferCommandView&
+        params) {
+  auto sync_iter =
+      periodic_advertising_syncs_.find(params.sync_handle().Read());
+  if (sync_iter == periodic_advertising_syncs_.end()) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER,
+        pwemb::StatusCode::UNKNOWN_ADVERTISING_IDENTIFIER);
+    return;
+  }
+
+  FakePeer* fake_peer = nullptr;
+  for (auto& [_, peer] : peers_) {
+    if (peer->HasLink(params.connection_handle().Read())) {
+      fake_peer = peer.get();
+      break;
+    }
+  }
+  if (!fake_peer) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER,
+        pwemb::StatusCode::UNKNOWN_CONNECTION_ID);
+    return;
+  }
+
+  fake_peer->AddPeriodicAdvertisingSyncTransfer(
+      FakePeer::PeriodicAdvertisingSyncTransfer{
+          sync_iter->second.peer_address,
+          sync_iter->second.advertising_sid,
+          params.service_data().Read()});
+
+  RespondWithCommandComplete(
+      pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER,
+      pwemb::StatusCode::SUCCESS);
 }
 
 void FakeController::OnLEPeriodicAdvertisingTerminateSyncCommandReceived(
@@ -4630,6 +4669,20 @@ void FakeController::OnAndroidLEApcfSetFilteringParametersCommandAdd(
   filter.rssi_high_threshold = params.rssi_high_threshold().Read();
   filter.rssi_low_threshold = params.rssi_low_threshold().Read();
 
+  switch (params.delivery_mode().Read()) {
+    case android_emb::ApcfDeliveryMode::IMMEDIATE:
+      filter.delivery_mode =
+          hci::AdvertisingPacketFilter::Config::DeliveryMode::kImmediate;
+      break;
+    case android_emb::ApcfDeliveryMode::BATCHED:
+      filter.delivery_mode =
+          hci::AdvertisingPacketFilter::Config::DeliveryMode::kBatched;
+      break;
+    case android_emb::ApcfDeliveryMode::ON_FOUND:
+      PW_CRASH("fake controller doesn't support the on_found delivery mode");
+      break;
+  }
+
   // We ignore devliery modes other than immediate delivery for testing
   // purposes: fields related to a delivery mode of ON_FOUND aren't read
   // here. The testing focus is on the logic and functionality in the
@@ -6591,6 +6644,8 @@ void FakeController::HandleReceivedCommandPacket(
     case static_cast<uint16_t>(
         pwemb::OpCode::LE_PERIODIC_ADVERTISING_CREATE_SYNC):
     case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER):
+    case static_cast<uint16_t>(
         pwemb::OpCode::LE_PERIODIC_ADVERTISING_TERMINATE_SYNC):
     case static_cast<uint16_t>(
         pwemb::OpCode::LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST):
@@ -6951,6 +7006,14 @@ void FakeController::HandleReceivedCommandPacket(
           command_packet
               .view<pwemb::LEPeriodicAdvertisingCreateSyncCommandView>();
       OnLEPeriodicAdvertisingCreateSyncCommandReceived(params);
+      break;
+    }
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER): {
+      const auto& params =
+          command_packet
+              .view<pwemb::LEPeriodicAdvertisingSyncTransferCommandView>();
+      OnLEPeriodicAdvertisingSyncTransferCommandReceived(params);
       break;
     }
     case static_cast<uint16_t>(

@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 import sys
 
+from google.protobuf import text_format
 import pw_cli.color
 from pw_cli import multitool
 
@@ -43,13 +44,14 @@ class WorkflowBuildPlugin(multitool.MultitoolPlugin):
     def __init__(
         self,
         manager: WorkflowsManager | None,
+        artifacts_manifest: Path | None = None,
     ):
         self._manager = manager
         if self._manager is None:
             raise AssertionError(
                 'Internal error: failed to initialize workflows manager'
             )
-        self._artifacts_manifest: Path | None = None
+        self._artifacts_manifest = artifacts_manifest
 
     def name(self) -> str:
         return 'build'
@@ -215,6 +217,15 @@ class WorkflowBuildPlugin(multitool.MultitoolPlugin):
                 self._print_all_builds()
             return 1
 
+        log_level = logging.DEBUG if args.debug_logging else logging.INFO
+
+        pw_cli.log.install(
+            level=log_level,
+            use_color=args.colors,
+            # Hide the date from the timestamp
+            time_format='%H:%M:%S',
+        )
+
         _PROJECT_BUILDER_LOGGER.propagate = True
 
         recipes = self._load_recipes(selected_workflows)
@@ -228,7 +239,8 @@ class WorkflowBuildPlugin(multitool.MultitoolPlugin):
             colors=args.colors,
             separate_build_file_logging=args.separate_logfiles,
             root_logfile=args.logfile,
-            log_level=logging.DEBUG if args.debug_logging else logging.INFO,
+            log_level=log_level,
+            dry_run=args.dry_run,
         )
 
         if builder.should_use_progress_bars():
@@ -248,5 +260,16 @@ class WorkflowBuildPlugin(multitool.MultitoolPlugin):
                 workers = args.parallel_workers
 
         result = builder.run_builds(workers)
+
+        if self._artifacts_manifest and len(selected_workflows) == 1:
+            try:
+                artifacts = self._manager.collect_artifacts(
+                    selected_workflows[0]
+                )
+                self._artifacts_manifest.write_text(
+                    text_format.MessageToString(artifacts),
+                )
+            except TypeError:
+                pass
 
         return result

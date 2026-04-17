@@ -16,6 +16,7 @@
 
 #include <pw_bluetooth/emboss_util.h>
 
+#include "public/pw_bluetooth_proxy/internal/l2cap_channel_sync.h"
 #include "pw_assert/check.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
 #include "pw_log/log.h"
@@ -56,8 +57,7 @@ L2capLogicalLink::L2capLogicalLink(uint16_t connection_handle,
       transport_(transport),
       acl_data_channel_(acl_data_channel),
       channel_manager_(l2cap_channel_manager),
-      signaling_channel_(L2capSignalingChannel::Create(
-          l2cap_channel_manager, connection_handle, transport)) {
+      signaling_channel_(l2cap_channel_manager) {
   Status status = acl_data_channel_.RegisterConnection(*this);
   if (!status.ok()) {
     PW_LOG_ERROR(
@@ -80,6 +80,10 @@ L2capLogicalLink::~L2capLogicalLink() {
         connection_handle_,
         status.str());
   }
+}
+
+Status L2capLogicalLink::Init() {
+  return signaling_channel_.Init(connection_handle_, transport_);
 }
 
 AclDataChannel::ConnectionDelegate::HandleAclDataReturn
@@ -363,14 +367,25 @@ L2capLogicalLink::HandleAclData(Direction direction,
 
   }  // is_first else
 
-  // Pass the L2CAP PDU on to the L2capChannel
+#if PW_BLUETOOTH_PROXY_ASYNC == 0
+  // We borrow the channel and release the `LockedL2capChannel` (and thus
+  // `channels_mutex`) before calling the client-provided `from_controller_fn_`
+  // or `from_host_fn_`. This avoids a deadlock if the client calls `Write`
+  // on the channel from within the callback, as `Write` also acquires
+  // `channels_mutex`.
   // TODO: https://pwbug.dev/403567488 - Look at sending MultiBuf here rather
   // than span. Channels at next level will create MultiBuf to pass on their
   // payload anyway.
+  BorrowedL2capChannel temp_channel = channel->channel().Borrow();
+#else
+  L2capChannel* temp_channel = &channel->channel();
+#endif
+  channel.reset();
+
   const bool handled =
       (direction == Direction::kFromController)
-          ? channel->channel().HandlePduFromController(send_l2cap_pdu)
-          : channel->channel().HandlePduFromHost(send_l2cap_pdu);
+          ? temp_channel->HandlePduFromController(send_l2cap_pdu)
+          : temp_channel->HandlePduFromHost(send_l2cap_pdu);
 
   if (!handled && recombined_mbuf.has_value()) {
     // Client rejected the entire PDU. So grab extra header for H4/ACL headers,
